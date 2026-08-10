@@ -10,7 +10,7 @@ COPY src/OLS.DataAccess/OLS.DataAccess.csproj src/OLS.DataAccess/
 RUN dotnet restore src/OLS.API/OLS.API.csproj
 
 COPY src/ src/
-RUN dotnet publish src/OLS.API/OLS.API.csproj -c Release -o /app --no-restore
+RUN dotnet publish src/OLS.API/OLS.API.csproj -c Release -o /app
 
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
