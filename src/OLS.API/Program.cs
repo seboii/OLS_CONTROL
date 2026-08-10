@@ -7,6 +7,7 @@ using System.Text.Json.Serialization.Metadata;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
 using OLS.API.Serialization;
 using Microsoft.IdentityModel.Tokens;
@@ -221,6 +222,19 @@ app.UseStaticFiles(new StaticFileOptions
     ServeUnknownFileTypes = true,
     DefaultContentType = "application/octet-stream",
 });
+
+// Temiz kurulumda migration + seed tek komutla (docker compose up) çalışsın
+// diye başlangıçta idempotent seed çalıştırılır. Üretim admin şifresi asla
+// sabit değildir — bkz. OLS.Business.Seed.DbSeeder.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<OLS.DataAccess.Context.OlsDbContext>();
+    var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+    var seedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+    await db.Database.MigrateAsync();
+    await OLS.Business.Seed.DbSeeder.SeedAsync(
+        db, passwordHasher, app.Configuration, app.Environment, seedLogger);
+}
 
 app.UseAuthentication();
 app.UseAuthorization();

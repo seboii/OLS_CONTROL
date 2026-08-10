@@ -195,7 +195,7 @@ public sealed class ExpeditionController : ApiControllerBase
     }
 
     [HttpGet]
-    [RequiresPermission(PermissionAction.Read, "load_management")]
+    [RequiresPermission(PermissionAction.Read, "expedition_management")]
     public async Task<IActionResult> All(
         [FromQuery] string? search,
         [FromQuery(Name = "work_type_id")] int? workTypeId,
@@ -211,7 +211,7 @@ public sealed class ExpeditionController : ApiControllerBase
     }
 
     [HttpGet("{id:long}")]
-    [RequiresPermission(PermissionAction.Read, "load_management")]
+    [RequiresPermission(PermissionAction.Read, "expedition_management")]
     public async Task<IActionResult> Single(long id, CancellationToken cancellationToken)
     {
         var expedition = await _expeditions.SingleAsync(id, cancellationToken);
@@ -226,7 +226,7 @@ public sealed class ExpeditionController : ApiControllerBase
     /// <c>deleted_movements</c> okuyor.
     /// </summary>
     [HttpGet("{id:long}/movements")]
-    [RequiresPermission(PermissionAction.Read, "load_management")]
+    [RequiresPermission(PermissionAction.Read, "expedition_management")]
     public async Task<IActionResult> Movements(
         long id,
         [FromQuery(Name = "destination_id")] long? destinationId,
@@ -254,7 +254,7 @@ public sealed class ExpeditionController : ApiControllerBase
     /// aynı davranış korundu, gövde boşsa rota parametresine düşülür.
     /// </summary>
     [HttpPost("{id:long}/movements")]
-    [RequiresPermission(PermissionAction.Create, "load_management")]
+    [RequiresPermission(PermissionAction.Create, "expedition_management")]
     public async Task<IActionResult> SaveMovement(
         long id,
         [FromForm] ExpeditionMovementForm form,
@@ -307,7 +307,7 @@ public sealed class ExpeditionController : ApiControllerBase
     /// Soft delete. Kaynak kayıt bulunmasa da başarı döndürüyor — korundu.
     /// </summary>
     [HttpDelete("{id:long}/movements/{movementId:long}")]
-    [RequiresPermission(PermissionAction.Delete, "load_management")]
+    [RequiresPermission(PermissionAction.Delete, "expedition_management")]
     public async Task<IActionResult> DeleteMovement(
         long id, long movementId, CancellationToken cancellationToken)
     {
@@ -369,7 +369,7 @@ public sealed class ExpeditionController : ApiControllerBase
     }
 
     [HttpPost]
-    [RequiresPermission(PermissionAction.Create, "load_management")]
+    [RequiresPermission(PermissionAction.Create, "expedition_management")]
     public async Task<IActionResult> Save(
         [FromBody] ExpeditionRequest request, CancellationToken cancellationToken)
     {
@@ -384,7 +384,7 @@ public sealed class ExpeditionController : ApiControllerBase
     }
 
     [HttpPut]
-    [RequiresPermission(PermissionAction.Update, "load_management")]
+    [RequiresPermission(PermissionAction.Update, "expedition_management")]
     public async Task<IActionResult> Update(
         [FromBody] ExpeditionRequest request, CancellationToken cancellationToken)
     {
@@ -402,7 +402,7 @@ public sealed class ExpeditionController : ApiControllerBase
     }
 
     [HttpDelete]
-    [RequiresPermission(PermissionAction.Delete, "load_management")]
+    [RequiresPermission(PermissionAction.Delete, "expedition_management")]
     public async Task<IActionResult> Delete(
         [FromBody] DeletionRequest request, CancellationToken cancellationToken)
     {

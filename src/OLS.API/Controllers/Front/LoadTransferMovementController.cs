@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using OLS.API.Filters;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Expeditions;
@@ -34,6 +35,7 @@ public sealed class LoadTransferMovementController : ApiControllerBase
     }
 
     [HttpGet]
+    [RequiresPermission(PermissionAction.Read, "load_management")]
     public async Task<IActionResult> All(
         [FromQuery(Name = "load_id")] long? loadId,
         [FromQuery(Name = "load_transfer_id")] long? loadTransferId,
@@ -55,6 +57,7 @@ public sealed class LoadTransferMovementController : ApiControllerBase
     }
 
     [HttpGet("{id:long}")]
+    [RequiresPermission(PermissionAction.Read, "load_management")]
     public async Task<IActionResult> Single(long id, CancellationToken cancellationToken)
     {
         var movement = await _movements.SingleLoadMovementAsync(id, cancellationToken);
@@ -75,6 +78,7 @@ public sealed class LoadTransferMovementController : ApiControllerBase
     }
 
     [HttpPost]
+    [RequiresPermission(PermissionAction.Create, "load_management")]
     public async Task<IActionResult> Save(
         [FromForm] MovementSaveRequest request, CancellationToken cancellationToken)
     {
@@ -122,6 +126,7 @@ public sealed class LoadTransferMovementController : ApiControllerBase
     /// <c>Request.Form</c> doğrudan okunur.
     /// </summary>
     [HttpPost("update")]
+    [RequiresPermission(PermissionAction.Update, "load_management")]
     public async Task<IActionResult> Update(
         [FromForm(Name = "id")] long? id, CancellationToken cancellationToken)
     {
@@ -180,6 +185,7 @@ public sealed class LoadTransferMovementController : ApiControllerBase
     /// Kaynak hem <c>deletion_id</c> dizisini hem tek <c>id</c>'yi kabul ediyor.
     /// </summary>
     [HttpDelete]
+    [RequiresPermission(PermissionAction.Delete, "load_management")]
     public async Task<IActionResult> Delete(
         [FromBody] MovementDeleteRequest request, CancellationToken cancellationToken)
     {

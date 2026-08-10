@@ -1,7 +1,9 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using OLS.API.Filters;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Expeditions;
 
 namespace OLS.API.Controllers.Front;
@@ -32,6 +34,7 @@ public sealed class ExpeditionLoadMappingController : ApiControllerBase
     }
 
     [HttpGet]
+    [RequiresPermission(PermissionAction.Read, "expedition_management")]
     public async Task<IActionResult> All(
         [FromQuery] string? search,
         [FromQuery(Name = "per_page")] int? perPage,
@@ -49,6 +52,7 @@ public sealed class ExpeditionLoadMappingController : ApiControllerBase
     /// arayüz <c>res.total_expedition_values</c> okuyor.
     /// </summary>
     [HttpGet("{id:long}")]
+    [RequiresPermission(PermissionAction.Read, "expedition_management")]
     public async Task<IActionResult> Single(long id, CancellationToken cancellationToken)
     {
         var result = await _mappings.ByExpeditionAsync(id, cancellationToken);
@@ -62,6 +66,7 @@ public sealed class ExpeditionLoadMappingController : ApiControllerBase
     }
 
     [HttpPost]
+    [RequiresPermission(PermissionAction.Create, "expedition_management")]
     public async Task<IActionResult> Save(
         [FromBody] MappingSaveRequest request, CancellationToken cancellationToken)
     {
@@ -82,6 +87,7 @@ public sealed class ExpeditionLoadMappingController : ApiControllerBase
     }
 
     [HttpPost("update")]
+    [RequiresPermission(PermissionAction.Update, "expedition_management")]
     public async Task<IActionResult> Update(
         [FromBody] MappingUpdateRequest request, CancellationToken cancellationToken)
     {
@@ -99,6 +105,7 @@ public sealed class ExpeditionLoadMappingController : ApiControllerBase
     }
 
     [HttpDelete]
+    [RequiresPermission(PermissionAction.Delete, "expedition_management")]
     public async Task<IActionResult> Delete(
         [FromBody] InvoiceController.DeleteRequest request, CancellationToken cancellationToken)
     {

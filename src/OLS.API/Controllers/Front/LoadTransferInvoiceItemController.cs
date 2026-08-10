@@ -36,6 +36,7 @@ public sealed class LoadTransferInvoiceItemController : ApiControllerBase
     }
 
     [HttpGet]
+    [RequiresPermission(PermissionAction.Read, "load_management")]
     public async Task<IActionResult> All(
         [FromQuery] string? search,
         [FromQuery] string? status,
@@ -53,6 +54,7 @@ public sealed class LoadTransferInvoiceItemController : ApiControllerBase
     }
 
     [HttpGet("{id:long}")]
+    [RequiresPermission(PermissionAction.Read, "load_management")]
     public async Task<IActionResult> Single(long id, CancellationToken cancellationToken)
     {
         var item = await _items.SingleAsync(id, cancellationToken);
@@ -61,6 +63,7 @@ public sealed class LoadTransferInvoiceItemController : ApiControllerBase
     }
 
     [HttpPost]
+    [RequiresPermission(PermissionAction.Create, "load_management")]
     public async Task<IActionResult> Save(
         [FromBody] InvoiceItemRequest request, CancellationToken cancellationToken)
     {
@@ -70,6 +73,7 @@ public sealed class LoadTransferInvoiceItemController : ApiControllerBase
     }
 
     [HttpPut]
+    [RequiresPermission(PermissionAction.Update, "load_management")]
     public async Task<IActionResult> Update(
         [FromBody] InvoiceItemRequest request, CancellationToken cancellationToken)
     {
@@ -83,9 +87,14 @@ public sealed class LoadTransferInvoiceItemController : ApiControllerBase
         return updated is null ? NotFoundError() : Ok(updated, "Güncelleme Başarılı");
     }
 
-    /// <summary>Kaynak burada <c>payment_management</c> yetkisini kontrol ediyor.</summary>
+    /// <summary>
+    /// KAYNAKTAN DÜZELTİLDİ: olsold/olsnew burada yanlışlıkla
+    /// <c>payment_management</c> (Ödeme Tipi) yetkisini kontrol ediyordu —
+    /// bu modülle ilgisi olmayan bir izin sızıntısıydı. <c>load_management</c>
+    /// ile değiştirildi.
+    /// </summary>
     [HttpDelete]
-    [RequiresPermission(PermissionAction.Delete, "payment_management")]
+    [RequiresPermission(PermissionAction.Delete, "load_management")]
     public async Task<IActionResult> Delete(
         [FromBody] InvoiceController.DeleteRequest request, CancellationToken cancellationToken)
     {
