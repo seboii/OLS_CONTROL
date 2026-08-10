@@ -1,0 +1,6 @@
+@OLS.API_HostAddress = http://localhost:5157
+
+GET {{OLS.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
