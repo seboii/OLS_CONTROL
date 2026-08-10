@@ -1,0 +1,36 @@
+{
+  "name": "ols-scoped-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.8",
+    "@vitejs/plugin-vue": "^5.1.4",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^4.0.8",
+    "vite": "^5.4.8"
+  },
+  "dependencies": {
+    "@kalimahapps/vue-icons": "^1.7.1",
+    "@primevue/themes": "^4.3.3",
+    "@tailwindcss/vite": "^4.0.8",
+    "@tanstack/vue-query": "^5.66.9",
+    "@vuelidate/core": "^2.0.3",
+    "@vuelidate/validators": "^2.0.4",
+    "axios": "^0.21",
+    "date-fns": "^4.1.0",
+    "hugeicons-vue": "^0.0.1",
+    "js-cookie": "^3.0.5",
+    "openai": "^4.73.1",
+    "pinia": "^2.2.4",
+    "primevue": "^4.3.3",
+    "vue": "^3.5.13",
+    "vue-router": "^4.4.5",
+    "vue-sonner": "^1.2.2",
+    "vue3-lottie": "^3.3.1"
+  }
+}

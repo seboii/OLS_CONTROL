@@ -4,7 +4,6 @@ node_modules/
 dist/
 *.user
 .vs/
-appsettings.Development.json
 .env
 storage/app/public/*
 !storage/app/public/.gitkeep

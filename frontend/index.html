@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <title>OLS | Logistic App</title>
+    <meta charset="utf-8" />
+    <meta name="description" content="OLS - Jeetwork" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta property="og:locale" content="tr_TR" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="OLS - Jeetwork" />
+    <meta property="og:url" content="https://ols.aksis.info" />
+    <meta property="og:site_name" content="OLS" />
+
+    <!--
+      olsold'daki resources/views/panel/main.blade.php karşılığı.
+      Blade'e özgü iki şey çıkarıldı:
+        - csrf-token meta: API artık JWT Bearer kullanıyor, CSRF yok.
+        - @laravelPWA: PWA manifest/service worker public/ altına statik konuldu.
+    -->
+    <link rel="stylesheet" href="/css/font.css">
+    <link rel="stylesheet" href="/assets/font/geist/geist.css">
+    <link rel="stylesheet" href="/css/main.css">
+</head>
+
+<body>
+    <div id="loading-screen">
+        <span class="loader"></span>
+    </div>
+    <div id="app"></div>
+
+    <script>
+        let loading_screen = document.getElementById('loading-screen');
+        let showLoaderTimeout = setTimeout(() => {
+            loading_screen.classList.add('show');
+        }, 1500);
+        window.addEventListener('load', () => {
+            clearTimeout(showLoaderTimeout);
+            loading_screen.classList.remove('show');
+        });
+    </script>
+
+    <script type="module" src="/src/app.js"></script>
+</body>
+
+</html>

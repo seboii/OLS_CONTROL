@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using OLS.API.Filters;
 using OLS.API.Services;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
@@ -183,6 +185,7 @@ public sealed class ContactFormController : ApiControllerBase
     }
 
     [AllowAnonymous]
+    [EnableRateLimiting("public-form")]
     [HttpPost]
     public async Task<IActionResult> Store(
         [FromBody] ContactFormRequest request, CancellationToken cancellationToken)
@@ -223,7 +226,7 @@ public sealed class ContactFormController : ApiControllerBase
         });
     }
 
-    [Authorize]
+    [RequiresPermission(PermissionAction.Read, "support_request_management")]
     [HttpGet]
     public async Task<IActionResult> Index(
         [FromQuery] int page = 1, CancellationToken cancellationToken = default)
@@ -237,7 +240,7 @@ public sealed class ContactFormController : ApiControllerBase
         });
     }
 
-    [Authorize]
+    [RequiresPermission(PermissionAction.Read, "support_request_management")]
     [HttpGet("{id:long}")]
     public async Task<IActionResult> Show(long id, CancellationToken cancellationToken)
     {
@@ -257,7 +260,7 @@ public sealed class ContactFormController : ApiControllerBase
         });
     }
 
-    [Authorize]
+    [RequiresPermission(PermissionAction.Update, "support_request_management")]
     [HttpPatch("{id:long}/answered")]
     public async Task<IActionResult> UpdateAnswered(
         long id, [FromBody] AnsweredRequest request, CancellationToken cancellationToken)

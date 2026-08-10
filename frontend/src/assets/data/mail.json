@@ -1,0 +1,106 @@
+[
+  {
+    "id": 1,
+    "from": {
+      "name": "Yücel Kulaç",
+      "email": "yucelkulac@jeetwork.com",
+      "image": "https://img.freepik.com/premium-photo/happy-man-ai-generated-portrait-user-profile_1119669-1.jpg"
+    },
+    "to": {
+      "name": "Şevket Erer",
+      "email": "sevketerer@jeetwork.com",
+      "image": "https://img.freepik.com/premium-photo/indian-male-model_928503-1124.jpg"
+    },
+    "subject": "Ekim ayı içerisinde yapılacak transferlerin rapolanması",
+    "date": "2024-10-26",
+    "time": "12:00",
+    "content": "Merhaba Şevket, ekte Ekim ayı içerisinde yapılacak transferlerin raporunu bulabilirsin. <br/> <br/> İnceleyip onayını rica ediyorum. Lorem Ipsum, baskı ve dizgi endüstrisinin kukla metnidir. Lorem Ipsum, 1500'lü yıllarda bilinmeyen bir matbaacının bir dizgi kalıbını alıp bir dizgi örneği kitabı yapmak için karıştırmasından bu yana sektörün standart sahte metni olmuştur. Sadece beş yüzyıl değil, aynı zamanda elektronik dizgiye geçişte de esasen değişmeden kalarak hayatta kalmıştır. 1960'larda Lorem Ipsum pasajları içeren Letraset sayfalarının piyasaya sürülmesiyle ve daha yakın zamanda Lorem Ipsum sürümlerini içeren Aldus PageMaker gibi masaüstü yayıncılık yazılımlarıyla popüler hale geldi.",
+    "files": [
+      {
+        "name": "Transfer Raporu",
+        "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+        "type": "pdf",
+        "size": "1.2 MB"
+      },
+      {
+        "name": "Güncel Bütçe Planı",
+        "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+        "type": "pdf",
+        "size": "0.7 MB"
+      }
+    ],
+    "viewed": true
+  },
+  {
+    "id": 2,
+    "from": {
+      "name": "Logo Yazılım",
+      "email": "contact@logo.com.tr",
+      "image": "https://s3-symbol-logo.tradingview.com/logo-yazilim--600.png"
+    },
+    "to": {
+      "name": "Burak Karahan",
+      "email": "burakkarahan@jeetwork.com",
+      "image": "https://img.freepik.com/premium-photo/indian-male-model_928503-1131.jpg"
+    },
+    "subject": "Premium hesap avantajları ve yeni ürün kataloğu",
+    "date": "2024-10-24",
+    "time": "09:30",
+    "content": "Merhaba Burak, yeni ürün kataloğundaki düzeltmeleri tamamladım. Göz atabilir misin? Geri dönüşlerini bekliyorum.",
+    "viewed": false
+  },
+  {
+    "id": 3,
+    "from": {
+      "name": "Nihan Şahin",
+      "email": "nihansahin@jeetwork.com",
+      "image": "https://www.shutterstock.com/image-photo/cute-girl-25-years-old-260nw-2508419695.jpg"
+    },
+    "to": {
+      "name": "Caner Keskin",
+      "email": "canerkeskin@jeetwork.com",
+      "image": "https://img.freepik.com/free-photo/portrait-man-laughing_23-2148859448.jpg?size=338&ext=jpg&ga=GA1.1.1819120589.1728432000&semt=ais_hybrid"
+    },
+    "subject": "Proje sunum dosyası",
+    "date": "2024-10-22",
+    "time": "15:45",
+    "content": "Selam Caner, sunum dosyasını tamamladım. İnceleyip geri bildirimlerini iletirsen çok sevinirim.",
+    "viewed": true
+  },
+  {
+    "id": 4,
+    "from": {
+      "name": "Elif Türedi",
+      "email": "elifturedi@jeetwork.com",
+      "image": "https://www.shutterstock.com/image-photo/happy-girl-25-years-old-260nw-2508318335.jpg"
+    },
+    "to": {
+      "name": "Sercan Demir",
+      "email": "sercandemir@jeetwork.com",
+      "image": "https://i.imgur.com/JFHjdNr.jpg"
+    },
+    "subject": "Kongre davetiyeleri hakkında",
+    "date": "2024-10-20",
+    "time": "17:10",
+    "content": "Merhaba Sercan, kongre davetiyelerini gönderdim. Herhangi bir eksik olup olmadığını kontrol edebilir misin?",
+    "viewed": true
+  },
+  {
+    "id": 5,
+    "from": {
+      "name": "Ozan Yıldız",
+      "email": "ozanyildiz@jeetwork.com",
+      "image": "https://portal.bilardo.gov.tr/assets/pages/media/profile/profile_user.jpg"
+    },
+    "to": {
+      "name": "Cansu Kaya",
+      "email": "cansukaya@jeetwork.com",
+      "image": "https://www.shutterstock.com/image-photo/happy-business-woman-touching-her-260nw-2162655199.jpg"
+    },
+    "subject": "Güncel bütçe planı",
+    "date": "2024-10-18",
+    "time": "10:15",
+    "content": "Selam Cansu, güncel bütçe planı ektedir. Detayları inceleyip onayını rica ediyorum.",
+    "viewed": false
+  }
+]

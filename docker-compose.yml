@@ -1,0 +1,111 @@
+# OLS scoped stack: web -> API -> PostgreSQL / sahte Siber (MSSQL)
+#
+# Yalnızca 8 modül (Müşteri, Teklif, Yük, Sefer, Fatura, Araç, Kullanıcılar,
+# Destek Talebi) için gerekli servisler. MongoDB (mesajlaşma) ve Socket.IO
+# kapsam dışı olduğu için bu yığında YOK.
+#
+# Tamamı yerelde çalışır, CANLI hiçbir sisteme bağlanmaz:
+#   - Siber entegrasyonu "siber-mock" konteynerine gider (canlı sunucuya DEĞİL)
+#
+# Portlar, aynı makinede çalışabilecek olsnew (5433/8006/8005/1434) ve diğer
+# projelerle çakışmasın diye kaydırıldı (5443/8106/8105/1444).
+
+services:
+  postgres:
+    image: 'postgres:16-alpine'
+    container_name: ols-scoped-postgres
+    ports:
+      - '${FORWARD_DB_PORT:-5443}:5432'
+    environment:
+      POSTGRES_DB: '${DB_DATABASE:-ols_scoped}'
+      POSTGRES_USER: '${DB_USERNAME:-postgres}'
+      POSTGRES_PASSWORD: '${DB_PASSWORD:-secret}'
+    volumes:
+      - 'ols-scoped-postgres:/var/lib/postgresql/data'
+    networks: [ols-scoped]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE:-ols_scoped}']
+      interval: 10s
+      retries: 10
+      timeout: 5s
+
+  # Yerel sahte Siber. Gerçek Siber2022 şemasının birebir kopyası değildir;
+  # amaç veri sadakati değil akış doğrulamasıdır.
+  siber-mock:
+    image: 'mcr.microsoft.com/mssql/server:2022-latest'
+    container_name: ols-scoped-siber-mock
+    ports:
+      - '${FORWARD_SIBER_PORT:-1444}:1433'
+    environment:
+      ACCEPT_EULA: 'Y'
+      MSSQL_SA_PASSWORD: '${SIBER_SA_PASSWORD:-Ols!Local2026}'
+      MSSQL_PID: 'Developer'
+    volumes:
+      - 'ols-scoped-siber:/var/opt/mssql'
+      - './docker/siber-mock:/init:ro'
+    networks: [ols-scoped]
+    healthcheck:
+      test: ['CMD-SHELL', '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" || exit 1']
+      interval: 15s
+      retries: 20
+      timeout: 10s
+
+  # Sahte Siber şemasını bir kez kurar, sonra çıkar.
+  siber-init:
+    image: 'mcr.microsoft.com/mssql/server:2022-latest'
+    container_name: ols-scoped-siber-init
+    depends_on:
+      siber-mock:
+        condition: service_healthy
+    volumes:
+      - './docker/siber-mock:/init:ro'
+    networks: [ols-scoped]
+    entrypoint: >
+      /bin/bash -c "/opt/mssql-tools18/bin/sqlcmd -S siber-mock -U sa
+      -P '${SIBER_SA_PASSWORD:-Ols!Local2026}' -C -i /init/init.sql &&
+      /opt/mssql-tools18/bin/sqlcmd -S siber-mock -U sa
+      -P '${SIBER_SA_PASSWORD:-Ols!Local2026}' -C -i /init/init-reference.sql &&
+      echo 'sahte Siber semasi kuruldu'"
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    container_name: ols-scoped-api
+    ports:
+      - '${API_PORT:-8106}:8080'
+    environment:
+      ASPNETCORE_ENVIRONMENT: '${ASPNETCORE_ENVIRONMENT:-Development}'
+      ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${DB_DATABASE:-ols_scoped};Username=${DB_USERNAME:-postgres};Password=${DB_PASSWORD:-secret}'
+      # Sahte Siber'e bağlanır — canlı ERP'ye DEĞİL
+      ConnectionStrings__Siber: 'Server=siber-mock,1433;Database=Siber2022;User Id=sa;Password=${SIBER_SA_PASSWORD:-Ols!Local2026};TrustServerCertificate=True'
+      Jwt__Key: '${JWT_KEY:-yerel-test-anahtari-en-az-32-bayt-olmali-0000}'
+      Jwt__Issuer: '${JWT_ISSUER:-ols-api}'
+      Jwt__Audience: '${JWT_AUDIENCE:-ols-app}'
+      Cors__AllowedOrigins__0: 'http://localhost:${FRONTEND_PORT:-8105}'
+    volumes:
+      - './storage/app/public:/app/storage/app/public'
+    networks: [ols-scoped]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    container_name: ols-scoped-frontend
+    ports:
+      - '${FRONTEND_PORT:-8105}:80'
+    networks: [ols-scoped]
+    depends_on: [api]
+
+networks:
+  ols-scoped:
+    driver: bridge
+    name: ols-scoped
+
+volumes:
+  ols-scoped-postgres: { driver: local }
+  ols-scoped-siber: { driver: local }

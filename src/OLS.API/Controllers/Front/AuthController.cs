@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using OLS.Business.Common;
 using OLS.Business.Services.Authentication;
 using OLS.Business.Services.Authorization;
@@ -36,6 +37,7 @@ public sealed class AuthController : ApiControllerBase
 
     [HttpPost("login")]
     [AllowAnonymous]
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> Login(
         [FromBody] LoginRequest request, CancellationToken cancellationToken)
     {
