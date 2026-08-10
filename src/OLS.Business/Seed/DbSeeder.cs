@@ -44,6 +44,12 @@ public static class DbSeeder
     {
         (string Slug, string Name)[] pages =
         [
+            // AccountService.IsSuperAdminAsync bu slug'ı arar: Read=1 olan
+            // kullanıcı tüm carileri görür, aksi halde yalnızca kendisine
+            // user_account_mappings ile atanmış carileri görür (object-level
+            // kural, olsold'dan birebir). Seed edilmezse KİMSE süper admin
+            // olamaz ve hiçbir cari hiçbir yeni kullanıcıya görünmez.
+            ("super_admin", "Süper Admin"),
             ("account_management", "Cari Yönetimi"),
             ("account_type_management", "Müşteri Tipi Yönetimi"),
             ("load_management", "Yük/Teklif Yönetimi"),
