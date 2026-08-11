@@ -3,6 +3,7 @@ import { AuthProvider } from "@/lib/auth";
 import { ToastProvider } from "@/components/ui/Toast";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
+import { DashboardPage } from "@/pages/dashboard/DashboardPage";
 import { CustomersPage } from "@/pages/customers/CustomersPage";
 import { QuotesPage } from "@/pages/quotes/QuotesPage";
 import { LoadsPage } from "@/pages/loads/LoadsPage";
@@ -21,7 +22,8 @@ export default function App() {
           <Routes>
             <Route path="/giris" element={<LoginPage />} />
             <Route element={<AppLayout />}>
-              <Route path="/" element={<Navigate to="/musteriler" replace />} />
+              <Route path="/" element={<Navigate to="/panel" replace />} />
+              <Route path="/panel" element={<DashboardPage />} />
               <Route path="/musteriler" element={<CustomersPage />} />
               <Route path="/teklifler" element={<QuotesPage />} />
               <Route path="/yukler" element={<LoadsPage />} />
@@ -32,7 +34,7 @@ export default function App() {
               <Route path="/destek-talepleri" element={<SupportPage />} />
               <Route path="/hesabim" element={<ProfilePage />} />
             </Route>
-            <Route path="*" element={<Navigate to="/musteriler" replace />} />
+            <Route path="*" element={<Navigate to="/panel" replace />} />
           </Routes>
         </ToastProvider>
       </AuthProvider>

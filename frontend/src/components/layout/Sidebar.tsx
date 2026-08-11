@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "motion/react";
 import { NavLink } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Users, FileText, Package, Truck, Receipt, Car, Shield, Headphones, Settings, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, LayoutDashboard, Users, FileText, Package, Truck, Receipt, Car, Shield, Headphones, Settings, LogOut } from "lucide-react";
 import { clsx } from "clsx";
 import { useAuth } from "@/lib/auth";
 
@@ -12,6 +12,7 @@ interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
+  { path: "/panel", label: "Dashboard", icon: LayoutDashboard },
   { path: "/musteriler", label: "Müşteriler", icon: Users, permissionSlug: "account_management" },
   { path: "/teklifler", label: "Teklifler", icon: FileText, permissionSlug: "load_management" },
   { path: "/yukler", label: "Yükler", icon: Package, permissionSlug: "load_management" },
