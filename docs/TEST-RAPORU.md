@@ -70,7 +70,7 @@ hem `curl` hem tarayıcı ekran görüntüsüyle teyit edildi.
 Gerçek ASP.NET Core pipeline'ı üzerinden çalışır — `WebApplicationFactory<Program>` gerçek `Program.cs`'i
 (JWT auth, `[RequiresPermission]` filtreleri, CORS, rate limiting, EF Core migrasyonları, `DbSeeder`)
 hiçbir katmanı mock'lamadan ayağa kaldırır. Her test sınıfı `[Collection("OlsApi")]` ile TEK bir izole
-Postgres veritabanını paylaşır (bkz. "Test izolasyon stratejisi").
+Postgres veritabanını paylaşır (izolasyon mekanizması ve bunu bulurken çıkan iki gerçek hata için bkz. §3.2–3.3).
 
 | Sınıf | Test | Ne doğrular |
 |---|---|---|
@@ -162,17 +162,51 @@ kendi taze konteynerini oluşturduğunu/yok ettiğini bildirse de. Bu, uygulama 
 Docker ağ katmanında bir sorun (muhtemelen Docker Desktop/WSL2 port-proxy önbelleği). Kod tarafında
 düzeltilebilecek bir şey yok.
 
-**Uygulanan çözüm:** `OlsApiFactory`, Testcontainers yerine AYNI (doğrulanmış çalışan) dev Postgres'e,
-her test çalıştırması için rastgele adlı İZOLE bir veritabanıyla bağlanıyor (`CREATE DATABASE` ile
-oluşturulup `DROP DATABASE ... WITH (FORCE)` ile temizleniyor). Gerçek migrasyon + gerçek seed + gerçek
-HTTP pipeline korunuyor; yalnızca izolasyon mekanizması değişti. Gerekçe `OlsApiFactory.cs`'te belgelendi.
+**Uygulanan çözüm (ilk deneme — YETERSİZ çıktı, bkz. §3.2.1):** `OlsApiFactory`, Testcontainers yerine
+AYNI (doğrulanmış çalışan) dev Postgres'e, her test çalıştırması için rastgele adlı İZOLE bir
+veritabanıyla bağlanmaya çalıştı (`CREATE DATABASE` ile oluşturulup `DROP DATABASE ... WITH (FORCE)`
+ile temizleniyor), `ConfigureAppConfiguration` ile `ConnectionStrings:Postgres` override edilerek.
 
 **Bilinen yan etki:** Bu geçiş sırasında birkaç test çalıştırması (sorun teşhis edilmeden önce)
 yanlışlıkla GERÇEK dev veritabanına test verisi yazdı (`@example.test` e-postalı 24 kullanıcı, GUID'li
 8 sahte cari, 4 sahte araç). Bu kayıtlar tespit edilip SQL ile temizlendi; dev veritabanında yalnızca
 gerçek seed admin + bu oturumun daha önce tarayıcıyla oluşturduğu 1 cari + 1 araç kaldı (doğrulandı).
 
-### 3.3 `Program.cs`'in `Jwt:Key` okuma sırası, `WebApplicationFactory` override'ını es geçiyor
+### 3.3 İlk izolasyon denemesi de sessizce başarısızdı — AYNI kök neden sınıfı §3.4'te
+
+**Bu, bu oturumdaki EN ÖNEMLİ bulgu:** §3.2'deki "izole veritabanı" düzeltmesi (`ConfigureAppConfiguration`
+ile `ConnectionStrings:Postgres` override) İLK BAKIŞTA çalışıyor GÖRÜNDÜ — testler geçti, hatta birkaç
+tur boyunca. Gerçekte HİÇBİR ZAMAN çalışmadı: `OLS.DataAccess/DependencyInjection.cs`'teki `AddDataAccess`,
+`ConnectionStrings:Postgres`'i `AddDbContext`'in options lambda'sı İÇİNDE değil, lambda'dan ÖNCE bir
+yerel değişkene (`var postgres = configuration.GetConnectionString("Postgres")`) okuyup lambda'yı bu
+DEĞİŞKENİN closure'ıyla kaydediyor — §3.4'teki `Jwt:Key` sorunuyla BİREBİR AYNI kök neden sınıfı
+(config'i `builder.Build()`'dan önce yerel değişkene okumak). `ConfigureAppConfiguration` override'ı bu
+erken okumadan SONRA devreye girdiği için SESSİZCE yok sayılıyordu — uygulama her zaman GERÇEK dev
+veritabanına (`ols_scoped`) bağlanıyordu; `CREATE DATABASE ols_scoped_inttest_...` / `DROP DATABASE`
+çağrıları BOŞ, hiç kullanılmayan bir veritabanı yaratıp siliyordu.
+
+**Nasıl fark edildi:** Gerçek frontend'de (`localhost:8105/musteriler`) beklenmeyen kayıtlar
+(`Baska Musteri d7f4e034...`, id C10/C11) görüldü — testler "geçtikten" SONRA bile dev veritabanı
+kirleniyordu. Bu, "izolasyon" düzeltmesinin hiç işe yaramadığının kanıtıydı; varsayımla bırakılmadı,
+doğrudan araştırıldı.
+
+**Doğrulama:** `DiagnosticTests` içine geçici bir test eklenip `SELECT current_database()` ve
+`db.Accounts.CountAsync()` doğrudan sorgulandı:
+- Düzeltmeden ÖNCE: `currentDb=ols_scoped` (gerçek dev veritabanı).
+- Düzeltmeden SONRA: `currentDb=ols_scoped_inttest_5e524e69...` (izole, `accountCount=0`).
+
+**Kalıcı çözüm:** `ConfigureAppConfiguration` yerine, `InitializeAsync` içinde (host hiç kurulmadan ÖNCE)
+`Environment.SetEnvironmentVariable("ConnectionStrings__Postgres", ...)` çağrılıyor. Ortam değişkenleri
+`WebApplication.CreateBuilder(args)`'ın KENDİ ilk yapılandırma taramasının bir parçası olduğundan,
+Program.cs'in erken okuduğu yerel değişken de bu değeri görüyor. `dotnet test` çıktısında migrasyon
+logu da bunu doğruluyor — düzeltmeden önce her zaman "No migrations were applied. The database is
+already up to date." (zaten migre edilmiş `ols_scoped`'a bağlanıldığının işareti), düzeltmeden sonra
+gerçekten "Applying migration '20260810122004_ScopedBaseline'." (gerçekten boş, taze bir veritabanı).
+
+**Temizlik:** Bu ikinci sızıntı sırasında oluşan ek sahte kayıtlar (2 cari, 1 araç, 6 kullanıcı) da
+SQL ile temizlendi; nihai doğrulama (`SELECT COUNT(*)`): 1 kullanıcı, 1 cari, 1 araç — hepsi gerçek.
+
+### 3.4 `Program.cs`'in `Jwt:Key` okuma sırası, `WebApplicationFactory` override'ını es geçiyor
 
 Yukarıdaki iki sorun düzeltildikten sonra bile: gerçek admin girişi (200 + token) başarılıydı ama O
 JETONLA yapılan bir sonraki istek HER ZAMAN 401 dönüyordu. `JwtBearerEvents.OnAuthenticationFailed`'e

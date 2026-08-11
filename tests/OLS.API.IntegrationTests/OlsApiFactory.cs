@@ -25,6 +25,24 @@ namespace OLS.API.IntegrationTests;
 /// çalışan) Postgres'e, ayrı/izole bir veritabanı adıyla bağlanılıyor — gerçek
 /// migrasyon + gerçek seed + gerçek HTTP pipeline'ı korunuyor, yalnızca izolasyon
 /// mekanizması değişiyor.
+///
+/// NOT 2 — İZOLASYON ÇEVRE DEĞİŞKENİYLE YAPILIYOR, ConfigureAppConfiguration İLE DEĞİL:
+/// OLS.DataAccess/DependencyInjection.cs'teki AddDataAccess, "ConnectionStrings:Postgres"'i
+/// AddDbContext'in options lambda'sı İÇİNDE değil, lambda'dan ÖNCE bir yerel değişkene
+/// okuyup lambda'yı bu değişkenin closure'ıyla kaydediyor — bu okuma Program.cs'in üst
+/// seviye kodu çalışırken, yani builder.Build() ÇAĞRILMADAN ÖNCE olur. WebApplicationFactory'nin
+/// ConfigureAppConfiguration override'ı ise .Build() bir DiagnosticListener olayıyla
+/// yakalandığında devreye girer — yani bu erken okumadan SONRA. Sonuç: ConfigureAppConfiguration
+/// ile verilen bir "ConnectionStrings:Postgres" override'ı SESSİZCE YOK SAYILIR ve uygulama
+/// appsettings.Development.json'daki GERÇEK dev veritabanına (ols_scoped) bağlanmaya devam
+/// eder — Jwt:Key'de yaşanan sorunla birebir aynı kök neden (bkz. NOT 3), ama bu kez fark
+/// edilmesi çok daha geç oldu: testler "geçiyor" göründü çünkü gerçek dev admin zaten
+/// (ayrı bir düzeltmeyle) doğru şifreyle çalışıyordu — sessizce gerçek dev veritabanına
+/// yazıp okuyorlardı. Ortam değişkenleri ise WebApplication.CreateBuilder(args)'ın KENDİ
+/// normal yapılandırma zincirinin bir parçasıdır (appsettings + env var'lar hep birlikte,
+/// Program.cs'in ilk satırında) — bu yüzden erken okuma da bu değeri GÖRÜR. Çözüm burada:
+/// override'ı ConfigureAppConfiguration yerine, host hiç kurulmadan önce
+/// Environment.SetEnvironmentVariable ile veriyoruz.
 /// </summary>
 public sealed class OlsApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
@@ -43,24 +61,20 @@ public sealed class OlsApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+
+        // DİKKAT: Jwt:Key BURADA override EDİLMİYOR — appsettings.Development.json'daki
+        // değer kullanılıyor. AddDataAccess ile birebir aynı erken-okuma tuzağı Program.cs'in
+        // Jwt:Key okuyan satırında da var (bkz. yukarıdaki sınıf yorumu NOT 2); JwtTokenService
+        // (imzalama, DI üzerinden İSTEK ANINDA okur) override'ı görür ama doğrulama tarafı
+        // (erken yakalanan yerel değişken) görmez — iki farklı anahtar, her jeton 401.
+        // Override'ı KALDIRMAK Program.cs'e dokunmadan iki tarafı da AYNI (gerçek dev)
+        // anahtara hizalıyor. Jwt:Key'in aksine ConnectionStrings:Postgres için "hiç override
+        // etme" seçeneği YOK (gerçek dev veritabanını kirletmemek gerekiyor) — o yüzden onun
+        // için ortam değişkeni yolu kullanılıyor, bkz. InitializeAsync.
         builder.ConfigureAppConfiguration((_, config) =>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:Postgres"] = TestConnectionString,
-                // Siber (legacy MSSQL) bilinçli olarak tanımsız: testler hiçbir
-                // gerçek dış sisteme bağlanmamalı.
-                //
-                // DİKKAT: Jwt:Key BURADA override EDİLMİYOR — appsettings.Development.json'daki
-                // değer kullanılıyor. Sebep: Program.cs, Jwt:Key'i builder.Build() çağrısından
-                // ÖNCE bir local değişkene okuyup AddJwtBearer'ın IssuerSigningKey'ine kapatıyor;
-                // WebApplicationFactory'nin ConfigureAppConfiguration override'ı ise .Build() bir
-                // DiagnosticListener olayıyla ele geçirildiğinde uygulanıyor — yani Program.cs'in
-                // ERKEN okuduğu local değişkenden SONRA. Sonuç: JwtTokenService (login'de imzalama,
-                // IConfiguration'ı DI üzerinden İSTEK ANINDA okuyor) override'ı görür, ama doğrulama
-                // tarafı (erken yakalanan local değişken) GÖRMEZ — iki farklı anahtarla imzalanıp
-                // doğrulanmış olur, her token 401 ile reddedilir. Burada override'ı KALDIRMAK,
-                // Program.cs'e hiç dokunmadan iki tarafı da AYNI (gerçek dev) anahtara hizalar.
                 ["Seed:AdminEmail"] = "admin@ols-scoped.local",
                 ["Seed:AdminPassword"] = "ChangeMe!Dev1",
             });
@@ -77,11 +91,22 @@ public sealed class OlsApiFactory : WebApplicationFactory<Program>, IAsyncLifeti
             create.CommandText = $"CREATE DATABASE \"{TestDatabaseName}\"";
             await create.ExecuteNonQueryAsync();
         }
+
+        // Program.cs, ConnectionStrings:Postgres'i builder.Build()'dan ÖNCE bir yerel
+        // değişkene okuyor (bkz. sınıf yorumu NOT 2) — bu yüzden ConfigureAppConfiguration
+        // ile verilen bir override'ı asla göremez. Ortam değişkeni ise
+        // WebApplication.CreateBuilder(args)'ın kendi ilk yapılandırma taramasının bir
+        // parçası olduğundan bu erken okumadan da GÖRÜLÜR. Bu satır, bu fixture'dan ilk kez
+        // host kurulmadan (ilk CreateClient/Services erişiminden) ÖNCE, InitializeAsync
+        // içinde (xUnit'in ilk testten önce garanti ettiği tek yer) çalıştırılmalı.
+        Environment.SetEnvironmentVariable("ConnectionStrings__Postgres", TestConnectionString);
     }
 
     async Task IAsyncLifetime.DisposeAsync()
     {
         await base.DisposeAsync();
+
+        Environment.SetEnvironmentVariable("ConnectionStrings__Postgres", null);
 
         await using var connection = new NpgsqlConnection(MaintenanceConnectionString);
         await connection.OpenAsync();
