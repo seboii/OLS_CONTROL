@@ -16,7 +16,7 @@ Durum kısaltmaları: **H**=Hazır (olsnew'de birebir var, sadece taşınacak), 
 | Konu | Karar |
 |---|---|
 | Backend kaynağı | olsnew (src/OLS.API, OLS.Business, OLS.DataAccess) — dosyalar büyük ölçüde birebir kopyalanacak, aynı namespace yapısı korunacak |
-| Frontend kaynağı | olsnew/frontend (Vue3+Vite+PrimeVue4+Tailwind4) — "hazır tasarım" budur; olstemel/docs'taki React/shadcn kiti OLS'e özgü ekran içermediği için ilgisiz kabul edildi |
+| Frontend kaynağı | **DÜZELTME (kullanıcı oturum ortasında düzeltti):** "hazır tasarım" olsnew/frontend'in Vue3+PrimeVue arayüzü DEĞİL — `docs/tasarım/src/app/App.tsx`'teki React/Tailwind/shadcn tasarımı (Figma "Kurumsal ERP Arayüzü Tasarımı" kod dışa aktarımı). Vue frontend'i tamamen kaldırılıp React 19+Vite+Tailwind v4 ile bu tasarımdan birebir yeniden kuruldu — bkz. TESLIM-RAPORU.md §1 "Kritik yön değişikliği" |
 | DbContext stratejisi | olsnew'in tek "Baseline" migration'ı 91 tablodan yalnızca `revoked_tokens`'ı gerçekten oluşturuyor (diğerleri var sayılıyor) — temiz kurulum için KULLANILAMAZ. Karar: ~47 entity'ye trim edilmiş yeni bir `OlsDbContext`, boş bir Postgres'e karşı gerçek bir `ScopedBaseline` migration'ı üretilecek (temiz kurulumda çalışsın diye) |
 | status_type_id (DATA-002) | olsold'un `StatusTypeSeeder` çıktısı (Teklif/İşlemde/Onaylandı/Tamamlandı/İptal) ile kodun gerçekte varsaydığı anlam (1=Olumsuz,2=Sipariş,3=Düzeltme,4=Teklif,5=Olumlu) TAMAMEN farklı. Karar: `status_types` tablosuna kararlı `code` sütunu eklenip (`REJECTED/ORDER/CORRECTION/OFFER/APPROVED`) gerçek çalışma zamanı anlamıyla seed edilecek; C# tarafında `StatusTypeCodes` sabitleri + tek bir lookup kullanılacak, ham sayısal literal kalmayacak |
 | TransferData (Siber ETL) | 20 action'lı toplu geçmiş-veri aktarım aracı (~1500 satır) KAPSAM DIŞI bırakıldı — sıfır geçmiş Siber verisiyle başlanacak, ileri yazımlar (Account/Car/Expedition/LoadTransfer save akışları) zaten kendi Siber senkronunu yapıyor. Bilinçli kapsam kararı, teslim raporunda gerekçelendirilecek |
@@ -150,6 +150,36 @@ Talebi = Website Contact Form.
 | **Tehlikeli ölü kod** | — | `FormDetailDrawer.vue` içinde kullanılmayan `handleDelete()` → `DELETE_USER(...)` çağırıyor (buton yok, UNREACHABLE) | — | — | — | — | — | — | **HEDEF'e taşınmayacak** — kopyala-yapıştır kalıntısı, ileride birisi "silme butonu ekleyeyim" derse yanlışlıkla kullanıcı silebilir |
 
 PII (ad/soyad/e-posta/telefon/mesaj) loglanmayacak; boyut sınırı ve backend validasyonu (§7 genel kurallar) uygulanacak.
+
+---
+
+## 9. Dashboard (sonradan eklendi — bkz. TESLIM-RAPORU.md §1)
+
+Orijinal görev tanımında Dashboard/raporlama bilinçli olarak KAPSAM DIŞI bırakılmıştı (§0 ile aynı kararlar
+listesinde). Kullanıcı daha sonra `docs/tasarım/src/app/App.tsx`'in ilk incelenen kopyada (`olstemel/docs`)
+bulunmayan, DAHA YENİ bir sürümünde `LoginPage`/`DashboardModule`/`MetricCard` bileşenlerinin var olduğunu
+gösterip eklenmesini istedi. olsold'da bu modülün karşılığı yok (ayrı bir Reports/Goals modülü var ama o
+hâlâ kapsam dışı) — bu, olsold'un birebir portu değil, YALNIZCA hazır tasarımdaki ekranı gerçek backend
+verisiyle dolduran yeni bir ekran.
+
+| Ekran/işlem | Tasarım kaynağı | .NET | İstek/Response | Yetki | Durum | Karar |
+|---|---|---|---|---|---|---|
+| Panel özeti | `DashboardModule` (App.tsx:2573) | `GET /api/v1/dashboard` `DashboardController`→`DashboardService` | `{data,message}` 200 | `[Authorize]` yeterli, sayfa-slug yetkisi yok (tasarımda da yetkiye göre gizlenen öğe yok) | YENİ | KPI'ler + 6 aylık trend + iş tipi dağılımı + haftalık tamamlanan sefer + son aktivite + yaklaşan seferler, hepsi GERÇEK sorgulardan |
+
+**Bilinçli veri dürüstlüğü kararı:** tasarımdaki "Teslim Oranı" (%94) ve "Haftalık Teslimat Performansı"
+(teslim/gecikme çift seri bar grafiği) bir SLA/zamanlama kavramı ima ediyor — ama `expedition_statuses` ve
+`load_status_types` bu HEDEF veritabanında BOŞ seed edilmiş durumda, yani "zamanında/gecikmeli teslimat"
+diye takip edilen bir alan YOK. Bu iki metrik UYDURULMADI: "Teslim Oranı" yerine GERÇEK verilerden
+hesaplanan dürüst bir vekil kullanıldı ("Tamamlanma Oranı" = bu ay `return_date` girilmiş seferlerin
+yüzdesi), "gecikme" serisi tamamen kaldırıldı (yalnızca gerçek "tamamlanan" sayısı gösteriliyor). Giriş
+ekranındaki tasarımda bulunan "canlı istatistik" kutucukları (142/7/%94 gibi) da bilinçli olarak
+uygulanmadı — oturum açmadan ÖNCE gösterilecek gerçek bir özet, ya kimliksiz bir uca ihtiyaç duyar (yeni
+bir güvenlik/gizlilik kararı gerektirir) ya da tamamen sahte sayı gösterir; ikisi de görev tanımının
+"sahte veriyi gerçekmiş gibi gösterme" kuralına aykırı olacağından ekran dışı bırakıldı.
+
+Gerçek testler: `tests/OLS.API.IntegrationTests/DashboardTests.cs` (401 sınırı, zarf şekli, boş
+diziler sahte satırla doldurulmuyor, `active_customers`'ın gerçek `/api/v1/account` toplamıyla
+birebir eşleştiği doğrudan karşılaştırmayla doğrulanıyor).
 
 ---
 

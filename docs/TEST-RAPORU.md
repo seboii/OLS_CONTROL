@@ -8,9 +8,9 @@ Hiçbir sonuç varsayılmadı; her iddia altındaki komut çalıştırılıp ç�
 | Proje | Test sayısı | Sonuç | Komut |
 |---|---|---|---|
 | `OLS.Business.Tests` | 29 | ✅ 29/29 geçti | `dotnet test tests/OLS.Business.Tests` |
-| `OLS.API.IntegrationTests` | 17 | ✅ 17/17 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
+| `OLS.API.IntegrationTests` | 20 | ✅ 20/20 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
 | `OLS.DataAccess.Tests` | 0 | ⚪ test yok (bilinçli, bkz. "Neden DataAccess.Tests boş") | — |
-| **Toplam** | **46** | **✅ 46/46** | `dotnet test` (çözüm kökünde) |
+| **Toplam** | **49** | **✅ 49/49** | `dotnet test` (çözüm kökünde) |
 
 Ayrıca: `dotnet build` (tüm çözüm) — 0 hata, 2 pre-existing nullability uyarısı (bu oturumda dokunulmayan
 `TransferSiberService.cs`/`ExpeditionLoadMappingService.cs` dosyalarında, davranışı etkilemiyor).
@@ -65,7 +65,7 @@ hem `curl` hem tarayıcı ekran görüntüsüyle teyit edildi.
 
 ## 2. Otomatik test paketi
 
-### 2.1 `OLS.API.IntegrationTests` (17 test)
+### 2.1 `OLS.API.IntegrationTests` (20 test)
 
 Gerçek ASP.NET Core pipeline'ı üzerinden çalışır — `WebApplicationFactory<Program>` gerçek `Program.cs`'i
 (JWT auth, `[RequiresPermission]` filtreleri, CORS, rate limiting, EF Core migrasyonları, `DbSeeder`)
@@ -91,6 +91,9 @@ Postgres veritabanını paylaşır (izolasyon mekanizması ve bunu bulurken çı
 | `AccountVisibilityTests` | `Admin_IsSuperAdmin_AndSeesAccountsWithoutExplicitMapping` | §1.2 regresyonu (pozitif) |
 | | `RegularUser_WithReadPermissionButNoAccountMapping_SeesNoAccounts` | §1.2 regresyonu (negatif) |
 | | `RegularUser_WithoutAccountManagementPermission_Returns403OnList` | Yetkisiz erişim engelleniyor |
+| `DashboardTests` | `GetDashboard_WithoutToken_Returns401` | Jetonsuz erişim engelleniyor |
+| | `GetDashboard_AsAuthenticatedUser_ReturnsRealAggregatesNotFakeData` | Zarf şekli + boş diziler sahte satırla doldurulmuyor |
+| | `GetDashboard_ActiveCustomers_MatchesRealAccountCount` | Panel sayısı, gerçek `/api/v1/account` toplamıyla birebir eşleşiyor (uydurma değil) |
 
 **Kapsam dışı bırakılanlar (bilinçli):** Siber (legacy MSSQL) senkronizasyonuna dokunan akışlar
 (`transfer_to_siber`, araç/cari Siber senkronu) — test ortamında `ConnectionStrings:Siber` bilinçli
@@ -115,7 +118,7 @@ Saf birim testler, veritabanı yok.
 ### 2.3 Neden `OLS.DataAccess.Tests` boş
 
 EF Core entity konfigürasyonları ve migrasyon davranışı, izole bir birim testinde anlamlı şekilde
-doğrulanamaz (gerçek bir sağlayıcıya karşı çalıştırılmaları gerekir). Bu davranış zaten 17 entegrasyon
+doğrulanamaz (gerçek bir sağlayıcıya karşı çalıştırılmaları gerekir). Bu davranış zaten 20 entegrasyon
 testinin HER BİRİNDE dolaylı olarak uçtan uca doğrulanıyor: her test gerçek Postgres'e karşı migrasyon
 çalıştırıyor, gerçek sorgular yürütüyor. Anlamsız/her zaman geçen sahte bir test eklemek yerine proje
 bilinçli olarak boş bırakıldı — `dotnet test` bunu "test yok" olarak dürüstçe raporluyor.

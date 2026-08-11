@@ -6,19 +6,27 @@ titizlikle, somut olarak listelendi.
 
 ## 1. Kapsam
 
-**İçeride (8 modül):** Müşteri (Cari), Teklif, Yük, Sefer, Fatura, Araç, Kullanıcılar, Destek Talebi —
-artı bunların ortak altyapısı (auth, yetki modeli, coğrafya/lookup verileri).
+**İçeride (9 ekran):** Dashboard, Müşteri (Cari), Teklif, Yük, Sefer, Fatura, Araç, Kullanıcılar, Destek
+Talebi — artı bunların ortak altyapısı (auth, yetki modeli, coğrafya/lookup verileri).
 
-**Dışarıda (bilinçli):** Dashboard/ciro-hedef yönetimi, PDKS, kurum-içi mesajlaşma (Socket.IO/Mongo),
-Excel yönetimi, muhasebe planı admin ekranları, gümrük modülleri (transit beyanname/ordino/yetki
-mektubu), CMS, test/demo sayfaları, ilgisiz cron/job'lar. Gerekçe:
-[docs/SECILI-MODUL-PARITE-MATRISI.md](SECILI-MODUL-PARITE-MATRISI.md).
+**Dışarıda (bilinçli):** olsold'un ayrı Reports/Hedef-ciro yönetimi (Dashboard'dan FARKLI — bkz. aşağıda),
+PDKS, kurum-içi mesajlaşma (Socket.IO/Mongo), Excel yönetimi, muhasebe planı admin ekranları, gümrük
+modülleri (transit beyanname/ordino/yetki mektubu), CMS, test/demo sayfaları, ilgisiz cron/job'lar.
+Gerekçe: [docs/SECILI-MODUL-PARITE-MATRISI.md](SECILI-MODUL-PARITE-MATRISI.md).
 
-**Kritik yön değişikliği (oturum ortasında):** Frontend başlangıçta yanlışlıkla olsnew'in Vue3+PrimeVue
+**Kritik yön değişikliği #1 (oturum ortasında):** Frontend başlangıçta yanlışlıkla olsnew'in Vue3+PrimeVue
 arayüzü baz alınarak inşa edilmişti. Kullanıcı bunu düzeltti: gerçek hazır tasarım
 `olstemel/docs/src/app/App.tsx`'teki React uygulaması. Vue frontend'i tamamen kaldırılıp (502 dosya
 değişikliği) React 19 + TypeScript + Vite + Tailwind v4 ile aynı tasarım sisteminden sıfırdan yeniden
 kuruldu. Backend bu değişiklikten etkilenmedi.
+
+**Kritik yön değişikliği #2 (bu güncellemede):** Kullanıcı, `docs/tasarım` klasöründe (ilk incelenen
+`olstemel/docs` kopyasından FARKLI, daha yeni bir dışa aktarım) bir Dashboard ve Login ekranı tasarımı
+bulunduğunu, bunların eklenmediğini belirtti. İnceleme doğruladı: `docs/tasarım/src/app/App.tsx` (2911
+satır, `olstemel/docs`'taki 2336 satırlık kopyadan farklı) gerçekten `LoginPage`, `MetricCard`,
+`DashboardModule` bileşenlerini içeriyor. Bu ikisi eklendi — Dashboard, önceki bir kararda kapsam dışı
+bırakılan olsold Reports modülünün portu DEĞİL, yalnızca bu 8 modülün zaten var olan verilerinden GERÇEK
+toplamlar hesaplayan yeni, hafif bir özet ekranı. Ayrıntı: SECILI-MODUL-PARITE-MATRISI.md §9.
 
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
@@ -36,7 +44,7 @@ kuruldu. Backend bu değişiklikten etkilenmedi.
 - **İki kritik hata canlı ortamda bulunup düzeltildi ve regresyon testiyle kilitlendi** — ayrıntı
   [docs/TEST-RAPORU.md](TEST-RAPORU.md) §1: `/api/v1/role` zarf uyuşmazlığı (sidebar tamamen boş
   görünüyordu), `super_admin` yetki sayfasının seed edilmemesi (yeni cariler kimseye görünmüyordu).
-- **46 otomatik test, hepsi geçiyor** (17 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
+- **49 otomatik test, hepsi geçiyor** (20 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
   pipeline'ı üzerinden, hiçbir katman mock'lanmadan. Test geliştirme sürecinde 3 ayrı gerçek ortam/
   test-edilebilirlik sorunu daha bulunup düzeltildi (bkz. TEST-RAPORU.md §3) — en önemlisi, testlerin
   başlangıçta sessizce GERÇEK dev veritabanına yazdığının fark edilip kalıcı olarak düzeltilmesi.
@@ -68,7 +76,7 @@ kuruldu. Backend bu değişiklikten etkilenmedi.
 
 ```
 dotnet build                                    → 0 hata, 2 pre-existing nullability uyarısı
-dotnet test                                     → 46/46 geçti (29 birim + 17 entegrasyon), ~1.2 dk
+dotnet test                                     → 49/49 geçti (29 birim + 20 entegrasyon), ~1.2 dk
 docker compose up -d --build                    → 4 servis (postgres/siber-mock/api/frontend) sağlıklı
 curl -X POST .../api/v1/login (admin)           → 200, gerçek JWT
 GET /api/v1/account (Docker API, canlı)         → 200, gerçek cari listesi
@@ -79,7 +87,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-46/46 otomatik test geçiyor. Kapsanan: auth (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları,
+49/49 otomatik test geçiyor. Kapsanan: auth (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları,
 bilinmeyen slug davranışı), iki kritik regresyon (rol zarfı, super_admin), para ayrıştırma, şifre
 hash'leme, sayfalama sözleşmesi. Kapsanmayan (bilinçli, dürüstçe not edildi): Teklif→Yük dönüşüm iş
 kuralları (BR-002/003/004/005), Sefer-Yük bağlama (BR-006/007/010), Fatura kalem/yuvarlama, profil
