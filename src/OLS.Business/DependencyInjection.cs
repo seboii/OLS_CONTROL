@@ -5,6 +5,7 @@ using OLS.Business.Services.Accounts;
 using OLS.Business.Services.Authentication;
 using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Cars;
+using OLS.Business.Services.Dashboard;
 using OLS.Business.Services.Expeditions;
 using OLS.Business.Services.Invoices;
 using OLS.Business.Services.Loads;
@@ -21,11 +22,14 @@ public static class DependencyInjection
 {
     /// <summary>
     /// BLL kayıtları — yalnızca 8 kapsam-içi modül (Müşteri, Teklif, Yük, Sefer,
-    /// Fatura, Araç, Kullanıcılar, Destek Talebi) + zorunlu ortak altyapı.
-    /// Kapsam dışı bırakılanlar (Accounting, Excel, Goals, Messages, Reports,
-    /// TransferData/Siber ETL, TransitDeclarations, AI/OCR, Currency admin+TCMB,
-    /// PDKS/WorkingTracking) olsnew'de mevcut ama buraya bilinçli olarak taşınmadı —
-    /// bkz. docs/SECILI-MODUL-PARITE-MATRISI.md §0.
+    /// Fatura, Araç, Kullanıcılar, Destek Talebi) + zorunlu ortak altyapı + Dashboard
+    /// (hazır tasarımda mevcut olduğu görülüp sonradan kapsama eklendi — bkz.
+    /// DashboardService.cs, yalnızca GERÇEK verilerden hesaplanan agregasyonlar,
+    /// olsold'daki tam raporlama modülünün portu DEĞİL).
+    /// Kapsam dışı bırakılanlar (Accounting, Excel, Goals, Messages, olsold'un tam
+    /// Reports modülü, TransferData/Siber ETL, TransitDeclarations, AI/OCR, Currency
+    /// admin+TCMB, PDKS/WorkingTracking) olsnew'de mevcut ama buraya bilinçli olarak
+    /// taşınmadı — bkz. docs/SECILI-MODUL-PARITE-MATRISI.md §0.
     /// </summary>
     public static IServiceCollection AddBusiness(
         this IServiceCollection services,
@@ -68,6 +72,8 @@ public static class DependencyInjection
         services.AddScoped<IProfileService, ProfileService>();
 
         services.AddScoped<IContactFormService, ContactFormService>();
+
+        services.AddScoped<IDashboardService, DashboardService>();
 
         // 23 referans/tanım modülü (27'den EinvoicePrefix hariç) tek generic kayıtla karşılanır.
         services.AddScoped(typeof(ILookupService<>), typeof(LookupService<>));
