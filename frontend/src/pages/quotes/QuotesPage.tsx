@@ -9,6 +9,7 @@ import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/co
 import { Drawer } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SelectInput, Tabs, TextInput, TextareaInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
+import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 
 interface NamedRef {
   id: number;
@@ -90,6 +91,13 @@ interface LoadDetail {
   load_content: LoadContentDetail[];
   load_financial_item: LoadFinancialItemDetail[];
   load_file: LoadFileDetail[];
+  load_charge_person: LoadChargePersonDetail[];
+  way_of_working: number | null;
+}
+
+interface LoadChargePersonDetail {
+  user_id: UserOption | null;
+  user_type: number | null;
 }
 
 type ContentRow = {
@@ -122,7 +130,11 @@ function useStatusTypeMap() {
 }
 
 const PER_PAGE = 8;
-const TABS = ["Genel Bilgiler", "Taraflar", "Güzergah", "Mali Kalemler", "Dosyalar"];
+const TABS = ["Genel Bilgiler", "Taraflar", "Güzergah", "Görevliler", "Mali Kalemler", "Dosyalar"];
+const WAY_OF_WORKING_OPTIONS = [
+  { value: "0", label: "Spot" },
+  { value: "1", label: "Yıllık" },
+];
 
 export function QuotesPage() {
   const { can } = useAuth();
@@ -151,7 +163,7 @@ export function QuotesPage() {
     load_transfer_type_id: "", instruction_id: "", romork_type_id: "", department_id: "",
     offer_date: new Date().toISOString().slice(0, 10), offer_validity_date: "",
     marketing_notification_date: new Date().toISOString().slice(0, 10),
-    payer_company: "", description: "",
+    payer_company: "", description: "", way_of_working: "0",
   });
   const [customer, setCustomer] = useState<AccountOption | null>(null);
   const [sender, setSender] = useState<AccountOption | null>(null);
@@ -159,6 +171,9 @@ export function QuotesPage() {
   const [agent, setAgent] = useState<AccountOption | null>(null);
   const [companyPayFreight, setCompanyPayFreight] = useState<AccountOption | null>(null);
   const [route, setRoute] = useState({ departure_country_id: "", transit_country_id: "", target_country_id: "" });
+  // olsold "Görevliler" sekmesi: Operasyon Yetkilisi tekil, Satış Temsilcisi çoğul seçim.
+  const [operationOfficer, setOperationOfficer] = useState<UserOption | null>(null);
+  const [salesReps, setSalesReps] = useState<UserOption[]>([]);
 
   const [content, setContent] = useState<ContentRow[]>([{ ...EMPTY_CONTENT_ROW }]);
   const [financialItems, setFinancialItems] = useState<FinancialItemRow[]>([]);
@@ -208,7 +223,7 @@ export function QuotesPage() {
       load_transfer_type_id: "", instruction_id: "", romork_type_id: "", department_id: "",
       offer_date: new Date().toISOString().slice(0, 10), offer_validity_date: "",
       marketing_notification_date: new Date().toISOString().slice(0, 10),
-      payer_company: "", description: "",
+      payer_company: "", description: "", way_of_working: "0",
     });
     setCustomer(null);
     setSender(null);
@@ -221,6 +236,8 @@ export function QuotesPage() {
     setExistingFiles([]);
     setRemovedFileIds([]);
     setNewFiles([]);
+    setOperationOfficer(null);
+    setSalesReps([]);
     setErrors({});
   }
 
@@ -254,7 +271,12 @@ export function QuotesPage() {
         marketing_notification_date: d.marketing_notification_date ?? "",
         payer_company: d.payer_company ?? "",
         description: d.description ?? "",
+        way_of_working: d.way_of_working != null ? String(d.way_of_working) : "0",
       });
+      setOperationOfficer(d.load_charge_person.find((p) => p.user_type === 1)?.user_id ?? null);
+      setSalesReps(
+        d.load_charge_person.filter((p) => p.user_type === 2 && p.user_id).map((p) => p.user_id!),
+      );
       setCustomer(d.customer_id);
       setSender(d.sender_id);
       setReceiver(d.receiver_id);
@@ -335,6 +357,7 @@ export function QuotesPage() {
     fd.append("marketing_notification_date", form.marketing_notification_date);
     fd.append("payer_company", form.payer_company);
     fd.append("description", form.description);
+    fd.append("way_of_working", form.way_of_working);
 
     if (customer) fd.append("customer_id", String(customer.id));
     if (sender) fd.append("sender_id", String(sender.id));
@@ -371,6 +394,16 @@ export function QuotesPage() {
       fd.append(`load_financial_item[${i}][net_price]`, item.net_price);
       fd.append(`load_financial_item[${i}][total_price]`, item.total_price);
       fd.append(`load_financial_item[${i}][quantity]`, item.quantity);
+    });
+
+    // olsold: görevli[0] = Operasyon Yetkilisi, görevli[1..] = Satış Temsilcisi (çoğul).
+    if (operationOfficer) {
+      fd.append("load_charge_person[0][user_id]", String(operationOfficer.id));
+      fd.append("load_charge_person[0][user_type]", "1");
+    }
+    salesReps.filter((rep) => rep.id).forEach((rep, i) => {
+      fd.append(`load_charge_person[${i + 1}][user_id]`, String(rep.id));
+      fd.append(`load_charge_person[${i + 1}][user_type]`, "2");
     });
 
     existingFiles
@@ -537,6 +570,9 @@ export function QuotesPage() {
                   <FormField label="Departman" required error={errors.department_id?.[0]}>
                     <SelectInput value={form.department_id} onChange={(v) => setForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
                   </FormField>
+                  <FormField label="Çalışma Şekli" required error={errors.way_of_working?.[0]}>
+                    <SelectInput value={form.way_of_working} onChange={(v) => setForm((f) => ({ ...f, way_of_working: v }))} options={WAY_OF_WORKING_OPTIONS} />
+                  </FormField>
                   <FormField label="Yük/Taşıma Tipi">
                     <SelectInput value={form.load_transfer_type_id} onChange={(v) => setForm((f) => ({ ...f, load_transfer_type_id: v }))} options={opts(loadTransferTypes)} />
                   </FormField>
@@ -639,6 +675,44 @@ export function QuotesPage() {
                 <FormField label="Varış Ülkesi">
                   <SelectInput value={route.target_country_id} onChange={(v) => setRoute((r) => ({ ...r, target_country_id: v }))} options={opts(countries)} />
                 </FormField>
+              </div>
+            )}
+
+            {tab === "Görevliler" && (
+              <div className="space-y-6">
+                <UserPicker
+                  label="Operasyon Yetkilisi"
+                  value={operationOfficer}
+                  onChange={setOperationOfficer}
+                  error={errors["load_charge_person.0.user_id"]?.[0]}
+                />
+
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Satış Temsilcisi</p>
+                    <button type="button" onClick={() => setSalesReps((list) => [...list, { id: 0, name: null, surname: null }])} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                      <Plus size={12} />Ekle
+                    </button>
+                  </div>
+                  {salesReps.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-8">Henüz satış temsilcisi eklenmedi.</p>
+                  ) : (
+                    salesReps.map((rep, i) => (
+                      <div key={i} className="flex items-start gap-2 mb-2">
+                        <div className="flex-1">
+                          <UserPicker
+                            label={`Satış Temsilcisi ${i + 1}`}
+                            value={rep.id ? rep : null}
+                            onChange={(v) => setSalesReps((list) => list.map((x, xi) => (xi === i ? (v ?? { id: 0, name: null, surname: null }) : x)))}
+                          />
+                        </div>
+                        <button type="button" onClick={() => setSalesReps((list) => list.filter((_, xi) => xi !== i))} className="mt-6 text-gray-300 hover:text-red-500">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             )}
 
