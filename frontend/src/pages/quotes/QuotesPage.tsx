@@ -93,6 +93,8 @@ interface LoadDetail {
   load_file: LoadFileDetail[];
   load_charge_person: LoadChargePersonDetail[];
   way_of_working: number | null;
+  front_transportation_by_us: number | null;
+  final_transportation_by_us: number | null;
 }
 
 interface LoadChargePersonDetail {
@@ -135,6 +137,10 @@ const WAY_OF_WORKING_OPTIONS = [
   { value: "0", label: "Spot" },
   { value: "1", label: "Yıllık" },
 ];
+const YES_NO_OPTIONS = [
+  { value: "1", label: "Evet" },
+  { value: "0", label: "Hayır" },
+];
 
 export function QuotesPage() {
   const { can } = useAuth();
@@ -164,6 +170,7 @@ export function QuotesPage() {
     offer_date: new Date().toISOString().slice(0, 10), offer_validity_date: "",
     marketing_notification_date: new Date().toISOString().slice(0, 10),
     payer_company: "", description: "", way_of_working: "0",
+    front_transportation_by_us: "0", final_transportation_by_us: "0",
   });
   const [customer, setCustomer] = useState<AccountOption | null>(null);
   const [sender, setSender] = useState<AccountOption | null>(null);
@@ -224,6 +231,7 @@ export function QuotesPage() {
       offer_date: new Date().toISOString().slice(0, 10), offer_validity_date: "",
       marketing_notification_date: new Date().toISOString().slice(0, 10),
       payer_company: "", description: "", way_of_working: "0",
+    front_transportation_by_us: "0", final_transportation_by_us: "0",
     });
     setCustomer(null);
     setSender(null);
@@ -272,6 +280,8 @@ export function QuotesPage() {
         payer_company: d.payer_company ?? "",
         description: d.description ?? "",
         way_of_working: d.way_of_working != null ? String(d.way_of_working) : "0",
+        front_transportation_by_us: d.front_transportation_by_us != null ? String(d.front_transportation_by_us) : "0",
+        final_transportation_by_us: d.final_transportation_by_us != null ? String(d.final_transportation_by_us) : "0",
       });
       setOperationOfficer(d.load_charge_person.find((p) => p.user_type === 1)?.user_id ?? null);
       setSalesReps(
@@ -358,6 +368,8 @@ export function QuotesPage() {
     fd.append("payer_company", form.payer_company);
     fd.append("description", form.description);
     fd.append("way_of_working", form.way_of_working);
+    fd.append("front_transportation_by_us", form.front_transportation_by_us);
+    fd.append("final_transportation_by_us", form.final_transportation_by_us);
 
     if (customer) fd.append("customer_id", String(customer.id));
     if (sender) fd.append("sender_id", String(sender.id));
@@ -556,7 +568,17 @@ export function QuotesPage() {
                 <AccountPicker label="Müşteri" value={customer} onChange={setCustomer} required error={errors.customer_id?.[0]} />
                 <div className="grid grid-cols-2 gap-4">
                   <FormField label="İş Tipi" required error={errors.work_type_id?.[0]}>
-                    <SelectInput value={form.work_type_id} onChange={(v) => setForm((f) => ({ ...f, work_type_id: v }))} options={opts(workTypes)} />
+                    <SelectInput
+                      value={form.work_type_id}
+                      onChange={(v) => setForm((f) => ({
+                        ...f,
+                        work_type_id: v,
+                        // olsold onChangeWorkType: İhracat/İthalat -> ön taşıma evet/son hayır; Transit -> ikisi de hayır.
+                        front_transportation_by_us: v === "1" || v === "2" ? "1" : "0",
+                        final_transportation_by_us: "0",
+                      }))}
+                      options={opts(workTypes)}
+                    />
                   </FormField>
                   <FormField label="Yükleme Tipi" required error={errors.loading_type_id?.[0]}>
                     <SelectInput value={form.loading_type_id} onChange={(v) => setForm((f) => ({ ...f, loading_type_id: v }))} options={opts(loadingTypes)} />
@@ -575,6 +597,12 @@ export function QuotesPage() {
                   </FormField>
                   <FormField label="Yük/Taşıma Tipi">
                     <SelectInput value={form.load_transfer_type_id} onChange={(v) => setForm((f) => ({ ...f, load_transfer_type_id: v }))} options={opts(loadTransferTypes)} />
+                  </FormField>
+                  <FormField label="Ön Taşıma Tarafımızdan Yapılır">
+                    <SelectInput value={form.front_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, front_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
+                  </FormField>
+                  <FormField label="Son Taşıma Tarafımızdan Yapılır">
+                    <SelectInput value={form.final_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, final_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
                   </FormField>
                   <FormField label="Talimat">
                     <SelectInput value={form.instruction_id} onChange={(v) => setForm((f) => ({ ...f, instruction_id: v }))} options={opts(instructions)} />
@@ -659,8 +687,8 @@ export function QuotesPage() {
               <div className="space-y-4">
                 <AccountPicker label="Gönderici" value={sender} onChange={setSender} error={errors.sender_id?.[0]} />
                 <AccountPicker label="Alıcı" value={receiver} onChange={setReceiver} error={errors.receiver_id?.[0]} />
-                <AccountPicker label="Acente" value={agent} onChange={setAgent} error={errors.agent_id?.[0]} />
-                <AccountPicker label="Navlun Ödeyen Firma (Cari)" value={companyPayFreight} onChange={setCompanyPayFreight} error={errors.company_pay_freight_id?.[0]} />
+                <AccountPicker label="Acente" value={agent} onChange={setAgent} error={errors.agent_id?.[0]} accountType={5} />
+                <AccountPicker label="Navlun Ödeyen Firma (Cari)" value={companyPayFreight} onChange={setCompanyPayFreight} error={errors.company_pay_freight_id?.[0]} accountType={1} />
               </div>
             )}
 

@@ -15,12 +15,14 @@ export interface AccountOption {
  * için ortak bileşen. Ham ID metin kutusu yerine gerçek arama+seçim sunar
  * (backend AccountRefDto id+name döndürüyor, kullanıcı ID ezberlemez).
  */
-export function AccountPicker({ label, value, onChange, required, error }: {
+export function AccountPicker({ label, value, onChange, required, error, accountType }: {
   label: string;
   value: AccountOption | null;
   onChange: (v: AccountOption | null) => void;
   required?: boolean;
   error?: string;
+  /** olsold: SelectAjax fetchParams={account_type_id}. Örn. Acente=5, Navlun Ödeyen Firma=1. */
+  accountType?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -34,13 +36,14 @@ export function AccountPicker({ label, value, onChange, required, error }: {
     api
       .get<DataMessage<Paginated<AccountOption>>>("/api/v1/account", {
         search: debouncedSearch || undefined,
+        account_type_id: accountType,
         per_page: 8,
         page: 1,
       })
       .then((res) => setResults(res.data.data))
       .catch(() => setResults([]))
       .finally(() => setLoading(false));
-  }, [open, debouncedSearch]);
+  }, [open, debouncedSearch, accountType]);
 
   return (
     <FormField label={label} required={required} error={error}>
