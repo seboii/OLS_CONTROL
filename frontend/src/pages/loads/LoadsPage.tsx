@@ -74,12 +74,24 @@ interface LoadTransferDetail extends LoadTransferItem {
   second_customer_representative: UserOption | null;
   load_id: number | null;
   load_file: LoadFileDetail[];
+  invoices: InvoiceSummaryDetail[];
 }
 
 interface LoadFileDetail {
   id: number;
   file: string | null;
   org_name: string | null;
+}
+
+interface InvoiceSummaryDetail {
+  id: number;
+  invoice_id: string | null;
+  box_type: number;
+  target_title: string | null;
+  target_identity_no: string | null;
+  invoice_execution_date: string | null;
+  invoice_status: NamedRef | null;
+  invoice_type: NamedRef | null;
 }
 
 interface MovementDetail {
@@ -117,7 +129,7 @@ const EMPTY_INVOICE_ITEM_ROW: InvoiceItemRow = {
 const EMPTY_MOVEMENT_FORM = { destination_id: "", expedition_status_id: "", description: "", address: "" };
 
 const PER_PAGE = 8;
-const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler", "Dosya Arşivi"];
+const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler", "Faturalar", "Dosya Arşivi"];
 
 export function LoadsPage() {
   const { can } = useAuth();
@@ -680,6 +692,47 @@ export function LoadsPage() {
                           <button type="button" onClick={() => deleteMovement(m.id)} className="text-gray-300 hover:text-red-500 shrink-0">
                             <Trash2 size={14} />
                           </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {tab === "Faturalar" && (
+                <div>
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Faturalar</p>
+                  {(detail?.invoices.length ?? 0) === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-8">Bu yüke bağlı fatura bulunamadı.</p>
+                  ) : (
+                    detail!.invoices.map((inv) => (
+                      <div key={inv.id} className="border border-gray-200 rounded-lg p-4 mb-2">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-[11px] text-gray-500">Fatura No</p>
+                            <p className="text-sm font-medium">{inv.invoice_id ?? "—"}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-[11px] text-gray-500">Gelen/Giden</p>
+                            <p className="text-sm font-medium">{inv.box_type === 1 ? "Gelir (Satış)" : "Gider (Alış)"}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-[11px] text-gray-500">Fatura Durumu</p>
+                            <p className="text-sm font-medium">{inv.invoice_status?.name ?? "—"}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-[11px] text-gray-500">Fatura Tipi</p>
+                            <p className="text-sm font-medium">{inv.invoice_type?.name ?? "—"}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3 col-span-2">
+                            <p className="text-[11px] text-gray-500">Alıcı</p>
+                            <p className="text-sm font-medium">{inv.target_title ?? "—"}</p>
+                            <p className="text-xs text-gray-500">{inv.target_identity_no ?? "—"}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3 col-span-2">
+                            <p className="text-[11px] text-gray-500">Fatura Tarihi</p>
+                            <p className="text-sm font-medium">{inv.invoice_execution_date ? new Date(inv.invoice_execution_date).toLocaleDateString("tr-TR") : "—"}</p>
+                          </div>
                         </div>
                       </div>
                     ))

@@ -101,6 +101,8 @@ public sealed class LoadTransferDetailDto
     [JsonPropertyName("load_id")] public long? OriginalLoadId { get; init; }
     [JsonPropertyName("load_file")] public IReadOnlyList<LoadFileDto> LoadFile { get; init; } = [];
 
+    [JsonPropertyName("invoices")] public IReadOnlyList<LoadTransferInvoiceDto> Invoices { get; init; } = [];
+
     [JsonPropertyName("load_transfer_package")]
     public IReadOnlyList<LoadTransferPackageDto> LoadTransferPackage { get; init; } = [];
 
@@ -137,6 +139,26 @@ public sealed class LoadTransferInvoiceItemDto
     [JsonPropertyName("item_id")] public NamedRefDto? ItemId { get; init; }
     [JsonPropertyName("account_id")] public NamedRefDto? AccountId { get; init; }
     [JsonPropertyName("currency_code")] public CurrencyDto? CurrencyCode { get; init; }
+}
+
+/// <summary>
+/// olsold: <c>LoadFormInvoices.vue</c> — bu Yük'ün fatura kalemlerinin
+/// eşlendiği gerçek Fatura kayıtları (salt-okunur çapraz görünüm).
+/// KDV/tutar alanları (payable_amount/tax_amount/tax_rate) BİLİNÇLİ OLARAK
+/// yok — Uyumsoft'a bağlı hesaplama mantığı bu portta hiç yok (bkz.
+/// TESLIM-RAPORU.md §1 Uyumsoft satırı); var olmayan bir hesabı sahte
+/// sıfır/boş göstermek yerine hiç göstermiyoruz.
+/// </summary>
+public sealed class LoadTransferInvoiceDto
+{
+    [JsonPropertyName("id")] public long Id { get; init; }
+    [JsonPropertyName("invoice_id")] public string? InvoiceId { get; init; }
+    [JsonPropertyName("box_type")] public short BoxType { get; init; }
+    [JsonPropertyName("target_title")] public string? TargetTitle { get; init; }
+    [JsonPropertyName("target_identity_no")] public string? TargetIdentityNo { get; init; }
+    [JsonPropertyName("invoice_execution_date")] public DateTime? InvoiceExecutionDate { get; init; }
+    [JsonPropertyName("invoice_status")] public NamedRefDto? InvoiceStatus { get; init; }
+    [JsonPropertyName("invoice_type")] public NamedRefDto? InvoiceType { get; init; }
 }
 
 public sealed class LoadTransferService : ILoadTransferService
@@ -270,6 +292,25 @@ public sealed class LoadTransferService : ILoadTransferService
                         MimeType = f.MimeType, OrgName = f.OrgName, CreatedAt = f.CreatedAt,
                     })
                     .ToListAsync(cancellationToken),
+
+            Invoices = await _db.LoadTransferInvoiceMaps.AsNoTracking()
+                .Where(m => m.LoadTransferId == t.Id)
+                .Select(m => m.Invoice)
+                .Distinct()
+                .Select(i => new LoadTransferInvoiceDto
+                {
+                    Id = i.Id,
+                    InvoiceId = i.InvoiceId,
+                    BoxType = i.BoxType,
+                    TargetTitle = i.TargetTitle,
+                    TargetIdentityNo = i.TargetIdentityNo,
+                    InvoiceExecutionDate = i.InvoiceExecutionDate,
+                    InvoiceStatus = i.InvoiceStatus == null ? null
+                        : new NamedRefDto { Id = i.InvoiceStatus.Id, Name = i.InvoiceStatus.Name },
+                    InvoiceType = i.InvoiceType == null ? null
+                        : new NamedRefDto { Id = i.InvoiceType.Id, Name = i.InvoiceType.Name },
+                })
+                .ToListAsync(cancellationToken),
 
             // Koli ve fatura kalemleri Siber kimliği üzerinden bağlanır
             // (load_transfers.load_transfer_id metin sütunu).
