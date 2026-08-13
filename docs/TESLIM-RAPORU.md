@@ -148,14 +148,24 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   sekmesi (backend `EmailTo`/`EmailCc` alanlarını zaten destekliyor, frontend'den hiç gönderilmiyor),
   "İlgili E-Posta" sekmesi (yalnızca teklif AI'dan/mail'den oluştuysa görünür, `saveAi` bu kapsamda
   zaten YOK — bkz. §4 AI satırı).
-- **Yük** (`LoadsPage.tsx`) — KISMEN TAMAMLANDI: artık gerçek 2 sekmeli (Genel Bilgiler/Paketler)
-  düzenleme formu var (önceden salt-okunurdu); Teklif→Yük dönüşüm tetikleyicisi (Teklifler ekranında
-  `siber_id` dolu satırlarda görünen kamyon ikonu → `POST /api/v1/load_transfer`) eklendi. Liste
-  sütunları da düzeltildi (bkz. altındaki "bu oturumda bulunup düzeltilen" notu). HÂLÂ EKSİK — bilinçli
-  kapsam dışı bırakıldı: Hareketler sekmesi (`expedition_statuses`/`load_status_types` tabloları boş —
-  bkz. §8 "Boş lookup tabloları"), Fatura Kalemleri (`load_transfer_invoice_item`) sekmesi. Otomatik
-  test: `LoadTransferTests.cs` (güncelleme + paket ekleme/silme, doğrudan EF Core ile seed edilen bir
-  kayıtla — bkz. aşağıdaki Siber kısıtı).
+- **Yük** (`LoadsPage.tsx`) — KISMEN TAMAMLANDI: 3 sekmeli (Genel Bilgiler/Paketler/Görevliler —
+  Görevliler bu güncellemede eklendi) düzenleme formu var (önceden salt-okunurdu); Teklif→Yük dönüşüm
+  tetikleyicisi (Teklifler ekranında `siber_id` dolu satırlarda görünen kamyon ikonu →
+  `POST /api/v1/load_transfer`) eklendi. Liste sütunları da düzeltildi. Görevliler: olsold'un gerçek
+  `LoadFormDrawer.vue`'sunda var, Teklif'ten FARKLI olarak `load_charge_person` gibi bir ilişki tablosu
+  DEĞİL — `LoadTransfer` üzerinde doğrudan iki `int` alan (`customer_representative_name`/
+  `second_customer_representative_name` — adlandırma yanıltıcı, içerik kullanıcı kimliği). Dönüşüm
+  sırasında ikisi de hep işlemi yapan kullanıcıya sabitleniyordu, HİÇBİR güncelleme ucu bu alanlara
+  dokunmuyordu; `LoadTransferUpdateRequest`'e eklendi, canlıda doğrulandı. DÜRÜST NOT — olsold'un gerçek
+  formu 8 sekmeli (Genel Bilgiler/Yük İçeriği/Finans/Görevliler/İlgili E-Posta/Hareketler/Faturalar/
+  Dosya Arşivi); burada hâlâ EKSİK olanlar: **Finans** sekmesi (backend `LoadTransferUpdateRequest.
+  InvoiceItems` ile `load_transfer_invoice_item` upsert'i ZATEN DESTEKLİYOR — yalnızca frontend'den hiç
+  gönderilmiyor, en düşük efor/en yüksek değerli sıradaki iş), **Hareketler** sekmesi (önceden
+  `expedition_statuses`/`load_status_types` boşluğu yüzünden bloke olarak belgeleniyordu — bu artık
+  YANLIŞ, `SiberImportService` ile çözüldü, ama sekme hâlâ hiç yazılmadı), **Faturalar** sekmesi
+  (`load_transfer_invoice_item`'i o Yük'ü kapsayan gerçek Fatura kayıtlarıyla çapraz gösteren salt-okunur
+  liste — hiç incelenmedi), **Dosya Arşivi** (bu Yük modülünde hiç yok; Teklif'te var). Otomatik test:
+  `LoadTransferTests.cs` (güncelleme + paket ekleme/silme, doğrudan EF Core ile seed edilen bir kayıtla).
 - **Sefer** (`TripsPage.tsx`) — KISMEN TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
   Drawer'ı eklendi (önceden yalnızca "Yeni Sefer" oluşturma vardı, mevcut kaydı açmanın hiçbir yolu
   yoktu), 2 sekmeli (Genel Bilgiler/Bağlı Yükler). Bağlı Yükler sekmesi TAM ÇALIŞIYOR: sefere
