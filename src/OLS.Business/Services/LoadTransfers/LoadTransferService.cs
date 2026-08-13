@@ -90,6 +90,17 @@ public sealed class LoadTransferDetailDto
     [JsonPropertyName("customer_representative")] public MappedUserDto? CustomerRepresentative { get; init; }
     [JsonPropertyName("second_customer_representative")] public MappedUserDto? SecondCustomerRepresentative { get; init; }
 
+    /// <summary>
+    /// olsold: <c>load_data.load_belongs</c> — Yük'ün dönüştüğü ORİJİNAL Teklif.
+    /// Dosya Arşivi bu Teklif'in <c>load_file</c> kayıtlarını gösterir (Yük'ün
+    /// kendi dosya tablosu yok — kaynakta da yok, bkz. LoadFormDrawer.vue
+    /// updateLoadFiles: <c>load_id</c> gönderiyor, <c>load_transfer_id</c> değil).
+    /// Eşleme <c>load_number_work_type</c> ↔ <c>loads.load_number</c> ile
+    /// (dönüşüm sırasında yazılan aynı değer — bkz. LoadTransferWriteService).
+    /// </summary>
+    [JsonPropertyName("load_id")] public long? OriginalLoadId { get; init; }
+    [JsonPropertyName("load_file")] public IReadOnlyList<LoadFileDto> LoadFile { get; init; } = [];
+
     [JsonPropertyName("load_transfer_package")]
     public IReadOnlyList<LoadTransferPackageDto> LoadTransferPackage { get; init; } = [];
 
@@ -184,6 +195,13 @@ public sealed class LoadTransferService : ILoadTransferService
         if (t is null)
             return null;
 
+        var originalLoadId = t.LoadNumberWorkType is null
+            ? (long?)null
+            : await _db.Loads.AsNoTracking()
+                .Where(l => l.LoadNumber == t.LoadNumberWorkType)
+                .Select(l => (long?)l.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
         return new LoadTransferDetailDto
         {
             Id = t.Id,
@@ -240,6 +258,18 @@ public sealed class LoadTransferService : ILoadTransferService
 
             CustomerRepresentative = await UserRefAsync(t.CustomerRepresentativeName, cancellationToken),
             SecondCustomerRepresentative = await UserRefAsync(t.SecondCustomerRepresentativeName, cancellationToken),
+
+            OriginalLoadId = originalLoadId,
+            LoadFile = originalLoadId is null
+                ? []
+                : await _db.LoadFiles.AsNoTracking()
+                    .Where(f => f.LoadId == (int)originalLoadId.Value)
+                    .Select(f => new LoadFileDto
+                    {
+                        Id = f.Id, LoadId = f.LoadId, File = f.File,
+                        MimeType = f.MimeType, OrgName = f.OrgName, CreatedAt = f.CreatedAt,
+                    })
+                    .ToListAsync(cancellationToken),
 
             // Koli ve fatura kalemleri Siber kimliği üzerinden bağlanır
             // (load_transfers.load_transfer_id metin sütunu).

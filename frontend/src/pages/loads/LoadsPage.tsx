@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Package, Plus, Trash2 } from "lucide-react";
+import { Package, Plus, Trash2, Upload, File as FileIcon, X } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
@@ -72,6 +72,14 @@ interface LoadTransferDetail extends LoadTransferItem {
   load_transfer_invoice_item: InvoiceItemDetail[];
   customer_representative: UserOption | null;
   second_customer_representative: UserOption | null;
+  load_id: number | null;
+  load_file: LoadFileDetail[];
+}
+
+interface LoadFileDetail {
+  id: number;
+  file: string | null;
+  org_name: string | null;
 }
 
 interface MovementDetail {
@@ -109,7 +117,7 @@ const EMPTY_INVOICE_ITEM_ROW: InvoiceItemRow = {
 const EMPTY_MOVEMENT_FORM = { destination_id: "", expedition_status_id: "", description: "", address: "" };
 
 const PER_PAGE = 8;
-const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler"];
+const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler", "Dosya Arşivi"];
 
 export function LoadsPage() {
   const { can } = useAuth();
@@ -148,6 +156,10 @@ export function LoadsPage() {
   const [movementModalOpen, setMovementModalOpen] = useState(false);
   const [movementForm, setMovementForm] = useState(EMPTY_MOVEMENT_FORM);
   const [savingMovement, setSavingMovement] = useState(false);
+  const [existingFiles, setExistingFiles] = useState<LoadFileDetail[]>([]);
+  const [removedFileIds, setRemovedFileIds] = useState<number[]>([]);
+  const [newFiles, setNewFiles] = useState<File[]>([]);
+  const [savingFiles, setSavingFiles] = useState(false);
 
   const { options: loadStatusTypes } = useLookupOptions("/api/v1/load_status_type");
   const { options: paymentTypes } = useLookupOptions("/api/v1/payment_type");
@@ -193,6 +205,8 @@ export function LoadsPage() {
     setDrawerOpen(true);
     setDetailLoading(true);
     setRemovedPackageIds([]);
+    setRemovedFileIds([]);
+    setNewFiles([]);
     fetchMovements(id);
     try {
       const res = await api.get<DataMessage<LoadTransferDetail>>(`/api/v1/load_transfer/${id}`);
@@ -216,6 +230,7 @@ export function LoadsPage() {
       setReceiver(d.receiver_id);
       setCustomerRep(d.customer_representative);
       setSecondCustomerRep(d.second_customer_representative);
+      setExistingFiles(d.load_file);
       setPackages(
         d.load_transfer_package.map((p) => ({
           id: p.id,
@@ -328,6 +343,32 @@ export function LoadsPage() {
       fetchMovements(editingId);
     } catch (err) {
       addToast(err instanceof Error ? err.message : "Hareket silinemedi", "error");
+    }
+  }
+
+  /**
+   * Dosyalar Yük'ün DEĞİL, dönüştüğü orijinal Teklif'in kaydına yazılır
+   * (olsold: LoadFormDrawer.vue updateLoadFiles → load_id gönderiyor).
+   * Bağımsız bir kaydet aksiyonu — ana "Kaydet" butonuna bağlı değil.
+   */
+  async function saveFiles() {
+    if (!detail?.load_id) return;
+    setSavingFiles(true);
+    try {
+      const fd = new FormData();
+      fd.append("load_id", String(detail.load_id));
+      existingFiles
+        .filter((f) => !removedFileIds.includes(f.id))
+        .forEach((f, i) => fd.append(`files[${i}][id]`, String(f.id)));
+      newFiles.forEach((f, i) => fd.append(`files[${existingFiles.length + i}][file]`, f));
+      await api.postForm("/api/v1/load/file/upload", fd);
+      addToast("Dosyalar kaydedildi");
+      setNewFiles([]);
+      openDetail(editingId!);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Dosyalar kaydedilemedi", "error");
+    } finally {
+      setSavingFiles(false);
     }
   }
 
@@ -642,6 +683,63 @@ export function LoadsPage() {
                         </div>
                       </div>
                     ))
+                  )}
+                </div>
+              )}
+
+              {tab === "Dosya Arşivi" && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Mevcut Dosyalar</p>
+                    {existingFiles.filter((f) => !removedFileIds.includes(f.id)).length === 0 ? (
+                      <p className="text-xs text-gray-400">Dosya yok.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {existingFiles.filter((f) => !removedFileIds.includes(f.id)).map((f) => (
+                          <div key={f.id} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 text-sm">
+                            <FileIcon size={14} className="text-gray-400 shrink-0" />
+                            <a href={f.file ? `/storage/${f.file}` : "#"} target="_blank" rel="noreferrer" className="flex-1 truncate text-blue-600 hover:underline">
+                              {f.org_name ?? f.file}
+                            </a>
+                            <button type="button" onClick={() => setRemovedFileIds((ids) => [...ids, f.id])} className="text-gray-300 hover:text-red-500">
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Yeni Dosya Ekle</p>
+                    <label className="flex items-center gap-2 justify-center border-2 border-dashed border-gray-200 rounded-lg p-4 text-xs text-gray-500 cursor-pointer hover:border-blue-300 hover:text-blue-600 transition-colors">
+                      <Upload size={14} />Dosya seç veya sürükle
+                      <input
+                        type="file"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => setNewFiles((prev) => [...prev, ...Array.from(e.target.files ?? [])])}
+                      />
+                    </label>
+                    {newFiles.length > 0 && (
+                      <div className="space-y-1.5 mt-2">
+                        {newFiles.map((f, i) => (
+                          <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 text-sm">
+                            <FileIcon size={14} className="text-gray-400 shrink-0" />
+                            <span className="flex-1 truncate">{f.name}</span>
+                            <button type="button" onClick={() => setNewFiles((list) => list.filter((_, xi) => xi !== i))} className="text-gray-300 hover:text-red-500">
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {canUpdate && (
+                    <div className="flex justify-end">
+                      <Btn onClick={saveFiles} disabled={savingFiles}>{savingFiles ? "Kaydediliyor..." : "Dosyaları Kaydet"}</Btn>
+                    </div>
                   )}
                 </div>
               )}
