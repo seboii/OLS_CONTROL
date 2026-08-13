@@ -8,9 +8,9 @@ Hiçbir sonuç varsayılmadı; her iddia altındaki komut çalıştırılıp ç�
 | Proje | Test sayısı | Sonuç | Komut |
 |---|---|---|---|
 | `OLS.Business.Tests` | 29 | ✅ 29/29 geçti | `dotnet test tests/OLS.Business.Tests` |
-| `OLS.API.IntegrationTests` | 24 | ✅ 24/24 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
+| `OLS.API.IntegrationTests` | 26 | ✅ 26/26 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
 | `OLS.DataAccess.Tests` | 0 | ⚪ test yok (bilinçli, bkz. "Neden DataAccess.Tests boş") | — |
-| **Toplam** | **53** | **✅ 53/53** | `dotnet test` (çözüm kökünde) |
+| **Toplam** | **55** | **✅ 55/55** | `dotnet test` (çözüm kökünde) |
 
 Ayrıca: `dotnet build` (tüm çözüm) — 0 hata, 2 pre-existing nullability uyarısı (bu oturumda dokunulmayan
 `TransferSiberService.cs`/`ExpeditionLoadMappingService.cs` dosyalarında, davranışı etkilemiyor).
@@ -65,7 +65,7 @@ hem `curl` hem tarayıcı ekran görüntüsüyle teyit edildi.
 
 ## 2. Otomatik test paketi
 
-### 2.1 `OLS.API.IntegrationTests` (24 test)
+### 2.1 `OLS.API.IntegrationTests` (26 test)
 
 Gerçek ASP.NET Core pipeline'ı üzerinden çalışır — `WebApplicationFactory<Program>` gerçek `Program.cs`'i
 (JWT auth, `[RequiresPermission]` filtreleri, CORS, rate limiting, EF Core migrasyonları, `DbSeeder`)
@@ -98,6 +98,8 @@ Postgres veritabanını paylaşır (izolasyon mekanizması ve bunu bulurken çı
 | | `CreateLoad_WithoutRequiredFields_ReturnsValidationErrors_NotServerError` | Eksik zorunlu alan → 400 + `errors` sözlüğü, 500 değil |
 | `LoadTransferTests` | `UpdateLoadTransfer_WithCoreFieldsAndPackages_RoundTripsCorrectly` | Yük güncelleme uç noktası (çekirdek alanlar + paket ekleme) gerçek Postgres'e karşı doğru çalışıyor |
 | | `DeletePackage_RemovesItFromSubsequentRead` | Ayrı paket-silme uç noktası, sonraki okumada kaydın gerçekten gittiğini doğruluyor |
+| `ExpeditionLoadMappingTests` | `SaveMapping_WithMatchingRomorkType_LinksLoadAndAppearsInDetail` | Sefere yük bağlama + silme gerçek Postgres'e karşı doğru çalışıyor; `total_expedition_values`'un zarfın KÖKÜNDE döndüğü doğrulanıyor |
+| | `SaveMapping_WithMismatchedRomorkType_ReturnsValidationError` | BR-006/007: araç ile yük romork tipi uyuşmazsa bağlama reddediliyor |
 
 **Neden `LoadTransferTests` bir Teklif'i gerçekten Yük'e çevirmiyor:** `LoadTransfer` kayıtları normalde
 YALNIZCA Siber'e aktarılmış bir teklifin dönüştürülmesiyle oluşur, bu da gerçek Siber-mock'a bağımlı bir
@@ -107,6 +109,15 @@ noktalarını buna karşı çalıştırıyor — amaç dönüşümün kendisini 
 Dönüşümün kendisi bu oturumda tarayıcıda canlı denendi ve BU ORTAMDA çalışmadığı doğrulandı (bkz.
 TESLIM-RAPORU.md §8 "Siber kimlik eşleşmesi kısıtı") — `payment_types.siber_id` hiçbir satırda dolu
 değil, olsold'un kendi seeder'ı da bu alanı hiç yazmıyor.
+
+**`ExpeditionLoadMappingTests` neden aynı sorunu yaşamıyor:** `Expedition` ve `LoadTransfer` yine
+doğrudan `OlsDbContext` ile seed ediliyor (Sefer oluşturma da benzer şekilde bloke — bkz. TESLIM-RAPORU.md
+§8 "Sefer oluşturma/güncelleme de boş lookup tablolarıyla bloke"), ama `ExpeditionLoadMappingService.
+SaveAsync` Siber yapılandırmasına BAĞIMLI DEĞİL (yalnızca yapılandırılmışsa Siber'e YAZMAYI DENER,
+yapılandırılmamışsa yerel GUID üretip PostgreSQL'e yazmaya devam eder) — bu yüzden test ortamında
+(Siber bilinçli olarak kapalı) tam işlevsel olarak çalışıyor. Bu akış ayrıca canlı Docker'da GERÇEK
+Siber-mock'a karşı da doğrulandı (bkz. TESLIM-RAPORU.md §8) — hem PostgreSQL hem `skn_yukaktarma`
+satırının oluştuğu `docker exec`+`sqlcmd` ile birebir teyit edildi.
 
 **Kapsam dışı bırakılanlar (bilinçli):** Siber (legacy MSSQL) senkronizasyonuna dokunan akışlar
 (`transfer_to_siber`, araç/cari Siber senkronu) — test ortamında `ConnectionStrings:Siber` bilinçli
@@ -279,10 +290,12 @@ kayıtlarıyla doğrulandı (tüm istekler 200 OK).
 
 - Teklif→Yük dönüşümünün KENDİSİ (BR-002/003/004/005 — `transfer_to_siber`/`ConvertOffer`): kod var,
   canlıda doğru validasyon hatası verdiği doğrulandı, ama bu ortamda Siber kimlik eşlemesi eksik olduğu
-  için gerçek bir dönüşüm uçtan uca ÇALIŞTIRILAMADI (bkz. TESLIM-RAPORU.md §8). Sefer-Yük bağlama
-  (BR-006/007/010), Fatura kalem/yuvarlama mantığı: bu modüllerin frontend alan derinliği henüz mockup
-  ile birebir değil (bkz. TESLIM-RAPORU.md kalan iş listesi) — arka uç iş kuralları için otomatik test
-  bu oturumda yazılmadı.
+  için gerçek bir dönüşüm uçtan uca ÇALIŞTIRILAMADI (bkz. TESLIM-RAPORU.md §8). Sefer oluşturma/
+  güncellemenin KENDİSİ de benzer şekilde boş lookup tablolarıyla bloke (bkz. TESLIM-RAPORU.md §8) —
+  Sefer-Yük BAĞLAMA (BR-006/007) bundan etkilenmiyor ve artık test edildi (`ExpeditionLoadMappingTests`).
+  BR-010, Fatura kalem/yuvarlama mantığı: bu modüllerin frontend alan derinliği henüz mockup ile
+  birebir değil (bkz. TESLIM-RAPORU.md kalan iş listesi) — arka uç iş kuralları için otomatik test bu
+  oturumda yazılmadı.
 - Profil güncelleme (BR-012 mevcut şifre kontrolü), dosya yükleme doğrulama, destek formu anonim erişim
   kuralları — kod içinde uygulanmış durumda, otomatik testleri bu oturumda eklenmedi.
 - Siber senkronizasyonuna dokunan uçların "yapılandırılmamışsa 503" davranışı — koda göre doğru

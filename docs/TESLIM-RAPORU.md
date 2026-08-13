@@ -87,16 +87,17 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-53/53 otomatik test geçiyor (29 OLS.Business.Tests + 24 OLS.API.IntegrationTests). Kapsanan: auth
+55/55 otomatik test geçiyor (29 OLS.Business.Tests + 26 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
 (taraflar/güzergah/mali kalem, Türkçe ondalık biçimiyle) round-trip ettiği, Yük güncelleme uç noktasının
-(çekirdek alanlar + paket upsert + paket silme) gerçek Postgres'e karşı doğru çalıştığı. Kapsanmayan
-(bilinçli, dürüstçe not edildi): Teklif→Yük dönüşümünün KENDİSİ (`transfer_to_siber`/`ConvertOffer` —
-bkz. §8 Siber kimlik eşleşmesi kısıtı, test ortamında kurulamıyor), Sefer-Yük bağlama (BR-006/007/010),
-Fatura kalem/yuvarlama, profil şifre değişikliği (BR-012), dosya yükleme doğrulama, Siber-503 davranışı.
-Ayrıntı: TEST-RAPORU.md.
+(çekirdek alanlar + paket upsert + paket silme) gerçek Postgres'e karşı doğru çalıştığı, Sefer-Yük
+bağlamanın (BR-006/007 romork tipi eşleşme kuralı dahil) doğru çalıştığı. Kapsanmayan (bilinçli,
+dürüstçe not edildi): Teklif→Yük dönüşümünün KENDİSİ (`transfer_to_siber`/`ConvertOffer` — bkz. §8
+Siber kimlik eşleşmesi kısıtı, test ortamında kurulamıyor), Sefer oluşturma/güncellemenin KENDİSİ (bkz.
+§8 — boş `expedition_types`/`expedition_statuses`), BR-010, Fatura kalem/yuvarlama, profil şifre
+değişikliği (BR-012), dosya yükleme doğrulama, Siber-503 davranışı. Ayrıntı: TEST-RAPORU.md.
 
 ## 7. Görsel parite durumu (özet)
 
@@ -125,8 +126,16 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   bkz. §8 "Boş lookup tabloları"), Fatura Kalemleri (`load_transfer_invoice_item`) sekmesi. Otomatik
   test: `LoadTransferTests.cs` (güncelleme + paket ekleme/silme, doğrudan EF Core ile seed edilen bir
   kayıtla — bkz. aşağıdaki Siber kısıtı).
-- **Sefer** (`TripsPage.tsx`, 218 satır): tek düz form (Araç/İş Tipi/Departman/Sefer Tipi/4 tarih alanı).
-  EKSİK: Bağlı Yükler (expedition_load_mapping) sekmesi, Hareketler sekmesi, araç uygunluk kontrolü UI'si.
+- **Sefer** (`TripsPage.tsx`) — KISMEN TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
+  Drawer'ı eklendi (önceden yalnızca "Yeni Sefer" oluşturma vardı, mevcut kaydı açmanın hiçbir yolu
+  yoktu), 2 sekmeli (Genel Bilgiler/Bağlı Yükler). Bağlı Yükler sekmesi TAM ÇALIŞIYOR: sefere
+  eklenebilecek (henüz bağlanmamış) yükleri arayan bir seçici, ekleme/çıkarma, toplam adet/ağırlık/
+  hacim özeti — hem PostgreSQL hem GERÇEK Siber-mock senkronuyla canlı doğrulandı (bkz. aşağıdaki
+  not — bu, Teklif→Yük dönüşümünün AKSİNE, Siber kimlik eşlemesine bağımlı değil). "Sefer Tipi" alanı
+  artık zorunlu işaretlendi (backend'in gerçekte zorunlu tuttuğu ama frontend'in yıldızlamadığı bir
+  alan olduğu bu oturumda bulundu). Otomatik test: `ExpeditionLoadMappingTests.cs` (bağlama+silme +
+  BR-006/007 romork tipi eşleşmeme senaryosu). HÂLÂ EKSİK — bilinçli kapsam dışı: Hareketler sekmesi
+  (aynı `expedition_statuses` boş-tablo kısıtı).
 - **Fatura** (`InvoicesPage.tsx`, 214 satır): tek düz form (Yön/Fatura Tipi/Müşteri/Fatura Türü/Tarihler/
   Açıklama). EKSİK: kalem (line item) çoklu-satır girişi, footer notları, PDF önizleme, Uyumsoft
   draft/send/cancel/approve UI'si (backend stub'ları planlandı ama frontend hiç çağırmıyor).
@@ -148,21 +157,40 @@ ve mantığı doğru görünüyor, ama bu ortamda gerçek bir Teklif'i gerçekte
 tıklaması DOĞRULANAMADI — yalnızca doğru validasyon hatası verdiği doğrulandı. Yük düzenleme uç
 noktası bu yüzden doğrudan EF Core ile seed edilen bir kayıtla test edildi (yukarıdaki `LoadTransferTests.cs`).
 
-### Bu oturumda bulunup düzeltilen bir hata
+### Sefer oluşturma/güncelleme de boş lookup tablolarıyla bloke — ama Bağlı Yükler DEĞİL
 
-Yük listesi (`LoadsPage.tsx`) "Ağırlık"/"Hacim" sütunları gösteriyordu ama backend'in liste uç noktası
-(`LoadTransferListItemDto`) bu alanları HİÇ döndürmüyor (yalnızca detay uç noktası döndürüyor) — sütunlar
-her zaman "—" gösteriyordu. olsold'un gerçek `LoadTable.vue` bileşeni kontrol edildi: kaynak liste zaten
-yalnızca Yük Numarası/Müşteri/Gönderici/Durum gösteriyor, ağırlık/hacim hiç yok. Sütunlar bu dört alanı
-gösterecek şekilde düzeltildi (`sender_id` artık `LoadTransferItem` tipinde) — birebir kaynağa uyuyor.
+Bu oturumda ayrıca bulundu: Sefer oluşturma (`POST /api/v1/expedition`) `expedition_types` tablosundan
+GERÇEKTEN bir satır bulmayı şart koşuyor (`ExpeditionWriteService.CreateAsync`), güncelleme ise aynı
+şekilde `expedition_statuses`'dan bir satır ister (`UpdateAsync`) — ikisi de bu ortamda BOŞ (0 satır).
+Kaynağı doğrulandı: olsold'da da bu iki tablo için hiçbir seeder yok (yalnızca migration var) — yani
+gerçek sistemde de bu değerler idari panelden elle girilmiş olurdu, taze bir kurulumda BOŞ olurdu.
+Canlıda denendi: `POST /api/v1/expedition` → 400 `"Sefer türü bulunamadı"`. Sonuç: bu ortamda YENİ bir
+Sefer oluşturmanın veya MEVCUT birinin Genel Bilgiler'ini kaydetmenin gerçek bir yolu yok — tıpkı
+Hareketler gibi, ama farklı bir tablo yüzünden. **Bağlı Yükler bundan ETKİLENMİYOR**: o akış
+(`ExpeditionLoadMappingService`) bu iki tabloya hiç dokunmuyor, yalnızca Sefer/Araç/Yük kayıtlarının
+VAR OLUP OLMADIĞINA ve romork tipi eşleşmesine bakıyor — bu yüzden canlıda uçtan uca (PostgreSQL +
+gerçek Siber-mock senkronu dahil) çalıştığı doğrulandı, otomatik testle de kilitlendi.
+
+### Bu oturumda bulunup düzeltilen hatalar
+
+- Yük listesi (`LoadsPage.tsx`) "Ağırlık"/"Hacim" sütunları gösteriyordu ama backend'in liste uç noktası
+  (`LoadTransferListItemDto`) bu alanları HİÇ döndürmüyor (yalnızca detay uç noktası döndürüyor) —
+  sütunlar her zaman "—" gösteriyordu. olsold'un gerçek `LoadTable.vue` bileşeni kontrol edildi: kaynak
+  liste zaten yalnızca Yük Numarası/Müşteri/Gönderici/Durum gösteriyor, ağırlık/hacim hiç yok. Sütunlar
+  bu dört alanı gösterecek şekilde düzeltildi (`sender_id` artık `LoadTransferItem` tipinde) — birebir
+  kaynağa uyuyor.
+- Sefer oluşturma formunda "Sefer Tipi" alanı zorunlu İŞARETLENMEMİŞTİ ama backend boş bırakılırsa
+  HER ZAMAN reddediyor (`ExpeditionWriteService.CreateAsync` → "Sefer türü bulunamadı") — kullanıcı
+  alanı atlarsa neden başarısız olduğunu anlayamazdı. `*` ile zorunlu işaretlendi.
 
 ### Diğer eksikler
 
 - 8 modül × 3 viewport tam görsel matrisi (yalnızca Müşteriler tam kontrol edildi — bkz. §7).
 - Mobil hamburger menüsünün AÇIK/slide-in hali interaktif doğrulanmadı (araç kısıtı, bkz.
   GORSEL-PARITE-RAPORU.md).
-- BR-002/003/004/005/006/007/010/012/013 iş kuralları için özel otomatik test yok (kod içinde
-  uygulanmış görünüyor ama ayrı test yazılmadı).
+- BR-002/003/004/005/010/012/013 iş kuralları için özel otomatik test yok (kod içinde uygulanmış
+  görünüyor ama ayrı test yazılmadı). BR-006/007 (Sefer-Yük romork tipi eşleşmesi) artık test edildi
+  (`ExpeditionLoadMappingTests.cs`).
 - Siber-503 davranışı ("yapılandırılmamışsa anlamlı 503 döner") koda göre doğru ama ayrı test
   yazılmadı.
 - Dosya yükleme (Teklif dosyaları, kullanıcı avatarı) uçtan uca tarayıcıda test edilmedi.
