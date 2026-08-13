@@ -8,12 +8,13 @@ Hiçbir sonuç varsayılmadı; her iddia altındaki komut çalıştırılıp ç�
 | Proje | Test sayısı | Sonuç | Komut |
 |---|---|---|---|
 | `OLS.Business.Tests` | 29 | ✅ 29/29 geçti | `dotnet test tests/OLS.Business.Tests` |
-| `OLS.API.IntegrationTests` | 41 | ✅ 41/41 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
+| `OLS.API.IntegrationTests` | 42 | ✅ 42/42 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
 | `OLS.DataAccess.Tests` | 0 | ⚪ test yok (bilinçli, bkz. "Neden DataAccess.Tests boş") | — |
-| **Toplam** | **70** | **✅ 70/70** | `dotnet test` (çözüm kökünde) |
+| **Toplam** | **71** | **✅ 71/71** | `dotnet test` (çözüm kökünde) |
 
-Ayrıca: `dotnet build` (tüm çözüm) — 0 hata, 2 pre-existing nullability uyarısı (bu oturumda dokunulmayan
-`TransferSiberService.cs`/`ExpeditionLoadMappingService.cs` dosyalarında, davranışı etkilemiyor).
+Ayrıca: `dotnet build` (tüm çözüm) — 0 hata, 2 pre-existing nullability uyarısı (`TransferSiberService.cs`/
+`ExpeditionLoadMappingService.cs` dosyalarında; bu güncellemede `TransferSiberService.cs`'e dokunuldu
+ama bu iki spesifik uyarı ilgisiz satırlarda, davranışı etkilemiyor).
 `docker compose build frontend` ve `docker compose up -d --build api` — ikisi de gerçekten çalıştırıldı,
 bkz. "Docker doğrulaması" bölümü.
 
@@ -111,28 +112,38 @@ Postgres veritabanını paylaşır (izolasyon mekanizması ve bunu bulurken çı
 | | `LoadSave_WhenSiberNotConfigured_ReturnsServiceUnavailable` | Daha önce testsiz kalan "Siber-503" davranışı: `loadSave` GERÇEKTEN 503 dönüyor |
 | | `LoadSave_WithoutId_ReturnsValidationError_BeforeCheckingSiberConfiguration` | Alan doğrulaması Siber kontrolünden önce çalışıyor |
 | | `TransferOfferAsync_WhenLoadAlreadyHasLoadNumber_ReturnsError` | Yük oluşmuş teklif tekrar Siber'e aktarılamaz |
-| | `TransferOfferAsync_WithoutPaymentType_ReturnsPaymentTypeRequiredError` | Canlıda bulunan gerçek kısıtın (bkz. TESLIM-RAPORU.md §8) servis seviyesinde regresyonu |
+| | `TransferOfferAsync_WithoutPaymentType_ReturnsPaymentTypeRequiredError` | `ValidateRequired`'ın 9. kontrolü (ödeme şekli) — öncesindeki 8 alan bilinçli doldurularak izole edildi |
+| | `TransferOfferAsync_WithoutSender_ReturnsSenderRequiredError` | Bu güncellemede EKLENEN "Gönderici boş olamaz" kontrolünün regresyonu (önceden hiç yoktu) |
 | | `ConvertOfferAsync_WhenLoadAlreadyConverted_ReturnsBR002Error` | BR-002: zaten yüke dönüştürülmüş teklif tekrar dönüştürülemez |
 | | `ConvertOfferAsync_WhenStatusNotApproved_ReturnsBR003Error` | BR-003: durum "Olumlu" değilse dönüşüm reddedilir |
 | | `ConvertOfferAsync_WhenNotTransferredToSiber_ReturnsBR004Error` | BR-004: önce Siber'e aktarılmamış teklif dönüştürülemez |
 
-**Neden `LoadTransferTests` bir Teklif'i gerçekten Yük'e çevirmiyor:** `LoadTransfer` kayıtları normalde
-YALNIZCA Siber'e aktarılmış bir teklifin dönüştürülmesiyle oluşur, bu da gerçek Siber-mock'a bağımlı bir
-zincir. Test bunun yerine `OlsDbContext` üzerinden doğrudan minimal bir `LoadTransfer` satırı ekliyor
-(şema incelemesiyle doğrulandı: `id` dışında NOT NULL kısıtı yok) ve gerçek `Update`/paket-silme uç
-noktalarını buna karşı çalıştırıyor — amaç dönüşümün kendisini değil, güncelleme sözleşmesini kilitlemek.
-Dönüşümün kendisi bu oturumda tarayıcıda canlı denendi ve BU ORTAMDA çalışmadığı doğrulandı (bkz.
-TESLIM-RAPORU.md §8 "Siber kimlik eşleşmesi kısıtı") — `payment_types.siber_id` hiçbir satırda dolu
-değil, olsold'un kendi seeder'ı da bu alanı hiç yazmıyor.
+**GÜNCELLEME — dönüşümün MUTLU YOLU artık canlıda çalışıyor (aşağıdaki paragraf tarihi kayıt olarak
+bırakıldı):** `SiberImportService` portlandıktan sonra (bkz. TESLIM-RAPORU.md §2/§8) bir Teklif gerçekten
+uçtan uca Yük'e dönüştürüldü: `POST /api/v1/transfer_to_siber` → 200 (gerçek `skn_rezervasyon` satırı),
+`POST /api/v1/load_transfer` → 200 (`"Yük başarıyla oluşturuldu"`, `load_transfers`+paket+2 fatura
+kalemi PostgreSQL'de, `skn_yuk`/`skn_yukkoli`/`sfy_modulkalem` mock Siber'de doğrulandı). Bu spesifik
+uçtan-uca SENARYO henüz otomatik bir xUnit testine dönüştürülmedi (canlı/manuel doğrulandı) — aşağıdaki
+`LoadTransferTests`/`TransferSiberTests` testleri hâlâ yalnızca RET yollarını ve güncelleme sözleşmesini
+kilitliyor, KABUL yolunu değil.
+
+**(Tarihi — artık geçerli değil) Neden `LoadTransferTests` bir Teklif'i gerçekten Yük'e çevirmiyordu:**
+`LoadTransfer` kayıtları normalde YALNIZCA Siber'e aktarılmış bir teklifin dönüştürülmesiyle oluşur, bu
+da gerçek Siber-mock'a bağımlı bir zincir. Test bunun yerine `OlsDbContext` üzerinden doğrudan minimal
+bir `LoadTransfer` satırı ekliyor (şema incelemesiyle doğrulandı: `id` dışında NOT NULL kısıtı yok) ve
+gerçek `Update`/paket-silme uç noktalarını buna karşı çalıştırıyor — amaç dönüşümün kendisini değil,
+güncelleme sözleşmesini kilitlemek. Bu YAKLAŞIM hâlâ geçerli (test hâlâ böyle çalışıyor), ama gerekçesi
+artık "bu ortamda dönüşüm çalışmıyor" DEĞİL — sadece bu testin amacı dönüşümü değil güncellemeyi
+kilitlemek.
 
 **`ExpeditionLoadMappingTests` neden aynı sorunu yaşamıyor:** `Expedition` ve `LoadTransfer` yine
-doğrudan `OlsDbContext` ile seed ediliyor (Sefer oluşturma da benzer şekilde bloke — bkz. TESLIM-RAPORU.md
-§8 "Sefer oluşturma/güncelleme de boş lookup tablolarıyla bloke"), ama `ExpeditionLoadMappingService.
-SaveAsync` Siber yapılandırmasına BAĞIMLI DEĞİL (yalnızca yapılandırılmışsa Siber'e YAZMAYI DENER,
-yapılandırılmamışsa yerel GUID üretip PostgreSQL'e yazmaya devam eder) — bu yüzden test ortamında
-(Siber bilinçli olarak kapalı) tam işlevsel olarak çalışıyor. Bu akış ayrıca canlı Docker'da GERÇEK
-Siber-mock'a karşı da doğrulandı (bkz. TESLIM-RAPORU.md §8) — hem PostgreSQL hem `skn_yukaktarma`
-satırının oluştuğu `docker exec`+`sqlcmd` ile birebir teyit edildi.
+doğrudan `OlsDbContext` ile seed ediliyor, ama `ExpeditionLoadMappingService.SaveAsync` Siber
+yapılandırmasına BAĞIMLI DEĞİL (yalnızca yapılandırılmışsa Siber'e YAZMAYI DENER, yapılandırılmamışsa
+yerel GUID üretip PostgreSQL'e yazmaya devam eder) — bu yüzden test ortamında (Siber bilinçli olarak
+kapalı) tam işlevsel olarak çalışıyor. Bu akış ayrıca canlı Docker'da GERÇEK Siber-mock'a karşı da
+doğrulandı — hem PostgreSQL hem `skn_yukaktarma` satırının oluştuğu `docker exec`+`sqlcmd` ile birebir
+teyit edildi. (Sefer oluşturmanın KENDİSİ de önceden `expedition_types`/`expedition_statuses` boşluğu
+yüzünden bloke oluyordu — `SiberImportService` ile çözüldü, bkz. TESLIM-RAPORU.md §8.)
 
 **`TransferSiberTests` neden bazı testleri sahte Siber depolarıyla, bazılarını gerçek HTTP ile
 yapıyor:** Siber (legacy MSSQL) senkronizasyonuna dokunan akışlar (`transfer_to_siber`, araç/cari
@@ -315,16 +326,17 @@ kayıtlarıyla doğrulandı (tüm istekler 200 OK).
 
 ## 6. Kapsam dışı / henüz test edilmeyenler (dürüst liste)
 
-- Teklif→Yük dönüşümünün MUTLU YOLU (gerçek Siber'e yazma + 15 alanlık rezervasyon karşılaştırması):
-  kod var, RET eden BR-002/003/004/005 kuralları artık doğrudan servis testleriyle kilitli
-  (`TransferSiberTests.cs`), ama KABUL eden yolun kendisi bu ortamda Siber kimlik eşlemesi eksik
-  olduğu için gerçekten ÇALIŞTIRILAMIYOR (bkz. TESLIM-RAPORU.md §8). Sefer oluşturma/güncellemenin
-  KENDİSİ de benzer şekilde boş lookup tablolarıyla bloke (bkz. TESLIM-RAPORU.md §8) — Sefer-Yük
-  BAĞLAMA (BR-006/007) bundan etkilenmiyor ve test edildi (`ExpeditionLoadMappingTests`). Fatura kalem
-  EŞLEME + durum geçişi de test edildi (`InvoiceTests`) — ama Uyumsoft'a bağlı KDV/yuvarlama hesaplama
-  mantığı (`PayableAmount`/`TaxAmount` vb.) hiç portlanmadı, dolayısıyla test edilecek bir şey yok —
-  kasıtlı kapsam dışı. `ValidateRequired`'daki kalan sekiz alan kontrolü (yalnızca ödeme şekli
-  örneklendi) ve BR-010 için ek test yazılmadı.
+- Teklif→Yük dönüşümünün MUTLU YOLU (gerçek Siber'e yazma + 18 alanlık rezervasyon karşılaştırması):
+  `SiberImportService` portlandıktan sonra CANLIDA ÇALIŞTIRILDI ve doğrulandı (bkz. TESLIM-RAPORU.md
+  §8) — ama bu spesifik uçtan-uca senaryo henüz bir xUnit testine dönüştürülmedi, yalnızca RET eden
+  BR-002/003/004/005 + genişletilen `ValidateRequired`/`MatchesReservation` kuralları doğrudan servis
+  testleriyle kilitli (`TransferSiberTests.cs`, 9 test). Sefer oluşturmanın KENDİSİ de aynı kökten
+  (`SiberImportService`) artık ÇALIŞIYOR ve canlıda doğrulandı — Sefer-Yük BAĞLAMA (BR-006/007) zaten
+  etkilenmiyordu, test edildi (`ExpeditionLoadMappingTests`). Fatura kalem EŞLEME + durum geçişi de
+  test edildi (`InvoiceTests`) — ama Uyumsoft'a bağlı KDV/yuvarlama hesaplama mantığı (`PayableAmount`/
+  `TaxAmount` vb.) hiç portlanmadı, dolayısıyla test edilecek bir şey yok — kasıtlı kapsam dışı.
+  `SiberImportService`'in kendisi (9 uç) için de otomatik test yazılmadı — yalnızca canlı/manuel
+  doğrulandı (sıfır hata, sıfır mükerrer, %100 `siber_id` kapsamı). BR-010 için ek test yazılmadı.
 - Profil güncelleme artık test edildi (BR-012 mevcut şifre kontrolü — `ProfileTests.cs`, ayrıca avatar
   yükleme/kaldırma round-trip'i). Belge türü/boyut doğrulama, destek formu anonim erişim kuralları —
   kod içinde uygulanmış durumda, otomatik testleri bu oturumda eklenmedi.

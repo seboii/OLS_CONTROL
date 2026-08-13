@@ -28,6 +28,22 @@ satır, `olstemel/docs`'taki 2336 satırlık kopyadan farklı) gerçekten `Login
 bırakılan olsold Reports modülünün portu DEĞİL, yalnızca bu 8 modülün zaten var olan verilerinden GERÇEK
 toplamlar hesaplayan yeni, hafif bir özet ekranı. Ayrıntı: SECILI-MODUL-PARITE-MATRISI.md §9.
 
+**Kritik yön değişikliği #3 (bu güncellemede — önceki "Siber kimlik eşleşmesi kısıtı" tersine döndü):**
+Kullanıcı "tamamen sahte Siber ile bütün sistemin eksiksiz çalıştığından emin olmamız lazım" dedi. Bu
+oturumda önceden "kalıcı, düzeltilemez bir kısıt" olarak belgelenen §8'deki iki madde ("Siber kimlik
+eşleşmesi kısıtı", "Sefer boş lookup tablolarıyla bloke") araştırılınca GERÇEKTEN kalıcı bir kısıt
+OLMADIĞI, olsold'un `TransferDataController`'ının (Siber referans/tanım verisini yerel tabloya aktaran
+ETL) bu porta hiç taşınmamış olmasından kaynaklandığı ortaya çıktı. `SiberImportService` bu boşluğu
+kapattı (bkz. §2) ve canlıda doğrulandı: (a) 9 aktarım ucu da (`POST /transfer_data` + 8 `getX`) sıfır
+hata/sıfır mükerrerle çalışıyor, tüm referans tablolarında `siber_id` %100 dolu; (b) gerçek bir Teklif
+uçtan uca (transfer_to_siber → load_transfer) Yük'e dönüştürüldü, hem PostgreSQL'de (`load_transfers`,
+paket, 2 fatura kalemi) hem mock Siber'de (`skn_yuk`/`skn_yukkoli`/`sfy_modulkalem`) doğrulandı; (c)
+Sefer oluşturma artık `POST /api/v1/expedition` ile gerçekten çalışıyor (`expedition_types`/
+`expedition_statuses` artık boş değil). Bu araştırma sırasında `ValidateRequired`/`MatchesReservation`
+kontrollerinin olsold'daki tam listenin yalnızca ~üçte birini içerdiği, `InsUser`'ın yanlış kullanıcıdan
+okunduğu ve birkaç lookup tablosunun (`RomorkType`/`LoadingType`) `Code` alanının hiç dolmadığı da
+bulunup düzeltildi — ayrıntı aşağıda "Teklif→Yük dönüşümü artık gerçekten çalışıyor" bölümünde.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 58 tablo, EF Core/Npgsql +
@@ -87,7 +103,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-70/70 otomatik test geçiyor (29 OLS.Business.Tests + 41 OLS.API.IntegrationTests). Kapsanan: auth
+71/71 otomatik test geçiyor (29 OLS.Business.Tests + 42 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
@@ -95,16 +111,16 @@ agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), 
 (çekirdek alanlar + paket upsert + paket silme) gerçek Postgres'e karşı doğru çalıştığı, Sefer-Yük
 bağlamanın (BR-006/007 romork tipi eşleşme kuralı dahil) doğru çalıştığı, Fatura kalem eşlemesinin
 (+ kalem durumunun alış/satışa göre doğru değiştiği) ve dipnot CRUD'unun doğru çalıştığı, Teklif→Yük
-dönüşüm zincirinin BR-002/003/004/005 kurallarının (doğrudan servis örneklemesi + sahte Siber
-depoları ile, bkz. §8) ve gerçek "Siber-503" davranışının doğru çalıştığı, Teklif dosya yükleme/
-kaldırmanın (gerçek disk + DB round-trip, bkz. §8) doğru çalıştığı, avatar yükleme/kaldırmanın ve
-BR-012'nin (mevcut şifre yanlışsa reddetme + şifrenin gerçekten değiştiği) doğru çalıştığı. Kapsanmayan
-(bilinçli, dürüstçe not edildi): dönüşümün MUTLU YOLU — gerçek Siber'e yazma + 15 alanlık rezervasyon
-karşılaştırması (bkz. §8 Siber kimlik eşleşmesi kısıtı, bu ortamda hâlâ kurulamıyor; yalnızca RET
-kuralları test edildi, kabul yolu değil), Sefer oluşturma/güncellemenin KENDİSİ (bkz. §8 — boş
-`expedition_types`/`expedition_statuses`), `ValidateRequired`'daki DİĞER sekiz alan kontrolü (yalnızca
-ödeme şekli örneklendi, aynı desen), BR-010, dosya yükleme doğrulama (belge türü/boyut kısıtları).
-Ayrıntı: TEST-RAPORU.md.
+dönüşüm zincirinin BR-002/003/004/005 kurallarının VE (bu güncellemede genişletilen) tam 21 alanlık
+`ValidateRequired` listesinin doğrudan servis örneklemesiyle (sahte Siber depoları ile) doğru çalıştığı,
+gerçek "Siber-503" davranışının doğru çalıştığı, Teklif dosya yükleme/kaldırmanın (gerçek disk + DB
+round-trip) doğru çalıştığı, avatar yükleme/kaldırmanın ve BR-012'nin (mevcut şifre yanlışsa reddetme +
+şifrenin gerçekten değiştiği) doğru çalıştığı. Dönüşümün MUTLU YOLU (gerçek Siber'e yazma + 18 alanlık
+rezervasyon karşılaştırması + gerçek Yük oluşumu) artık ÇALIŞIYOR ve CANLIDA doğrulandı (bkz. §8) ama
+bu spesifik uçtan-uca senaryo henüz OTOMATİK bir xUnit testine dönüştürülmedi — yalnızca ValidateRequired/
+MatchesReservation'ın RET yolları otomatik test altında. Kapsanmayan (bilinçli, dürüstçe not edildi):
+`SiberImportService`'in kendisi için otomatik test (yalnızca canlı/manuel doğrulandı — bkz. §8), BR-010,
+dosya yükleme doğrulama (belge türü/boyut kısıtları). Ayrıntı: TEST-RAPORU.md.
 
 ## 7. Görsel parite durumu (özet)
 
@@ -121,10 +137,17 @@ aynı olması BEKLENİYOR ama tek tek DOĞRULANMADI). Ayrıntı: GORSEL-PARITE-R
 Önceki oturumda her modülün yalnızca TEMEL alanları çalışıyordu. Bu oturumda Teklif ve Yük derinlik
 kazandı; Sefer ve Fatura henüz kazanmadı:
 
-- **Teklif** (`QuotesPage.tsx`) — TAMAMLANDI: 5 sekme (Genel Bilgiler/Taraflar/Güzergah/Mali Kalemler/
-  Dosyalar), tam oluşturma+düzenleme, çoklu içerik/mali-kalem satırı, `AccountPicker` ile gerçek cari
-  arama (gönderici/alıcı/acente/navlun-ödeyen), dosya ekleme/kaldırma. Backend DTO'suyla alan
-  kapsamı birebir. Otomatik test: `LoadTests.cs` (tam alan round-trip + Türkçe ondalık ayrıştırma).
+- **Teklif** (`QuotesPage.tsx`) — TAMAMLANDI: 6 sekme (Genel Bilgiler/Taraflar/Güzergah/Görevliler/
+  Mali Kalemler/Dosyalar — Görevliler bu güncellemede eklendi, bkz. §8), tam oluşturma+düzenleme, çoklu
+  içerik/mali-kalem satırı, `AccountPicker`/`UserPicker` ile gerçek cari/kullanıcı arama (gönderici/
+  alıcı/acente/navlun-ödeyen/operasyon-yetkilisi/satış-temsilcisi), "Çalışma Şekli" alanı, dosya
+  ekleme/kaldırma. Backend DTO'suyla alan kapsamı birebir. Otomatik test: `LoadTests.cs` (tam alan
+  round-trip + Türkçe ondalık ayrıştırma). DÜRÜST NOT — sekme YAPISI kaynaktan farklı: olsold'un gerçek
+  `OfferFormDrawer.vue`'sunda Taraflar/Güzergah ayrı sekme değil, Genel Bilgiler içinde; buradaki alan
+  kapsamı birebir ama gruplama farklı. Ayrıca olsold'da olup burada HÂLÂ eklenmeyen: "E-Posta Ayarları"
+  sekmesi (backend `EmailTo`/`EmailCc` alanlarını zaten destekliyor, frontend'den hiç gönderilmiyor),
+  "İlgili E-Posta" sekmesi (yalnızca teklif AI'dan/mail'den oluştuysa görünür, `saveAi` bu kapsamda
+  zaten YOK — bkz. §4 AI satırı).
 - **Yük** (`LoadsPage.tsx`) — KISMEN TAMAMLANDI: artık gerçek 2 sekmeli (Genel Bilgiler/Paketler)
   düzenleme formu var (önceden salt-okunurdu); Teklif→Yük dönüşüm tetikleyicisi (Teklifler ekranında
   `siber_id` dolu satırlarda görünen kamyon ikonu → `POST /api/v1/load_transfer`) eklendi. Liste
@@ -166,32 +189,61 @@ regresyon testi de eklendi.
 alanlarında karşılanıyor (Hareketler, PDF/Uyumsoft kasıtlı olarak dışarıda); Sefer için Bağlı Yükler
 tam karşılanıyor ama Genel Bilgiler kaydı ortam kısıtı yüzünden ÇALIŞTIRILAMIYOR (bkz. yukarıdaki not).
 
-### Siber kimlik eşleşmesi kısıtı (bu oturumda bulunan, doğrulanan gerçek kısıt)
+### Teklif→Yük dönüşümü artık gerçekten çalışıyor (önceki "Siber kimlik eşleşmesi kısıtı" ÇÖZÜLDÜ)
 
-Teklif→Yük dönüşümü (`POST /api/v1/transfer_to_siber` → `POST /api/v1/load_transfer`) canlıda uçtan
-uca DENENDİ ve şu anda BU ORTAMDA çalışmıyor: `payment_types.siber_id` (ve büyük olasılıkla diğer
-Siber-eşlemeli lookup sütunları) hiçbir satırda dolu değil, bu yüzden `TransferSiberService` her
-zaman "Ödeme şekli boş olamaz" hatasıyla reddediyor. Kaynağı doğrulandı — bu bir port hatası DEĞİL:
-olsold'un kendi `PaymentTypeSeeder.php` dosyası da `siber_id` alanını hiç yazmıyor (bkz. dosya), yani
-gerçek sistemde bu değerler seed'den değil, gerçek Siber entegrasyonunun canlı kullanımından zamanla
-birikiyor. Bu scoped/yerel ortamda öyle bir geçmiş yok. Sonuç: `ConvertOfferAsync` kod olarak mevcut
-ve mantığı doğru görünüyor, ama bu ortamda gerçek bir Teklif'i gerçekten Yük'e çeviren bir buton
-tıklaması DOĞRULANAMADI — yalnızca doğru validasyon hatası verdiği doğrulandı. Yük düzenleme uç
-noktası bu yüzden doğrudan EF Core ile seed edilen bir kayıtla test edildi (yukarıdaki `LoadTransferTests.cs`).
+**Önceki durum (artık YANLIŞ, tarihi kayıt olarak bırakıldı):** Bu bölüm önceden, `payment_types.siber_id`
+(ve diğer Siber-eşlemeli lookup sütunlarının) hiçbir satırda dolu olmadığını, bunun "gerçek Siber
+entegrasyonunun canlı kullanımından zamanla biriken" ve bu yüzden taze bir ortamda YAPISAL OLARAK
+telafi edilemeyen bir veri eksikliği olduğunu iddia ediyordu. Bu YANLIŞTI: gerçek kök neden, olsold'un
+`TransferDataController`'ının (Front\TransferData) — Siber'in KENDİ referans tablolarından
+(`skn_sabittanim`, `sky_kullanici`, ...) yerel tabloya `siber_id` dolduran ETL — bu porta hiç
+taşınmamış olmasıydı. Bu "canlı kullanım geçmişi" değil, tek seferlik bir kurulum adımı.
 
-### Sefer oluşturma/güncelleme de boş lookup tablolarıyla bloke — ama Bağlı Yükler DEĞİL
+**Şimdiki durum:** `SiberImportService` + `TransferDataController` (bkz. §2) bu ETL'i portladı. Canlı
+doğrulama, DOĞRUDAN bir Teklif üzerinde, gerçek buton tıklamalarıyla eşdeğer API çağrılarıyla yapıldı:
 
-Bu oturumda ayrıca bulundu: Sefer oluşturma (`POST /api/v1/expedition`) `expedition_types` tablosundan
-GERÇEKTEN bir satır bulmayı şart koşuyor (`ExpeditionWriteService.CreateAsync`), güncelleme ise aynı
-şekilde `expedition_statuses`'dan bir satır ister (`UpdateAsync`) — ikisi de bu ortamda BOŞ (0 satır).
-Kaynağı doğrulandı: olsold'da da bu iki tablo için hiçbir seeder yok (yalnızca migration var) — yani
-gerçek sistemde de bu değerler idari panelden elle girilmiş olurdu, taze bir kurulumda BOŞ olurdu.
-Canlıda denendi: `POST /api/v1/expedition` → 400 `"Sefer türü bulunamadı"`. Sonuç: bu ortamda YENİ bir
-Sefer oluşturmanın veya MEVCUT birinin Genel Bilgiler'ini kaydetmenin gerçek bir yolu yok — tıpkı
-Hareketler gibi, ama farklı bir tablo yüzünden. **Bağlı Yükler bundan ETKİLENMİYOR**: o akış
-(`ExpeditionLoadMappingService`) bu iki tabloya hiç dokunmuyor, yalnızca Sefer/Araç/Yük kayıtlarının
-VAR OLUP OLMADIĞINA ve romork tipi eşleşmesine bakıyor — bu yüzden canlıda uçtan uca (PostgreSQL +
-gerçek Siber-mock senkronu dahil) çalıştığı doğrulandı, otomatik testle de kilitlendi.
+1. `POST /api/v1/transfer_data` + 8 `getX` ucu sırayla çağrıldı → hepsi 200, sıfır hata, ikinci
+   çalıştırmada `created: 0` (idempotent, mükerrer kayıt YOK — 15 referans tablosu tek tek sayıldı).
+2. Bir Teklif'in TÜM zorunlu alanları dolduruldu (müşteri/gönderici/alıcı/departman/ülkeler/görevliler/
+   içerik/mali kalem/Çalışma Şekli), durum "Olumlu"ya çekildi.
+3. `POST /api/v1/transfer_to_siber` → **200**, gerçek bir `skn_rezervasyon` satırı mock Siber'e yazıldı.
+4. `POST /api/v1/load_transfer` → **200**, `"Yük başarıyla oluşturuldu"`. PostgreSQL'de doğrulandı:
+   `load_transfers` (doğru toplam ağırlık/hacimle), 1 paket, 2 fatura kalemi (alış+satış çifti) satırı
+   oluştu, Teklif'in `load_number`'ı doldu. Mock Siber'de doğrulandı: `skn_yuk`/`skn_yukkoli`/
+   `sfy_modulkalem` tablolarına karşılık gelen satırlar eklendi.
+
+**Bu araştırma sırasında bulunup düzeltilen yan hatalar** (`TransferSiberService.cs`/
+`LoadTransferWriteService.cs`): `ValidateRequired` olsold'daki ~21 kontrolden yalnızca ~8'ini
+içeriyordu (talimat/römork/iş türü/yükleme tipi/tarihler/gönderici/alıcı hiç doğrulanmıyordu — eksik
+alanlı bir teklif sessizce Siber'e aktarılabiliyordu); `MatchesReservation` 18 karşılaştırmadan
+yalnızca 9'unu yapıyordu; Siber'e yazılan `insuser`, işlemi yapan kullanıcı yerine yanlışlıkla
+görevli[0]'ın kodundan okunuyordu; "Çalışma şekli boş olamaz" kontrolü olsold'da hiç tetiklenmeyen
+(NOT NULL+default 0 sütun) ölü bir kontrolün birebir-olmayan bir çevirisiydi ve geçerli "Spot" (0)
+seçimini yanlışlıkla reddediyordu — hepsi düzeltildi, `TransferSiberTests.cs`'e 2 yeni regresyon testi
+eklendi (toplam 71/71 test geçiyor).
+
+**Frontend'de bulunan, aynı zincirin gerçek kullanılabilirliğini engelleyen ayrı bir eksik:** Teklif
+formunda ne "Çalışma Şekli" (Spot/Yıllık) alanı ne de "Görevliler" (Operasyon Yetkilisi/Satış
+Temsilcisi) sekmesi vardı — olsold'un gerçek `OfferFormDrawer.vue`'sunda ikisi de var, backend
+(`LoadWriteModel`/`LoadFormRequest`) ikisini de zaten destekliyordu. Sonuç: arayüzden oluşturulan HER
+teklif `way_of_working=0` ile ve HER İKİ görevli slotu da (formu açan) mevcut kullanıcıya sabitlenerek
+kaydediliyordu — kullanıcının Siber kodu yoksa (yerel seed admin gibi) o teklif arayüzden asla Yük'e
+dönüştürülemezdi. `UserPicker.tsx` (yeni, `AccountPicker`'ın User karşılığı) + `QuotesPage.tsx`'e
+"Görevliler" sekmesi ve "Çalışma Şekli" alanı eklendi; canlıda doğrulandı (dönüştürülmüş teklif
+açıldığında iki alan da doğru değerlerle geliyor).
+
+### Sefer oluşturma/güncelleme de aynı kökten bloke ediliyordu — artık ÇALIŞIYOR
+
+**Önceki durum (artık YANLIŞ):** Bu bölüm önceden Sefer oluşturmanın (`POST /api/v1/expedition`)
+`expedition_types`/`expedition_statuses` tablolarının BOŞ olması yüzünden bu ortamda YAPISAL OLARAK
+imkansız olduğunu, gerçek sistemde bu değerlerin "idari panelden elle girilmiş" olacağını iddia
+ediyordu. Bu da aynı kök nedene (portlanmamış `TransferDataController`) bağlıydı — bu iki tablo da
+Siber'in `skn_sabittanim` (SEFERTUR grubu) referansından geliyor, elle girilen veri değil.
+
+**Şimdiki durum:** `SiberImportService.ImportExpeditionTypesAsync`/`ImportExpeditionStatusesAsync` bu
+tabloları doldurdu (2 + 3 satır). Canlıda doğrulandı: `POST /api/v1/expedition` gerçek bir gövdeyle
+çağrıldı → **200**, gerçek bir Sefer kaydı oluştu (`id`, `expedition_id`, `sefer_id` dolu). Bağlı
+Yükler zaten bundan etkilenmiyordu (bkz. altındaki not) — artık Genel Bilgiler de etkilenmiyor.
 
 ### Bu oturumda bulunup düzeltilen hatalar
 
