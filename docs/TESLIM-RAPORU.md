@@ -148,24 +148,32 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   sekmesi (backend `EmailTo`/`EmailCc` alanlarını zaten destekliyor, frontend'den hiç gönderilmiyor),
   "İlgili E-Posta" sekmesi (yalnızca teklif AI'dan/mail'den oluştuysa görünür, `saveAi` bu kapsamda
   zaten YOK — bkz. §4 AI satırı).
-- **Yük** (`LoadsPage.tsx`) — KISMEN TAMAMLANDI: 3 sekmeli (Genel Bilgiler/Paketler/Görevliler —
-  Görevliler bu güncellemede eklendi) düzenleme formu var (önceden salt-okunurdu); Teklif→Yük dönüşüm
-  tetikleyicisi (Teklifler ekranında `siber_id` dolu satırlarda görünen kamyon ikonu →
-  `POST /api/v1/load_transfer`) eklendi. Liste sütunları da düzeltildi. Görevliler: olsold'un gerçek
-  `LoadFormDrawer.vue`'sunda var, Teklif'ten FARKLI olarak `load_charge_person` gibi bir ilişki tablosu
-  DEĞİL — `LoadTransfer` üzerinde doğrudan iki `int` alan (`customer_representative_name`/
-  `second_customer_representative_name` — adlandırma yanıltıcı, içerik kullanıcı kimliği). Dönüşüm
-  sırasında ikisi de hep işlemi yapan kullanıcıya sabitleniyordu, HİÇBİR güncelleme ucu bu alanlara
-  dokunmuyordu; `LoadTransferUpdateRequest`'e eklendi, canlıda doğrulandı. DÜRÜST NOT — olsold'un gerçek
-  formu 8 sekmeli (Genel Bilgiler/Yük İçeriği/Finans/Görevliler/İlgili E-Posta/Hareketler/Faturalar/
-  Dosya Arşivi); burada hâlâ EKSİK olanlar: **Finans** sekmesi (backend `LoadTransferUpdateRequest.
-  InvoiceItems` ile `load_transfer_invoice_item` upsert'i ZATEN DESTEKLİYOR — yalnızca frontend'den hiç
-  gönderilmiyor, en düşük efor/en yüksek değerli sıradaki iş), **Hareketler** sekmesi (önceden
+- **Yük** (`LoadsPage.tsx`) — KISMEN TAMAMLANDI: 4 sekmeli (Genel Bilgiler/Paketler/Finans/Görevliler —
+  son ikisi bu güncellemede eklendi) düzenleme formu var (önceden salt-okunurdu, sonra 2 sekmeliydi);
+  Teklif→Yük dönüşüm tetikleyicisi (Teklifler ekranında `siber_id` dolu satırlarda görünen kamyon ikonu
+  → `POST /api/v1/load_transfer`) eklendi. Liste sütunları da düzeltildi.
+  - **Görevliler**: olsold'un gerçek `LoadFormDrawer.vue`'sunda var, Teklif'ten FARKLI olarak
+    `load_charge_person` gibi bir ilişki tablosu DEĞİL — `LoadTransfer` üzerinde doğrudan iki `int`
+    alan (`customer_representative_name`/`second_customer_representative_name` — adlandırma yanıltıcı,
+    içerik kullanıcı kimliği). Dönüşüm sırasında ikisi de hep işlemi yapan kullanıcıya sabitleniyordu,
+    HİÇBİR güncelleme ucu bu alanlara dokunmuyordu; `LoadTransferUpdateRequest`'e eklendi.
+  - **Finans**: backend (`LoadTransferUpdateRequest.InvoiceItems` + `UpsertInvoiceItemsAsync`)
+    `load_transfer_invoice_item` upsert'ini ZATEN DESTEKLİYORDU, hiç frontend'den gönderilmiyordu.
+    olsold gibi Alış (`buysell="1"`)/Satış (`buysell="2"`) iki bölüme ayrılarak gösteriliyor; kalem
+    tipi/cari/para birimi/miktar/fiyat/açıklama düzenlenebiliyor, silme mevcut
+    `DELETE .../load_transfer_invoice_item` ucunu kullanıyor. Canlıda doğrulandı: dönüşümden gelen 2
+    kalem (Alış+Satış çifti) doğru render edildi, bir alan düzenlenip kaydedildi, GET ile kalıcılığı
+    ve diğer kaydın etkilenmediği teyit edildi.
+  - Her ikisi de canlıda doğrulandı (yazma → okuma round-trip, gerçek Docker API'ye karşı).
+
+  DÜRÜST NOT — olsold'un gerçek formu 8 sekmeli (Genel Bilgiler/Yük İçeriği/Finans/Görevliler/İlgili
+  E-Posta/Hareketler/Faturalar/Dosya Arşivi); burada hâlâ EKSİK olanlar: **Hareketler** sekmesi (önceden
   `expedition_statuses`/`load_status_types` boşluğu yüzünden bloke olarak belgeleniyordu — bu artık
   YANLIŞ, `SiberImportService` ile çözüldü, ama sekme hâlâ hiç yazılmadı), **Faturalar** sekmesi
   (`load_transfer_invoice_item`'i o Yük'ü kapsayan gerçek Fatura kayıtlarıyla çapraz gösteren salt-okunur
   liste — hiç incelenmedi), **Dosya Arşivi** (bu Yük modülünde hiç yok; Teklif'te var). Otomatik test:
-  `LoadTransferTests.cs` (güncelleme + paket ekleme/silme, doğrudan EF Core ile seed edilen bir kayıtla).
+  `LoadTransferTests.cs` (güncelleme + paket ekleme/silme, doğrudan EF Core ile seed edilen bir kayıtla)
+  — Görevliler/Finans için otomatik regresyon testi henüz yazılmadı, yalnızca canlı doğrulandı.
 - **Sefer** (`TripsPage.tsx`) — KISMEN TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
   Drawer'ı eklendi (önceden yalnızca "Yeni Sefer" oluşturma vardı, mevcut kaydı açmanın hiçbir yolu
   yoktu), 2 sekmeli (Genel Bilgiler/Bağlı Yükler). Bağlı Yükler sekmesi TAM ÇALIŞIYOR: sefere
