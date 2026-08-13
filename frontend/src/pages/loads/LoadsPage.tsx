@@ -37,6 +37,7 @@ interface PackageDetail {
   height: number | null;
   stackable: number | null;
   product_type_id: NamedRef | null;
+  case_type_id: NamedRef | null;
 }
 
 interface InvoiceItemDetail {
@@ -115,13 +116,13 @@ interface MovementDetail {
 }
 
 type PackageRow = {
-  id: number | null; product_type_id: string; quantity: string;
+  id: number | null; product_type_id: string; case_type_id: string; quantity: string;
   gross_weight: string; net_weight: string; volume: string; lademeter: string;
   width: string; height: string; length: string; stackable: string;
 };
 
 const EMPTY_PACKAGE_ROW: PackageRow = {
-  id: null, product_type_id: "", quantity: "1", gross_weight: "", net_weight: "",
+  id: null, product_type_id: "", case_type_id: "", quantity: "1", gross_weight: "", net_weight: "",
   volume: "", lademeter: "", width: "", height: "", length: "", stackable: "1",
 };
 
@@ -201,6 +202,7 @@ export function LoadsPage() {
   const { options: departments } = useLookupOptions("/api/v1/department");
   const { options: romorkTypes } = useLookupOptions("/api/v1/romork_type");
   const { options: productTypes } = useLookupOptions("/api/v1/product_type");
+  const { options: caseTypes } = useLookupOptions("/api/v1/case_type");
   // olsold: SelectAjax fetchParams={type: buysell} -- Alış/Satış'a göre farklı kalem listesi.
   const { options: financialItemsBuy } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_BUY_QUERY);
   const { options: financialItemsSell } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_SELL_QUERY);
@@ -286,6 +288,7 @@ export function LoadsPage() {
         d.load_transfer_package.map((p) => ({
           id: p.id,
           product_type_id: p.product_type_id ? String(p.product_type_id.id) : "",
+          case_type_id: p.case_type_id ? String(p.case_type_id.id) : "",
           quantity: p.quantity != null ? String(p.quantity) : "",
           gross_weight: p.gross_weight != null ? String(p.gross_weight) : "",
           net_weight: p.net_weight != null ? String(p.net_weight) : "",
@@ -461,6 +464,7 @@ export function LoadsPage() {
           .map((p) => ({
             id: p.id,
             product_type_id: int(p.product_type_id),
+            case_type_id: int(p.case_type_id),
             quantity: int(p.quantity),
             gross_weight: num(p.gross_weight),
             net_weight: num(p.net_weight),
@@ -636,6 +640,9 @@ export function LoadsPage() {
                         <div className="grid grid-cols-3 gap-3">
                           <FormField label="Ürün Tipi">
                             <SelectInput value={p.product_type_id} onChange={(v) => setPackages((list) => list.map((x, xi) => (xi === i ? { ...x, product_type_id: v } : x)))} options={opts(productTypes)} />
+                          </FormField>
+                          <FormField label="Kap Tipi">
+                            <SelectInput value={p.case_type_id} onChange={(v) => setPackages((list) => list.map((x, xi) => (xi === i ? { ...x, case_type_id: v } : x)))} options={opts(caseTypes)} />
                           </FormField>
                           <FormField label="Adet">
                             <TextInput value={p.quantity} onChange={(v) => setPackages((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />

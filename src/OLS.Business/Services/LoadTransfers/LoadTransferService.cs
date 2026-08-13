@@ -141,6 +141,7 @@ public sealed class LoadTransferPackageDto
     [JsonPropertyName("height")] public decimal? Height { get; init; }
     [JsonPropertyName("stackable")] public int? Stackable { get; init; }
     [JsonPropertyName("product_type_id")] public NamedRefDto? ProductTypeId { get; init; }
+    [JsonPropertyName("case_type_id")] public NamedRefDto? CaseTypeId { get; init; }
 }
 
 public sealed class LoadTransferInvoiceItemDto
@@ -358,19 +359,7 @@ public sealed class LoadTransferService : ILoadTransferService
 
             // Koli ve fatura kalemleri Siber kimliği üzerinden bağlanır
             // (load_transfers.load_transfer_id metin sütunu).
-            LoadTransferPackage = await _db.LoadTransferPackages.AsNoTracking()
-                .Where(p => p.LoadTransferId == t.LoadTransferId)
-                .Select(p => new LoadTransferPackageDto
-                {
-                    Id = p.Id, Yukkoliid = p.Yukkoliid, Quantity = p.Quantity,
-                    GrossWeight = p.GrossWeight, NetWeight = p.NetWeight, Volume = p.Volume,
-                    Lademeter = p.Lademeter, Width = p.Width, Length = p.Length,
-                    Height = p.Height, Stackable = p.Stackable,
-                    ProductTypeId = _db.ProductTypes.Where(x => x.Id == p.ProductTypeId)
-                        .Select(x => new NamedRefDto { Id = x.Id, Name = x.Name })
-                        .FirstOrDefault(),
-                })
-                .ToListAsync(cancellationToken),
+            LoadTransferPackage = await LoadTransferPackagesAsync(t.LoadTransferId, cancellationToken),
 
             LoadTransferInvoiceItem = await _db.LoadTransferInvoiceItems.AsNoTracking()
                 .Where(i => i.InsertName == t.LoadNumberWorkType)
@@ -400,6 +389,45 @@ public sealed class LoadTransferService : ILoadTransferService
                 .Where(a => a.Id == id)
                 .Select(a => new NamedRefDto { Id = a.Id, Name = a.Name })
                 .FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>
+    /// <c>LoadTransferPackage.CaseTypeId</c> (aksine <c>ProductTypeId</c>'ye)
+    /// <c>string?</c> — dönüşüm kodu <c>ToString()</c> ile yazıyor (bkz.
+    /// LoadTransferWriteService.WritePackagesAsync). EF Core string->int
+    /// karşılaştırmasını SQL'e çeviremediği için CaseType eşlemesi bellekte yapılır.
+    /// </summary>
+    private async Task<IReadOnlyList<LoadTransferPackageDto>> LoadTransferPackagesAsync(
+        string? loadTransferId, CancellationToken cancellationToken)
+    {
+        var packages = await _db.LoadTransferPackages.AsNoTracking()
+            .Where(p => p.LoadTransferId == loadTransferId)
+            .ToListAsync(cancellationToken);
+
+        var productTypeIds = packages.Where(p => p.ProductTypeId != null).Select(p => p.ProductTypeId!.Value).Distinct().ToList();
+        var productTypes = await _db.ProductTypes.AsNoTracking()
+            .Where(x => productTypeIds.Contains((int)x.Id))
+            .ToDictionaryAsync(x => (int)x.Id, x => new NamedRefDto { Id = x.Id, Name = x.Name }, cancellationToken);
+
+        var caseTypeIds = packages
+            .Select(p => int.TryParse(p.CaseTypeId, out var cid) ? cid : (int?)null)
+            .Where(cid => cid != null)
+            .Select(cid => cid!.Value)
+            .Distinct()
+            .ToList();
+        var caseTypes = await _db.CaseTypes.AsNoTracking()
+            .Where(x => caseTypeIds.Contains((int)x.Id))
+            .ToDictionaryAsync(x => (int)x.Id, x => new NamedRefDto { Id = x.Id, Name = x.Name }, cancellationToken);
+
+        return packages.Select(p => new LoadTransferPackageDto
+        {
+            Id = p.Id, Yukkoliid = p.Yukkoliid, Quantity = p.Quantity,
+            GrossWeight = p.GrossWeight, NetWeight = p.NetWeight, Volume = p.Volume,
+            Lademeter = p.Lademeter, Width = p.Width, Length = p.Length,
+            Height = p.Height, Stackable = p.Stackable,
+            ProductTypeId = p.ProductTypeId is { } pid && productTypes.TryGetValue(pid, out var pt) ? pt : null,
+            CaseTypeId = int.TryParse(p.CaseTypeId, out var cid) && caseTypes.TryGetValue(cid, out var ct) ? ct : null,
+        }).ToList();
+    }
 
     private async Task<MappedUserDto?> UserRefAsync(int? userId, CancellationToken cancellationToken) =>
         userId is null
