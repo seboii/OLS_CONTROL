@@ -87,17 +87,18 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-55/55 otomatik test geçiyor (29 OLS.Business.Tests + 26 OLS.API.IntegrationTests). Kapsanan: auth
+58/58 otomatik test geçiyor (29 OLS.Business.Tests + 29 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
 (taraflar/güzergah/mali kalem, Türkçe ondalık biçimiyle) round-trip ettiği, Yük güncelleme uç noktasının
 (çekirdek alanlar + paket upsert + paket silme) gerçek Postgres'e karşı doğru çalıştığı, Sefer-Yük
-bağlamanın (BR-006/007 romork tipi eşleşme kuralı dahil) doğru çalıştığı. Kapsanmayan (bilinçli,
-dürüstçe not edildi): Teklif→Yük dönüşümünün KENDİSİ (`transfer_to_siber`/`ConvertOffer` — bkz. §8
-Siber kimlik eşleşmesi kısıtı, test ortamında kurulamıyor), Sefer oluşturma/güncellemenin KENDİSİ (bkz.
-§8 — boş `expedition_types`/`expedition_statuses`), BR-010, Fatura kalem/yuvarlama, profil şifre
-değişikliği (BR-012), dosya yükleme doğrulama, Siber-503 davranışı. Ayrıntı: TEST-RAPORU.md.
+bağlamanın (BR-006/007 romork tipi eşleşme kuralı dahil) doğru çalıştığı, Fatura kalem eşlemesinin
+(+ kalem durumunun alış/satışa göre doğru değiştiği) ve dipnot CRUD'unun doğru çalıştığı. Kapsanmayan
+(bilinçli, dürüstçe not edildi): Teklif→Yük dönüşümünün KENDİSİ (`transfer_to_siber`/`ConvertOffer` —
+bkz. §8 Siber kimlik eşleşmesi kısıtı, test ortamında kurulamıyor), Sefer oluşturma/güncellemenin
+KENDİSİ (bkz. §8 — boş `expedition_types`/`expedition_statuses`), BR-010, profil şifre değişikliği
+(BR-012), dosya yükleme doğrulama, Siber-503 davranışı. Ayrıntı: TEST-RAPORU.md.
 
 ## 7. Görsel parite durumu (özet)
 
@@ -136,13 +137,28 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   alan olduğu bu oturumda bulundu). Otomatik test: `ExpeditionLoadMappingTests.cs` (bağlama+silme +
   BR-006/007 romork tipi eşleşmeme senaryosu). HÂLÂ EKSİK — bilinçli kapsam dışı: Hareketler sekmesi
   (aynı `expedition_statuses` boş-tablo kısıtı).
-- **Fatura** (`InvoicesPage.tsx`, 214 satır): tek düz form (Yön/Fatura Tipi/Müşteri/Fatura Türü/Tarihler/
-  Açıklama). EKSİK: kalem (line item) çoklu-satır girişi, footer notları, PDF önizleme, Uyumsoft
-  draft/send/cancel/approve UI'si (backend stub'ları planlandı ama frontend hiç çağırmıyor).
+- **Fatura** (`InvoicesPage.tsx`) — KISMEN TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
+  Drawer'ı eklendi, 3 sekmeli (Genel Bilgiler/Kalemler/Dipnotlar). Kalemler sekmesi bir "Fatura'nın
+  kendi satırları" DEĞİL — kaynağın gerçek veri modelini yansıtıyor: mevcut `load_transfer_invoice_item`
+  kayıtlarını arayıp faturaya EŞLEYEN bir seçici (`load_transfer_invoice_maps`), backend'in "her
+  güncellemede eşlemeleri baştan kur" davranışına uygun olarak yerelde biriktirilip Kaydet'te toplu
+  gönderiliyor. Dipnotlar sekmesi bağımsız, anında kaydedilen CRUD (kendi REST uçları var). Müşteri
+  alanı da `AccountPicker`'a yükseltildi (hem oluşturma hem düzenleme formunda). Canlıda uçtan uca
+  doğrulandı: gerçek bir kalem eklenip kaydedildi (DB'de `load_transfer_invoice_maps` satırı VE
+  kalemin durumu `invoice_issued`'a geçtiği doğrulandı — kaynağın alış/satış kuralı birebir), sonra
+  kaldırılıp tekrar boşaltıldığı doğrulandı; dipnot eklenip silindi. Otomatik test: `InvoiceTests.cs`
+  (3 test). HÂLÂ EKSİK — bilinçli kapsam dışı: PDF önizleme, Uyumsoft draft/send/cancel/approve UI'si
+  (backend'de zaten hiç portlanmadı — bkz. `InvoiceController.cs` üstündeki yorum).
 
-"Birebir" alan parite şartı Teklif için artık karşılanıyor; Yük için çekirdek+paket alanlarında
-karşılanıyor (Hareketler/Fatura Kalemleri kasıtlı olarak dışarıda); Sefer ve Fatura için HENÜZ
-karşılanmıyor.
+**Bu oturumda bulunan bir hata daha:** Fatura oluşturma formunda "Vade Tarihi" zorunlu
+İŞARETLENMEMİŞTİ ama backend boş bırakılırsa HER ZAMAN reddediyor (`InvoiceController.Validate` →
+`invoice_execution_date`). Canlıda denendi, doğrulandı, düzeltildi (hem oluşturma hem düzenleme
+formunda `*` eklendi) — `InvoiceTests.CreateInvoice_WithoutExecutionDate_ReturnsValidationError` ile
+regresyon testi de eklendi.
+
+"Birebir" alan parite şartı Teklif için tam karşılanıyor; Yük ve Fatura için çekirdek+ilişkili-kayıt
+alanlarında karşılanıyor (Hareketler, PDF/Uyumsoft kasıtlı olarak dışarıda); Sefer için Bağlı Yükler
+tam karşılanıyor ama Genel Bilgiler kaydı ortam kısıtı yüzünden ÇALIŞTIRILAMIYOR (bkz. yukarıdaki not).
 
 ### Siber kimlik eşleşmesi kısıtı (bu oturumda bulunan, doğrulanan gerçek kısıt)
 

@@ -8,9 +8,9 @@ Hiçbir sonuç varsayılmadı; her iddia altındaki komut çalıştırılıp ç�
 | Proje | Test sayısı | Sonuç | Komut |
 |---|---|---|---|
 | `OLS.Business.Tests` | 29 | ✅ 29/29 geçti | `dotnet test tests/OLS.Business.Tests` |
-| `OLS.API.IntegrationTests` | 26 | ✅ 26/26 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
+| `OLS.API.IntegrationTests` | 29 | ✅ 29/29 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
 | `OLS.DataAccess.Tests` | 0 | ⚪ test yok (bilinçli, bkz. "Neden DataAccess.Tests boş") | — |
-| **Toplam** | **55** | **✅ 55/55** | `dotnet test` (çözüm kökünde) |
+| **Toplam** | **58** | **✅ 58/58** | `dotnet test` (çözüm kökünde) |
 
 Ayrıca: `dotnet build` (tüm çözüm) — 0 hata, 2 pre-existing nullability uyarısı (bu oturumda dokunulmayan
 `TransferSiberService.cs`/`ExpeditionLoadMappingService.cs` dosyalarında, davranışı etkilemiyor).
@@ -65,7 +65,7 @@ hem `curl` hem tarayıcı ekran görüntüsüyle teyit edildi.
 
 ## 2. Otomatik test paketi
 
-### 2.1 `OLS.API.IntegrationTests` (26 test)
+### 2.1 `OLS.API.IntegrationTests` (29 test)
 
 Gerçek ASP.NET Core pipeline'ı üzerinden çalışır — `WebApplicationFactory<Program>` gerçek `Program.cs`'i
 (JWT auth, `[RequiresPermission]` filtreleri, CORS, rate limiting, EF Core migrasyonları, `DbSeeder`)
@@ -100,6 +100,9 @@ Postgres veritabanını paylaşır (izolasyon mekanizması ve bunu bulurken çı
 | | `DeletePackage_RemovesItFromSubsequentRead` | Ayrı paket-silme uç noktası, sonraki okumada kaydın gerçekten gittiğini doğruluyor |
 | `ExpeditionLoadMappingTests` | `SaveMapping_WithMatchingRomorkType_LinksLoadAndAppearsInDetail` | Sefere yük bağlama + silme gerçek Postgres'e karşı doğru çalışıyor; `total_expedition_values`'un zarfın KÖKÜNDE döndüğü doğrulanıyor |
 | | `SaveMapping_WithMismatchedRomorkType_ReturnsValidationError` | BR-006/007: araç ile yük romork tipi uyuşmazsa bağlama reddediliyor |
+| `InvoiceTests` | `CreateInvoice_WithoutExecutionDate_ReturnsValidationError` | Canlıda bulunan gerçek bir hatanın regresyonu: Vade Tarihi boş bırakılırsa 422 |
+| | `UpdateInvoice_WithItemMap_LinksItemAndFlipsItsStatus` | Kalem eşleme uç noktası + kaynağın alış/satışa göre kalem durumu değiştirme kuralı; eşlemeler baştan kurulduğu için boş liste gönderilince hepsi silindiği de doğrulanıyor |
+| | `Footer_CreateThenDelete_RoundTripsCorrectly` | Dipnot CRUD'u gerçek Postgres'e karşı doğru çalışıyor |
 
 **Neden `LoadTransferTests` bir Teklif'i gerçekten Yük'e çevirmiyor:** `LoadTransfer` kayıtları normalde
 YALNIZCA Siber'e aktarılmış bir teklifin dönüştürülmesiyle oluşur, bu da gerçek Siber-mock'a bağımlı bir
@@ -293,9 +296,10 @@ kayıtlarıyla doğrulandı (tüm istekler 200 OK).
   için gerçek bir dönüşüm uçtan uca ÇALIŞTIRILAMADI (bkz. TESLIM-RAPORU.md §8). Sefer oluşturma/
   güncellemenin KENDİSİ de benzer şekilde boş lookup tablolarıyla bloke (bkz. TESLIM-RAPORU.md §8) —
   Sefer-Yük BAĞLAMA (BR-006/007) bundan etkilenmiyor ve artık test edildi (`ExpeditionLoadMappingTests`).
-  BR-010, Fatura kalem/yuvarlama mantığı: bu modüllerin frontend alan derinliği henüz mockup ile
-  birebir değil (bkz. TESLIM-RAPORU.md kalan iş listesi) — arka uç iş kuralları için otomatik test bu
-  oturumda yazılmadı.
+  Fatura kalem EŞLEME + durum geçişi de artık test edildi (`InvoiceTests`) — ama Uyumsoft'a bağlı KDV/
+  yuvarlama hesaplama mantığı (`PayableAmount`/`TaxAmount` vb.) hiç portlanmadı (bkz. `InvoiceController.
+  cs` üstündeki yorum), dolayısıyla test edilecek bir şey yok — kasıtlı kapsam dışı. BR-010: arka uç iş
+  kuralı için otomatik test bu oturumda yazılmadı.
 - Profil güncelleme (BR-012 mevcut şifre kontrolü), dosya yükleme doğrulama, destek formu anonim erişim
   kuralları — kod içinde uygulanmış durumda, otomatik testleri bu oturumda eklenmedi.
 - Siber senkronizasyonuna dokunan uçların "yapılandırılmamışsa 503" davranışı — koda göre doğru
