@@ -44,6 +44,37 @@ kontrollerinin olsold'daki tam listenin yalnızca ~üçte birini içerdiği, `In
 okunduğu ve birkaç lookup tablosunun (`RomorkType`/`LoadingType`) `Code` alanının hiç dolmadığı da
 bulunup düzeltildi — ayrıntı aşağıda "Teklif→Yük dönüşümü artık gerçekten çalışıyor" bölümünde.
 
+**Kritik yön değişikliği #4 (bu güncellemede — sistematik alan denetimi, kullanıcı isteğiyle):**
+Kullanıcı "Teklif ve Yük modüllerinin tam denetimine devam et" dedi. olsold'un gerçek
+`OfferFormDrawer.vue`/`LoadFormDrawer.vue`'sü ve alt bileşenleri (`*FormContentItem.vue`,
+`*FormFinancialItem.vue`) SATIR SATIR taranıp her alan bu portun karşılığıyla tek tek karşılaştırıldı
+(önceki oturumlarda yalnızca SEKME/TAB düzeyinde, yani "sekme var mı" diye bakılmıştı — bu kez her
+sekmenin İÇİNDEKİ her alan). Sonuç, en ciddisi gerçek bir veri kaybı hatası olan 5 gerçek bulgu:
+
+1. **[EN CİDDİ] Yük düzenleme formu 9 alanı sessizce siliyordu.** `LoadTransferDetailDto`'da (okuma)
+   `romork_type_id`/`instruction_id`/`delivery_method_id`/`load_transfer_type_id`/`way_of_working`/
+   `front_transportation_by_us`/`final_transportation_by_us`/`departure_country_id`/`target_country_id`
+   HİÇ YOKTU — yazma tarafında (`LoadTransferUpdateRequest`) hepsi vardı. Formu AÇIP dokunmadan Kaydet'e
+   basmak bu 9 alanı boşaltıyordu. Bu TEORİK değildi: bu oturumda DAHA ÖNCE yapılan Görevliler/Finans/
+   Hareketler testleri sırasında canlı bir Yük kaydının bu alanlarını GERÇEKTEN sıfırlamıştı — DB'de
+   doğrulandı. Aynı desende bir alan daha bulundu: paketlerin `case_type_id`'si.
+2. Teklif'in Mali Kalemler sekmesinde Alış/Satış değerleri TERSTİ (`{Satış:"1",Alış:"0"}` — olması
+   gereken `{Alış:1,Satış:2}`, Yük'te doğruydu). Bu oturumda önceden oluşturulan test verileri dahil,
+   var olan her mali kalemin anlamı ters etiketleniyordu.
+3. HEM Teklif HEM Yük'te "Kalem" alanı yanlış tabloyu (`item_type`) kullanıyordu; backend id'yi
+   `financial_items` tablosunda arıyor. Bu ortamda iki tablonun id'leri TESADÜFEN örtüştüğü için hata
+   gizli kalmıştı.
+4. Acente/Navlun Ödeyen Firma/Mali Kalem Cari seçicileri hiç filtrelenmiyordu; kaynak `account_type_id`
+   ile filtreliyor (ör. Acente yalnızca tip 5). Backend ucu filtreyi destekliyordu, hiç kullanılmıyordu.
+5. Teklif formunda "Ön/Son Taşıma Tarafımızdan Yapılır" alanları hiç yoktu (backend destekliyordu),
+   Yük formunda 5 çalışan alan (Yük Tipi/Yük Türü/Talimat/Teslimat Şekli/Çalışma Şekli/ülkeler) hiç
+   yoktu.
+
+Backend'e ayrıca 23+ modülün paylaştığı `LookupService<TEntity>`'ye opsiyonel `type` filtresi eklendi
+(yalnızca `Type` sütunu olan entity'lerde devreye girer — bugün yalnızca `FinancialItem`). Tüm bulgular
+canlı Docker'a karşı yazma→okuma round-trip'le doğrulandı; hiçbiri için "muhtemelen çalışıyordur"
+denmedi. 71/71 test hâlâ geçiyor. Ayrıntı: §8.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 58 tablo, EF Core/Npgsql +
@@ -138,16 +169,19 @@ aynı olması BEKLENİYOR ama tek tek DOĞRULANMADI). Ayrıntı: GORSEL-PARITE-R
 kazandı; Sefer ve Fatura henüz kazanmadı:
 
 - **Teklif** (`QuotesPage.tsx`) — TAMAMLANDI: 6 sekme (Genel Bilgiler/Taraflar/Güzergah/Görevliler/
-  Mali Kalemler/Dosyalar — Görevliler bu güncellemede eklendi, bkz. §8), tam oluşturma+düzenleme, çoklu
-  içerik/mali-kalem satırı, `AccountPicker`/`UserPicker` ile gerçek cari/kullanıcı arama (gönderici/
-  alıcı/acente/navlun-ödeyen/operasyon-yetkilisi/satış-temsilcisi), "Çalışma Şekli" alanı, dosya
-  ekleme/kaldırma. Backend DTO'suyla alan kapsamı birebir. Otomatik test: `LoadTests.cs` (tam alan
-  round-trip + Türkçe ondalık ayrıştırma). DÜRÜST NOT — sekme YAPISI kaynaktan farklı: olsold'un gerçek
-  `OfferFormDrawer.vue`'sunda Taraflar/Güzergah ayrı sekme değil, Genel Bilgiler içinde; buradaki alan
-  kapsamı birebir ama gruplama farklı. Ayrıca olsold'da olup burada HÂLÂ eklenmeyen: "E-Posta Ayarları"
-  sekmesi (backend `EmailTo`/`EmailCc` alanlarını zaten destekliyor, frontend'den hiç gönderilmiyor),
-  "İlgili E-Posta" sekmesi (yalnızca teklif AI'dan/mail'den oluştuysa görünür, `saveAi` bu kapsamda
-  zaten YOK — bkz. §4 AI satırı).
+  Mali Kalemler/Dosyalar), tam oluşturma+düzenleme, çoklu içerik/mali-kalem satırı, `AccountPicker`/
+  `UserPicker` ile gerçek cari/kullanıcı arama (gönderici/alıcı/acente/navlun-ödeyen/operasyon-yetkilisi/
+  satış-temsilcisi), "Çalışma Şekli" + "Ön/Son Taşıma Tarafımızdan Yapılır" alanları (ikisi de bu
+  güncellemede eklendi — kaynakta var, backend zaten destekliyordu, frontend'de hiç yoktu), dosya
+  ekleme/kaldırma. Otomatik test: `LoadTests.cs` (tam alan round-trip + Türkçe ondalık ayrıştırma).
+  Bu güncellemede AYRICA düzeltildi (bkz. §1 Kritik yön değişikliği #4): Mali Kalemler'deki Alış/Satış
+  değerlerinin TERS olması, "Kalem" alanının yanlış tabloyu (`item_type` yerine `financial_item`)
+  kullanması, Acente/Navlun Ödeyen Firma/Mali Kalem Cari seçicilerinin `account_type_id`'ye göre hiç
+  filtrelenmemesi. DÜRÜST NOT — sekme YAPISI kaynaktan farklı: olsold'un gerçek `OfferFormDrawer.vue`'sunda
+  Taraflar/Güzergah ayrı sekme değil, Genel Bilgiler içinde; buradaki alan kapsamı birebir ama gruplama
+  farklı. Ayrıca olsold'da olup burada HÂLÂ eklenmeyen: "E-Posta Ayarları" sekmesi (backend `EmailTo`/
+  `EmailCc` alanlarını zaten destekliyor, frontend'den hiç gönderilmiyor), "İlgili E-Posta" sekmesi
+  (yalnızca teklif AI'dan/mail'den oluştuysa görünür, `saveAi` bu kapsamda zaten YOK — bkz. §4 AI satırı).
 - **Yük** (`LoadsPage.tsx`) — TAMAMLANDI: 7 sekmeli (Genel Bilgiler/Paketler/Finans/Görevliler/
   Hareketler/Faturalar/Dosya Arşivi — son 5'i bu güncellemede eklendi, önceden yalnızca ilk 2 vardı ve
   form salt-okunurdu) düzenleme formu; Teklif→Yük dönüşüm tetikleyicisi (Teklifler ekranında `siber_id`
@@ -177,6 +211,17 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
     yüklenen dosyanın HEM Yük HEM orijinal Teklif görünümünde aynı kayıt olduğu teyit edildi). Otomatik
     test: `LoadTransferTests.cs` (güncelleme + paket ekleme/silme) — bu 5 yeni sekme için ayrı otomatik
     regresyon testi henüz yazılmadı, yalnızca canlı doğrulandı.
+  - **[EN CİDDİ BULGU, sonraki güncellemede]** `LoadTransferDetailDto` (okuma) `romork_type_id`/
+    `instruction_id`/`delivery_method_id`/`load_transfer_type_id`/`way_of_working`/`front_transportation_
+    by_us`/`final_transportation_by_us`/`departure_country_id`/`target_country_id`/paketlerin
+    `case_type_id`'si HİÇ YOKTU — yazma tarafı zaten destekliyordu. Formu AÇIP dokunmadan Kaydet'e basmak
+    bu alanları SESSİZCE boşaltıyordu; bu oturumda DAHA ÖNCE yapılan Görevliler/Finans/Hareketler
+    testleri sırasında canlı bir kaydın bu alanlarını GERÇEKTEN sıfırladığı DB'de doğrulandı. Genel
+    Bilgiler'e ayrıca kaynakta çalışan ama arayüzde hiç olmayan 5 alan eklendi: Yük Tipi, Yük Türü,
+    Talimat, Teslimat Şekli (`/api/v1/load_transfer_deliver_method`), Çalışma Şekli, Kalkış/Varış
+    Ülkesi. `work_type` bilinçli olarak eklenmedi — kaynağın KENDİ update metodunda yorum satırıyla
+    devre dışı (dönüşümde sabitleniyor, kaynak da göstermesine rağmen kaydetmiyor). Tüm 10 alan
+    ac+dokunmadan+kaydet ile korundugu canlı teyit edildi (bkz. §1 Kritik yön değişikliği #4).
 - **Sefer** (`TripsPage.tsx`) — KISMEN TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
   Drawer'ı eklendi (önceden yalnızca "Yeni Sefer" oluşturma vardı, mevcut kaydı açmanın hiçbir yolu
   yoktu), 2 sekmeli (Genel Bilgiler/Bağlı Yükler). Bağlı Yükler sekmesi TAM ÇALIŞIYOR: sefere
