@@ -9,6 +9,7 @@ import { DataTable, EmptyState, Pagination, type Column } from "@/components/ui/
 import { Drawer } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
+import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 
 interface NamedRef {
   id: number;
@@ -65,6 +66,8 @@ interface LoadTransferDetail extends LoadTransferItem {
   date_of_receipt_customer: string | null;
   load_transfer_package: PackageDetail[];
   load_transfer_invoice_item: InvoiceItemDetail[];
+  customer_representative: UserOption | null;
+  second_customer_representative: UserOption | null;
 }
 
 type PackageRow = {
@@ -79,7 +82,7 @@ const EMPTY_PACKAGE_ROW: PackageRow = {
 };
 
 const PER_PAGE = 8;
-const TABS = ["Genel Bilgiler", "Paketler"];
+const TABS = ["Genel Bilgiler", "Paketler", "Görevliler"];
 
 export function LoadsPage() {
   const { can } = useAuth();
@@ -109,6 +112,8 @@ export function LoadsPage() {
   const [customer, setCustomer] = useState<AccountOption | null>(null);
   const [sender, setSender] = useState<AccountOption | null>(null);
   const [receiver, setReceiver] = useState<AccountOption | null>(null);
+  const [customerRep, setCustomerRep] = useState<UserOption | null>(null);
+  const [secondCustomerRep, setSecondCustomerRep] = useState<UserOption | null>(null);
   const [packages, setPackages] = useState<PackageRow[]>([]);
   const [removedPackageIds, setRemovedPackageIds] = useState<number[]>([]);
 
@@ -165,6 +170,8 @@ export function LoadsPage() {
       setCustomer(d.customer_id);
       setSender(d.sender_id);
       setReceiver(d.receiver_id);
+      setCustomerRep(d.customer_representative);
+      setSecondCustomerRep(d.second_customer_representative);
       setPackages(
         d.load_transfer_package.map((p) => ({
           id: p.id,
@@ -222,6 +229,8 @@ export function LoadsPage() {
         customer_id: customer?.id ?? null,
         sender_id: sender?.id ?? null,
         receiver_id: receiver?.id ?? null,
+        customer_representative_user_id: customerRep?.id ?? null,
+        second_customer_representative_user_id: secondCustomerRep?.id ?? null,
         total_gross_weight: num(form.total_gross_weight),
         total_volume: num(form.total_volume),
         total_lademeter: num(form.total_lademeter),
@@ -391,6 +400,13 @@ export function LoadsPage() {
                       </div>
                     ))
                   )}
+                </div>
+              )}
+
+              {tab === "Görevliler" && (
+                <div className="space-y-6">
+                  <UserPicker label="Operasyon Yetkilisi" value={customerRep} onChange={setCustomerRep} />
+                  <UserPicker label="Satış Temsilcisi" value={secondCustomerRep} onChange={setSecondCustomerRep} />
                 </div>
               )}
             </div>

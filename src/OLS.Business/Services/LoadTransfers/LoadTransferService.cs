@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Accounts;
 using OLS.Business.Services.Loads;
 using OLS.DataAccess.Context;
 
@@ -80,6 +81,14 @@ public sealed class LoadTransferDetailDto
     [JsonPropertyName("load_type_id")] public NamedRefDto? LoadTypeId { get; init; }
     [JsonPropertyName("payment_type_id")] public NamedRefDto? PaymentTypeId { get; init; }
     [JsonPropertyName("department_id")] public NamedRefDto? DepartmentId { get; init; }
+
+    /// <summary>
+    /// DİKKAT: sütun adı <c>customer_representative_name</c> ama içeriği bir
+    /// KULLANICI KİMLİĞİ (int) — olsold'da da aynı yanıltıcı adlandırma var.
+    /// olsold: <c>LoadFormDrawer.vue</c> "Görevliler" sekmesi.
+    /// </summary>
+    [JsonPropertyName("customer_representative")] public MappedUserDto? CustomerRepresentative { get; init; }
+    [JsonPropertyName("second_customer_representative")] public MappedUserDto? SecondCustomerRepresentative { get; init; }
 
     [JsonPropertyName("load_transfer_package")]
     public IReadOnlyList<LoadTransferPackageDto> LoadTransferPackage { get; init; } = [];
@@ -229,6 +238,9 @@ public sealed class LoadTransferService : ILoadTransferService
                 .Select(d => new NamedRefDto { Id = d.Id, Name = d.Name })
                 .FirstOrDefaultAsync(cancellationToken),
 
+            CustomerRepresentative = await UserRefAsync(t.CustomerRepresentativeName, cancellationToken),
+            SecondCustomerRepresentative = await UserRefAsync(t.SecondCustomerRepresentativeName, cancellationToken),
+
             // Koli ve fatura kalemleri Siber kimliği üzerinden bağlanır
             // (load_transfers.load_transfer_id metin sütunu).
             LoadTransferPackage = await _db.LoadTransferPackages.AsNoTracking()
@@ -272,5 +284,17 @@ public sealed class LoadTransferService : ILoadTransferService
             : await _db.Accounts.AsNoTracking()
                 .Where(a => a.Id == id)
                 .Select(a => new NamedRefDto { Id = a.Id, Name = a.Name })
+                .FirstOrDefaultAsync(cancellationToken);
+
+    private async Task<MappedUserDto?> UserRefAsync(int? userId, CancellationToken cancellationToken) =>
+        userId is null
+            ? null
+            : await _db.Users.AsNoTracking()
+                .Where(u => u.Id == userId)
+                .Select(u => new MappedUserDto
+                {
+                    Id = u.Id, Name = u.Name ?? string.Empty, Surname = u.Surname ?? string.Empty,
+                    Email = u.Email ?? string.Empty, Avatar = u.Avatar, SiberCode = u.SiberCode,
+                })
                 .FirstOrDefaultAsync(cancellationToken);
 }

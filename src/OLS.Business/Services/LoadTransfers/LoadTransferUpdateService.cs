@@ -50,6 +50,15 @@ public sealed class LoadTransferUpdateRequest
     public int? DepartmentId { get; set; }
     public int? LoadTransferTypeId { get; set; }
     public int? DeliveryMethodId { get; set; }
+
+    /// <summary>
+    /// olsold "Görevliler" sekmesi: Operasyon Yetkilisi / Satış Temsilcisi.
+    /// Sütun adı yanıltıcı (<c>customer_representative_name</c>) ama içeriği
+    /// bir kullanıcı kimliğidir — dönüşüm sırasında hep işlemi yapan
+    /// kullanıcıya sabitleniyordu, bu uçla artık düzenlenebilir.
+    /// </summary>
+    public int? CustomerRepresentativeUserId { get; set; }
+    public int? SecondCustomerRepresentativeUserId { get; set; }
     public string? DepartureCountryId { get; set; }
     public string? TargetCountryId { get; set; }
     public int? WayOfWorking { get; set; }
@@ -176,6 +185,8 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         transfer.TotalCap = request.TotalQuantity;
         transfer.LoadTransferTypeId = request.LoadTransferTypeId;
         transfer.DeliveryMethodId = request.DeliveryMethodId;
+        transfer.CustomerRepresentativeName = request.CustomerRepresentativeUserId;
+        transfer.SecondCustomerRepresentativeName = request.SecondCustomerRepresentativeUserId;
         transfer.DepartureCountryId = request.DepartureCountryId;
         transfer.TargetCountryId = request.TargetCountryId;
         transfer.WayOfWorking = request.WayOfWorking;
