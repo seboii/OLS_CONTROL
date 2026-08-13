@@ -83,6 +83,23 @@ public sealed class LoadTransferDetailDto
     [JsonPropertyName("department_id")] public NamedRefDto? DepartmentId { get; init; }
 
     /// <summary>
+    /// DÜRÜST NOT: bu 8 alan (romork_type_id .. final_transportation_by_us)
+    /// önceden bu DTO'da HİÇ YOKTU — `LoadTransferUpdateRequest`'te (yazma)
+    /// zaten karşılığı olmasına rağmen okuma tarafı boştu. Sonucu: formu
+    /// AÇIP dokunmadan Kaydet'e basmak bu alanları SESSİZCE boşaltıyordu
+    /// (frontend `undefined`'ı boş gönderiyordu). Bu güncellemede eklendi.
+    /// </summary>
+    [JsonPropertyName("romork_type_id")] public NamedRefDto? RomorkTypeId { get; init; }
+    [JsonPropertyName("instruction_id")] public NamedRefDto? InstructionId { get; init; }
+    [JsonPropertyName("delivery_method_id")] public NamedRefDto? DeliveryMethodId { get; init; }
+    [JsonPropertyName("load_transfer_type_id")] public NamedRefDto? LoadTransferTypeId { get; init; }
+    [JsonPropertyName("way_of_working")] public int? WayOfWorking { get; init; }
+    [JsonPropertyName("front_transportation_by_us")] public int? FrontTransportationByUs { get; init; }
+    [JsonPropertyName("final_transportation_by_us")] public int? FinalTransportationByUs { get; init; }
+    [JsonPropertyName("departure_country_id")] public CountryDto? DepartureCountryId { get; init; }
+    [JsonPropertyName("target_country_id")] public CountryDto? TargetCountryId { get; init; }
+
+    /// <summary>
     /// DİKKAT: sütun adı <c>customer_representative_name</c> ama içeriği bir
     /// KULLANICI KİMLİĞİ (int) — olsold'da da aynı yanıltıcı adlandırma var.
     /// olsold: <c>LoadFormDrawer.vue</c> "Görevliler" sekmesi.
@@ -278,6 +295,33 @@ public sealed class LoadTransferService : ILoadTransferService
                 .Select(d => new NamedRefDto { Id = d.Id, Name = d.Name })
                 .FirstOrDefaultAsync(cancellationToken),
 
+            RomorkTypeId = await _db.RomorkTypes.AsNoTracking()
+                .Where(r => r.Id == t.RomorkTypeId)
+                .Select(r => new NamedRefDto { Id = r.Id, Name = r.Name, Code = r.Code })
+                .FirstOrDefaultAsync(cancellationToken),
+
+            InstructionId = await _db.Instructions.AsNoTracking()
+                .Where(i => i.Id == t.InstructionId)
+                .Select(i => new NamedRefDto { Id = i.Id, Name = i.Name, Code = i.Code })
+                .FirstOrDefaultAsync(cancellationToken),
+
+            DeliveryMethodId = await _db.LoadTransferDeliveryMethods.AsNoTracking()
+                .Where(m => m.Id == t.DeliveryMethodId)
+                .Select(m => new NamedRefDto { Id = m.Id, Name = m.Name })
+                .FirstOrDefaultAsync(cancellationToken),
+
+            LoadTransferTypeId = await _db.LoadTransferTypes.AsNoTracking()
+                .Where(l => l.Id == t.LoadTransferTypeId)
+                .Select(l => new NamedRefDto { Id = l.Id, Name = l.Name, Code = l.Code })
+                .FirstOrDefaultAsync(cancellationToken),
+
+            WayOfWorking = t.WayOfWorking,
+            FrontTransportationByUs = t.FrontTransportationByUs,
+            FinalTransportationByUs = t.FinalTransportationByUs,
+
+            DepartureCountryId = await CountryRefAsync(t.DepartureCountryId, cancellationToken),
+            TargetCountryId = await CountryRefAsync(t.TargetCountryId, cancellationToken),
+
             CustomerRepresentative = await UserRefAsync(t.CustomerRepresentativeName, cancellationToken),
             SecondCustomerRepresentative = await UserRefAsync(t.SecondCustomerRepresentativeName, cancellationToken),
 
@@ -368,4 +412,20 @@ public sealed class LoadTransferService : ILoadTransferService
                     Email = u.Email ?? string.Empty, Avatar = u.Avatar, SiberCode = u.SiberCode,
                 })
                 .FirstOrDefaultAsync(cancellationToken);
+
+    /// <summary>
+    /// <c>LoadTransfer.DepartureCountryId</c>/<c>TargetCountryId</c> Load'un
+    /// aksine <c>string?</c> (dönüşüm sırasında Guid'in <c>.ToString()</c>'u
+    /// yazılıyor — bkz. LoadTransferWriteService.ConvertOfferAsync).
+    /// </summary>
+    private async Task<CountryDto?> CountryRefAsync(string? countryId, CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(countryId, out var id))
+            return null;
+
+        return await _db.Countries.AsNoTracking()
+            .Where(c => c.Id == id)
+            .Select(c => new CountryDto { Id = c.Id, Name = c.Name })
+            .FirstOrDefaultAsync(cancellationToken);
+    }
 }

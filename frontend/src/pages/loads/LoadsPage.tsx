@@ -75,6 +75,15 @@ interface LoadTransferDetail extends LoadTransferItem {
   load_id: number | null;
   load_file: LoadFileDetail[];
   invoices: InvoiceSummaryDetail[];
+  load_type_id: NamedRef | null;
+  instruction_id: NamedRef | null;
+  delivery_method_id: NamedRef | null;
+  load_transfer_type_id: NamedRef | null;
+  way_of_working: number | null;
+  front_transportation_by_us: number | null;
+  final_transportation_by_us: number | null;
+  departure_country_id: { id: string; name: string | null } | null;
+  target_country_id: { id: string; name: string | null } | null;
 }
 
 interface LoadFileDetail {
@@ -127,6 +136,14 @@ const EMPTY_INVOICE_ITEM_ROW: InvoiceItemRow = {
 };
 
 const EMPTY_MOVEMENT_FORM = { destination_id: "", expedition_status_id: "", description: "", address: "" };
+const WAY_OF_WORKING_OPTIONS = [
+  { value: "0", label: "Spot" },
+  { value: "1", label: "Yıllık" },
+];
+const YES_NO_OPTIONS = [
+  { value: "1", label: "Evet" },
+  { value: "0", label: "Hayır" },
+];
 const FINANCIAL_ITEM_BUY_QUERY = { type: "1" };
 const FINANCIAL_ITEM_SELL_QUERY = { type: "2" };
 
@@ -157,10 +174,14 @@ export function LoadsPage() {
     load_status_id: "", payment_type_id: "", department_id: "", romork_type_id: "",
     total_gross_weight: "", total_volume: "", total_lademeter: "",
     instruction_arrival_date: "", request_arrival_date: "", readiness_date: "", date_of_receipt_customer: "",
+    load_type_id: "", instruction_id: "", delivery_method_id: "", load_transfer_type_id: "",
+    way_of_working: "0", front_transportation_by_us: "0", final_transportation_by_us: "0",
   });
   const [customer, setCustomer] = useState<AccountOption | null>(null);
   const [sender, setSender] = useState<AccountOption | null>(null);
   const [receiver, setReceiver] = useState<AccountOption | null>(null);
+  const [departureCountry, setDepartureCountry] = useState("");
+  const [targetCountry, setTargetCountry] = useState("");
   const [customerRep, setCustomerRep] = useState<UserOption | null>(null);
   const [secondCustomerRep, setSecondCustomerRep] = useState<UserOption | null>(null);
   const [packages, setPackages] = useState<PackageRow[]>([]);
@@ -186,6 +207,11 @@ export function LoadsPage() {
   const { options: currencies } = useLookupOptions("/api/v1/currency");
   const { options: destinations } = useLookupOptions("/api/v1/destination");
   const { options: expeditionStatuses } = useLookupOptions("/api/v1/expedition_status");
+  const { options: loadingTypes } = useLookupOptions("/api/v1/loading_type");
+  const { options: instructions } = useLookupOptions("/api/v1/instruction");
+  const { options: deliveryMethods } = useLookupOptions("/api/v1/load_transfer_deliver_method");
+  const { options: loadTransferTypes } = useLookupOptions("/api/v1/load_transfer_type");
+  const { options: countries } = useLookupOptions("/api/v1/country");
 
   function opts(list: { id: string | number; name: string }[]) {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
@@ -240,12 +266,21 @@ export function LoadsPage() {
         request_arrival_date: d.request_arrival_date ?? "",
         readiness_date: d.readiness_date ?? "",
         date_of_receipt_customer: d.date_of_receipt_customer ?? "",
+        load_type_id: d.load_type_id ? String(d.load_type_id.id) : "",
+        instruction_id: d.instruction_id ? String(d.instruction_id.id) : "",
+        delivery_method_id: d.delivery_method_id ? String(d.delivery_method_id.id) : "",
+        load_transfer_type_id: d.load_transfer_type_id ? String(d.load_transfer_type_id.id) : "",
+        way_of_working: d.way_of_working != null ? String(d.way_of_working) : "0",
+        front_transportation_by_us: d.front_transportation_by_us != null ? String(d.front_transportation_by_us) : "0",
+        final_transportation_by_us: d.final_transportation_by_us != null ? String(d.final_transportation_by_us) : "0",
       });
       setCustomer(d.customer_id);
       setSender(d.sender_id);
       setReceiver(d.receiver_id);
       setCustomerRep(d.customer_representative);
       setSecondCustomerRep(d.second_customer_representative);
+      setDepartureCountry(d.departure_country_id?.id ?? "");
+      setTargetCountry(d.target_country_id?.id ?? "");
       setExistingFiles(d.load_file);
       setPackages(
         d.load_transfer_package.map((p) => ({
@@ -405,6 +440,15 @@ export function LoadsPage() {
         receiver_id: receiver?.id ?? null,
         customer_representative_user_id: customerRep?.id ?? null,
         second_customer_representative_user_id: secondCustomerRep?.id ?? null,
+        load_type_id: int(form.load_type_id),
+        instruction_id: int(form.instruction_id),
+        delivery_method_id: int(form.delivery_method_id),
+        load_transfer_type_id: int(form.load_transfer_type_id),
+        way_of_working: int(form.way_of_working),
+        front_transportation_by_us: int(form.front_transportation_by_us),
+        final_transportation_by_us: int(form.final_transportation_by_us),
+        departure_country_id: departureCountry || null,
+        target_country_id: targetCountry || null,
         total_gross_weight: num(form.total_gross_weight),
         total_volume: num(form.total_volume),
         total_lademeter: num(form.total_lademeter),
@@ -518,6 +562,33 @@ export function LoadsPage() {
                     </FormField>
                     <FormField label="Römork Tipi">
                       <SelectInput value={form.romork_type_id} onChange={(v) => setForm((f) => ({ ...f, romork_type_id: v }))} options={opts(romorkTypes)} />
+                    </FormField>
+                    <FormField label="Yük Tipi">
+                      <SelectInput value={form.load_type_id} onChange={(v) => setForm((f) => ({ ...f, load_type_id: v }))} options={opts(loadingTypes)} />
+                    </FormField>
+                    <FormField label="Yük Türü">
+                      <SelectInput value={form.load_transfer_type_id} onChange={(v) => setForm((f) => ({ ...f, load_transfer_type_id: v }))} options={opts(loadTransferTypes)} />
+                    </FormField>
+                    <FormField label="Talimat">
+                      <SelectInput value={form.instruction_id} onChange={(v) => setForm((f) => ({ ...f, instruction_id: v }))} options={opts(instructions)} />
+                    </FormField>
+                    <FormField label="Teslimat Şekli">
+                      <SelectInput value={form.delivery_method_id} onChange={(v) => setForm((f) => ({ ...f, delivery_method_id: v }))} options={opts(deliveryMethods)} />
+                    </FormField>
+                    <FormField label="Çalışma Şekli">
+                      <SelectInput value={form.way_of_working} onChange={(v) => setForm((f) => ({ ...f, way_of_working: v }))} options={WAY_OF_WORKING_OPTIONS} />
+                    </FormField>
+                    <FormField label="Ön Taşıma Tarafımızdan Yapılır">
+                      <SelectInput value={form.front_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, front_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
+                    </FormField>
+                    <FormField label="Son Taşıma Tarafımızdan Yapılır">
+                      <SelectInput value={form.final_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, final_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
+                    </FormField>
+                    <FormField label="Kalkış Ülkesi">
+                      <SelectInput value={departureCountry} onChange={setDepartureCountry} options={opts(countries)} />
+                    </FormField>
+                    <FormField label="Varış Ülkesi">
+                      <SelectInput value={targetCountry} onChange={setTargetCountry} options={opts(countries)} />
                     </FormField>
                     <FormField label="Brüt Ağırlık (kg)">
                       <TextInput value={form.total_gross_weight} onChange={(v) => setForm((f) => ({ ...f, total_gross_weight: v }))} />
