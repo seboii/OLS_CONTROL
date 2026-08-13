@@ -8,9 +8,9 @@ Hiçbir sonuç varsayılmadı; her iddia altındaki komut çalıştırılıp ç�
 | Proje | Test sayısı | Sonuç | Komut |
 |---|---|---|---|
 | `OLS.Business.Tests` | 29 | ✅ 29/29 geçti | `dotnet test tests/OLS.Business.Tests` |
-| `OLS.API.IntegrationTests` | 20 | ✅ 20/20 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
+| `OLS.API.IntegrationTests` | 24 | ✅ 24/24 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
 | `OLS.DataAccess.Tests` | 0 | ⚪ test yok (bilinçli, bkz. "Neden DataAccess.Tests boş") | — |
-| **Toplam** | **49** | **✅ 49/49** | `dotnet test` (çözüm kökünde) |
+| **Toplam** | **53** | **✅ 53/53** | `dotnet test` (çözüm kökünde) |
 
 Ayrıca: `dotnet build` (tüm çözüm) — 0 hata, 2 pre-existing nullability uyarısı (bu oturumda dokunulmayan
 `TransferSiberService.cs`/`ExpeditionLoadMappingService.cs` dosyalarında, davranışı etkilemiyor).
@@ -65,7 +65,7 @@ hem `curl` hem tarayıcı ekran görüntüsüyle teyit edildi.
 
 ## 2. Otomatik test paketi
 
-### 2.1 `OLS.API.IntegrationTests` (20 test)
+### 2.1 `OLS.API.IntegrationTests` (24 test)
 
 Gerçek ASP.NET Core pipeline'ı üzerinden çalışır — `WebApplicationFactory<Program>` gerçek `Program.cs`'i
 (JWT auth, `[RequiresPermission]` filtreleri, CORS, rate limiting, EF Core migrasyonları, `DbSeeder`)
@@ -94,6 +94,19 @@ Postgres veritabanını paylaşır (izolasyon mekanizması ve bunu bulurken çı
 | `DashboardTests` | `GetDashboard_WithoutToken_Returns401` | Jetonsuz erişim engelleniyor |
 | | `GetDashboard_AsAuthenticatedUser_ReturnsRealAggregatesNotFakeData` | Zarf şekli + boş diziler sahte satırla doldurulmuyor |
 | | `GetDashboard_ActiveCustomers_MatchesRealAccountCount` | Panel sayısı, gerçek `/api/v1/account` toplamıyla birebir eşleşiyor (uydurma değil) |
+| `LoadTests` | `CreateLoad_WithPartiesRouteAndFinancialItems_RoundTripsCorrectly` | Teklif'in TAM alan kapsamı (taraflar+güzergah+çoklu mali kalem) gerçekten kaydedilip geri okunuyor; Türkçe ondalık (`"250,5"`, `"1.250,75"`) doğru ayrıştırılıyor |
+| | `CreateLoad_WithoutRequiredFields_ReturnsValidationErrors_NotServerError` | Eksik zorunlu alan → 400 + `errors` sözlüğü, 500 değil |
+| `LoadTransferTests` | `UpdateLoadTransfer_WithCoreFieldsAndPackages_RoundTripsCorrectly` | Yük güncelleme uç noktası (çekirdek alanlar + paket ekleme) gerçek Postgres'e karşı doğru çalışıyor |
+| | `DeletePackage_RemovesItFromSubsequentRead` | Ayrı paket-silme uç noktası, sonraki okumada kaydın gerçekten gittiğini doğruluyor |
+
+**Neden `LoadTransferTests` bir Teklif'i gerçekten Yük'e çevirmiyor:** `LoadTransfer` kayıtları normalde
+YALNIZCA Siber'e aktarılmış bir teklifin dönüştürülmesiyle oluşur, bu da gerçek Siber-mock'a bağımlı bir
+zincir. Test bunun yerine `OlsDbContext` üzerinden doğrudan minimal bir `LoadTransfer` satırı ekliyor
+(şema incelemesiyle doğrulandı: `id` dışında NOT NULL kısıtı yok) ve gerçek `Update`/paket-silme uç
+noktalarını buna karşı çalıştırıyor — amaç dönüşümün kendisini değil, güncelleme sözleşmesini kilitlemek.
+Dönüşümün kendisi bu oturumda tarayıcıda canlı denendi ve BU ORTAMDA çalışmadığı doğrulandı (bkz.
+TESLIM-RAPORU.md §8 "Siber kimlik eşleşmesi kısıtı") — `payment_types.siber_id` hiçbir satırda dolu
+değil, olsold'un kendi seeder'ı da bu alanı hiç yazmıyor.
 
 **Kapsam dışı bırakılanlar (bilinçli):** Siber (legacy MSSQL) senkronizasyonuna dokunan akışlar
 (`transfer_to_siber`, araç/cari Siber senkronu) — test ortamında `ConnectionStrings:Siber` bilinçli
@@ -264,9 +277,12 @@ kayıtlarıyla doğrulandı (tüm istekler 200 OK).
 
 ## 6. Kapsam dışı / henüz test edilmeyenler (dürüst liste)
 
-- Teklif→Yük dönüşümü (BR-002/003/004/005), Sefer-Yük bağlama (BR-006/007/010), Fatura kalem/yuvarlama
-  mantığı: bu modüllerin frontend alan derinliği henüz mockup ile birebir değil (bkz. TESLIM-RAPORU.md
-  kalan iş listesi) — arka uç iş kuralları için otomatik test bu oturumda yazılmadı.
+- Teklif→Yük dönüşümünün KENDİSİ (BR-002/003/004/005 — `transfer_to_siber`/`ConvertOffer`): kod var,
+  canlıda doğru validasyon hatası verdiği doğrulandı, ama bu ortamda Siber kimlik eşlemesi eksik olduğu
+  için gerçek bir dönüşüm uçtan uca ÇALIŞTIRILAMADI (bkz. TESLIM-RAPORU.md §8). Sefer-Yük bağlama
+  (BR-006/007/010), Fatura kalem/yuvarlama mantığı: bu modüllerin frontend alan derinliği henüz mockup
+  ile birebir değil (bkz. TESLIM-RAPORU.md kalan iş listesi) — arka uç iş kuralları için otomatik test
+  bu oturumda yazılmadı.
 - Profil güncelleme (BR-012 mevcut şifre kontrolü), dosya yükleme doğrulama, destek formu anonim erişim
   kuralları — kod içinde uygulanmış durumda, otomatik testleri bu oturumda eklenmedi.
 - Siber senkronizasyonuna dokunan uçların "yapılandırılmamışsa 503" davranışı — koda göre doğru

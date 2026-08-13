@@ -57,9 +57,9 @@ npm run dev   # http://localhost:5173, /api ve /storage backend'e (5197) proxy'l
 ## Testler
 
 ```bash
-dotnet test                                          # tüm çözüm (49 test)
+dotnet test                                          # tüm çözüm (53 test)
 dotnet test tests/OLS.Business.Tests                 # 29 birim testi, veritabanı gerekmez
-dotnet test tests/OLS.API.IntegrationTests            # 20 entegrasyon testi, gerçek Postgres gerekir (localhost:5443)
+dotnet test tests/OLS.API.IntegrationTests            # 24 entegrasyon testi, gerçek Postgres gerekir (localhost:5443)
 ```
 
 Entegrasyon testleri `docker compose`'daki Postgres'e karşı, HER ÇALIŞTIRMADA rastgele adlı izole bir

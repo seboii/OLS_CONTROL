@@ -87,11 +87,16 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-49/49 otomatik test geçiyor. Kapsanan: auth (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları,
-bilinmeyen slug davranışı), iki kritik regresyon (rol zarfı, super_admin), para ayrıştırma, şifre
-hash'leme, sayfalama sözleşmesi. Kapsanmayan (bilinçli, dürüstçe not edildi): Teklif→Yük dönüşüm iş
-kuralları (BR-002/003/004/005), Sefer-Yük bağlama (BR-006/007/010), Fatura kalem/yuvarlama, profil
-şifre değişikliği (BR-012), dosya yükleme doğrulama, Siber-503 davranışı. Ayrıntı: TEST-RAPORU.md.
+53/53 otomatik test geçiyor (29 OLS.Business.Tests + 24 OLS.API.IntegrationTests). Kapsanan: auth
+(giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
+regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
+agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
+(taraflar/güzergah/mali kalem, Türkçe ondalık biçimiyle) round-trip ettiği, Yük güncelleme uç noktasının
+(çekirdek alanlar + paket upsert + paket silme) gerçek Postgres'e karşı doğru çalıştığı. Kapsanmayan
+(bilinçli, dürüstçe not edildi): Teklif→Yük dönüşümünün KENDİSİ (`transfer_to_siber`/`ConvertOffer` —
+bkz. §8 Siber kimlik eşleşmesi kısıtı, test ortamında kurulamıyor), Sefer-Yük bağlama (BR-006/007/010),
+Fatura kalem/yuvarlama, profil şifre değişikliği (BR-012), dosya yükleme doğrulama, Siber-503 davranışı.
+Ayrıntı: TEST-RAPORU.md.
 
 ## 7. Görsel parite durumu (özet)
 
@@ -103,26 +108,53 @@ aynı olması BEKLENİYOR ama tek tek DOĞRULANMADI). Ayrıntı: GORSEL-PARITE-R
 
 ## 8. Bilinen kısıtlar / eksik iş (somut, dürüst liste)
 
-### Alan derinliği (en büyük eksik)
+### Alan derinliği (en büyük eksik — kısmen kapatıldı)
 
-Şu an her modülün TEMEL alanları çalışıyor ama backend DTO'larının sunduğu tam zenginlik frontend'de
-yok — kod satırı sayımıyla doğrulandı (bu oturumda):
+Önceki oturumda her modülün yalnızca TEMEL alanları çalışıyordu. Bu oturumda Teklif ve Yük derinlik
+kazandı; Sefer ve Fatura henüz kazanmadı:
 
-- **Teklif** (`QuotesPage.tsx`, 307 satır): tek düz form (Müşteri/İş Tipi/Yükleme Tipi/Ödeme Tipi/Durum/
-  Departman/Tarihler + TEK ürün satırı + Açıklama). EKSİK: Taraflar (gönderici/alıcı/acente) sekmesi,
-  Güzergah sekmesi, ÇOKLU mali kalem satırı girişi, Dosyalar sekmesi, "AI'dan teklif" özelliği.
-- **Yük** (`LoadsPage.tsx`, 138 satır): yalnızca liste + salt-okunur detay Drawer'ı. EKSİK: doğrudan
-  oluşturma/düzenleme UI'si (backend'de zaten yalnızca Teklif'ten dönüşümle oluşuyor — bu kısıtlama
-  DOĞRU, ama dönüşüm AKIŞININ KENDİSİ frontend'de yok), Hareketler sekmesi, paket/fatura-kalemi yönetimi.
+- **Teklif** (`QuotesPage.tsx`) — TAMAMLANDI: 5 sekme (Genel Bilgiler/Taraflar/Güzergah/Mali Kalemler/
+  Dosyalar), tam oluşturma+düzenleme, çoklu içerik/mali-kalem satırı, `AccountPicker` ile gerçek cari
+  arama (gönderici/alıcı/acente/navlun-ödeyen), dosya ekleme/kaldırma. Backend DTO'suyla alan
+  kapsamı birebir. Otomatik test: `LoadTests.cs` (tam alan round-trip + Türkçe ondalık ayrıştırma).
+- **Yük** (`LoadsPage.tsx`) — KISMEN TAMAMLANDI: artık gerçek 2 sekmeli (Genel Bilgiler/Paketler)
+  düzenleme formu var (önceden salt-okunurdu); Teklif→Yük dönüşüm tetikleyicisi (Teklifler ekranında
+  `siber_id` dolu satırlarda görünen kamyon ikonu → `POST /api/v1/load_transfer`) eklendi. Liste
+  sütunları da düzeltildi (bkz. altındaki "bu oturumda bulunup düzeltilen" notu). HÂLÂ EKSİK — bilinçli
+  kapsam dışı bırakıldı: Hareketler sekmesi (`expedition_statuses`/`load_status_types` tabloları boş —
+  bkz. §8 "Boş lookup tabloları"), Fatura Kalemleri (`load_transfer_invoice_item`) sekmesi. Otomatik
+  test: `LoadTransferTests.cs` (güncelleme + paket ekleme/silme, doğrudan EF Core ile seed edilen bir
+  kayıtla — bkz. aşağıdaki Siber kısıtı).
 - **Sefer** (`TripsPage.tsx`, 218 satır): tek düz form (Araç/İş Tipi/Departman/Sefer Tipi/4 tarih alanı).
   EKSİK: Bağlı Yükler (expedition_load_mapping) sekmesi, Hareketler sekmesi, araç uygunluk kontrolü UI'si.
 - **Fatura** (`InvoicesPage.tsx`, 214 satır): tek düz form (Yön/Fatura Tipi/Müşteri/Fatura Türü/Tarihler/
   Açıklama). EKSİK: kalem (line item) çoklu-satır girişi, footer notları, PDF önizleme, Uyumsoft
   draft/send/cancel/approve UI'si (backend stub'ları planlandı ama frontend hiç çağırmıyor).
 
-Bu, zamanlanmış bir tasarım kararıydı: 8 modülün TÜMÜNÜ minimum işlevsel hale getirmek (genişlik),
-sonra derinliği artırmak — ama derinlik artırma adımı bu oturumda tamamlanamadı. "Birebir" alan
-parite şartı bu 4 modül için HENÜZ karşılanmıyor.
+"Birebir" alan parite şartı Teklif için artık karşılanıyor; Yük için çekirdek+paket alanlarında
+karşılanıyor (Hareketler/Fatura Kalemleri kasıtlı olarak dışarıda); Sefer ve Fatura için HENÜZ
+karşılanmıyor.
+
+### Siber kimlik eşleşmesi kısıtı (bu oturumda bulunan, doğrulanan gerçek kısıt)
+
+Teklif→Yük dönüşümü (`POST /api/v1/transfer_to_siber` → `POST /api/v1/load_transfer`) canlıda uçtan
+uca DENENDİ ve şu anda BU ORTAMDA çalışmıyor: `payment_types.siber_id` (ve büyük olasılıkla diğer
+Siber-eşlemeli lookup sütunları) hiçbir satırda dolu değil, bu yüzden `TransferSiberService` her
+zaman "Ödeme şekli boş olamaz" hatasıyla reddediyor. Kaynağı doğrulandı — bu bir port hatası DEĞİL:
+olsold'un kendi `PaymentTypeSeeder.php` dosyası da `siber_id` alanını hiç yazmıyor (bkz. dosya), yani
+gerçek sistemde bu değerler seed'den değil, gerçek Siber entegrasyonunun canlı kullanımından zamanla
+birikiyor. Bu scoped/yerel ortamda öyle bir geçmiş yok. Sonuç: `ConvertOfferAsync` kod olarak mevcut
+ve mantığı doğru görünüyor, ama bu ortamda gerçek bir Teklif'i gerçekten Yük'e çeviren bir buton
+tıklaması DOĞRULANAMADI — yalnızca doğru validasyon hatası verdiği doğrulandı. Yük düzenleme uç
+noktası bu yüzden doğrudan EF Core ile seed edilen bir kayıtla test edildi (yukarıdaki `LoadTransferTests.cs`).
+
+### Bu oturumda bulunup düzeltilen bir hata
+
+Yük listesi (`LoadsPage.tsx`) "Ağırlık"/"Hacim" sütunları gösteriyordu ama backend'in liste uç noktası
+(`LoadTransferListItemDto`) bu alanları HİÇ döndürmüyor (yalnızca detay uç noktası döndürüyor) — sütunlar
+her zaman "—" gösteriyordu. olsold'un gerçek `LoadTable.vue` bileşeni kontrol edildi: kaynak liste zaten
+yalnızca Yük Numarası/Müşteri/Gönderici/Durum gösteriyor, ağırlık/hacim hiç yok. Sütunlar bu dört alanı
+gösterecek şekilde düzeltildi (`sender_id` artık `LoadTransferItem` tipinde) — birebir kaynağa uyuyor.
 
 ### Diğer eksikler
 

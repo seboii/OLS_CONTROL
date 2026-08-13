@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FileText, Package, Plus, Trash2, Upload, File as FileIcon, X } from "lucide-react";
+import { FileText, Package, Plus, Trash2, Truck, Upload, File as FileIcon, X } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
@@ -24,6 +24,7 @@ interface LoadItem {
   work_type_id: NamedRef | null;
   customer_id: AccountOption | null;
   load_content_count: number;
+  siber_id: string | null;
 }
 
 interface LoadContentDetail {
@@ -421,6 +422,21 @@ export function QuotesPage() {
     }
   }
 
+  /**
+   * Onaylanmış (Siber'e aktarılmış) bir teklifi yüke dönüştürür.
+   * LoadTransferController.ConvertOffer, teklifin SİBER kimliğini (siber_id) —
+   * ID DEĞİL — bekliyor; bu yüzden buton yalnızca siber_id doluyken etkin.
+   */
+  async function handleConvertToLoad(siberId: string) {
+    try {
+      const res = await api.post<{ data: { yuk_no: string }; message: string }>("/api/v1/load_transfer", { id: siberId });
+      addToast(`Yük oluşturuldu: ${res.data.yuk_no}`);
+    } catch (err) {
+      if (err instanceof ApiError) addToast(err.message, "error");
+      else addToast(err instanceof Error ? err.message : "Yüke dönüştürülemedi", "error");
+    }
+  }
+
   const columns: Column<LoadItem>[] = [
     { key: "id", header: "Teklif No", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">{r.reservation_number ?? `T${r.id}`}</span> },
     { key: "customer", header: "Müşteri", sortable: true, render: (r) => <span className="font-semibold">{r.customer_id?.name ?? "—"}</span> },
@@ -458,6 +474,15 @@ export function QuotesPage() {
                     >
                       <Package size={14} />
                     </button>
+                    {r.siber_id && canCreate && (
+                      <button
+                        title="Yüke Dönüştür"
+                        onClick={(e) => { e.stopPropagation(); handleConvertToLoad(r.siber_id!); }}
+                        className="p-1.5 rounded text-gray-400 hover:bg-emerald-50 hover:text-emerald-600 transition-colors"
+                      >
+                        <Truck size={14} />
+                      </button>
+                    )}
                     <RowActions
                       onView={() => openEdit(r.id)}
                       onEdit={canUpdate ? () => openEdit(r.id) : undefined}
