@@ -141,6 +141,14 @@ const YES_NO_OPTIONS = [
   { value: "1", label: "Evet" },
   { value: "0", label: "Hayır" },
 ];
+// olsold: buysell_types (Alış=1, Satış=2) -- Yük modülüyle aynı kod, Teklif'te ayrıca
+// tanımlıydı ve YANLIŞLIKLA ters (0/1) kullanılıyordu, birebir düzeltildi.
+const BUYSELL_OPTIONS = [
+  { value: "1", label: "Alış" },
+  { value: "2", label: "Satış" },
+];
+const FINANCIAL_ITEM_BUY_QUERY = { type: "1" };
+const FINANCIAL_ITEM_SELL_QUERY = { type: "2" };
 
 export function QuotesPage() {
   const { can } = useAuth();
@@ -198,7 +206,9 @@ export function QuotesPage() {
   const { options: loadTransferTypes } = useLookupOptions("/api/v1/load_transfer_type");
   const { options: productTypes } = useLookupOptions("/api/v1/product_type");
   const { options: caseTypes } = useLookupOptions("/api/v1/case_type");
-  const { options: itemTypes } = useLookupOptions("/api/v1/item_type");
+  // olsold: SelectAjax fetchParams={type: buysell} -- Alış/Satış'a göre farklı kalem listesi.
+  const { options: financialItemsBuy } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_BUY_QUERY);
+  const { options: financialItemsSell } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_SELL_QUERY);
   const { options: transportTypes } = useLookupOptions("/api/v1/transport_type");
   const { options: currencies } = useLookupOptions("/api/v1/currency");
   const { options: countries } = useLookupOptions("/api/v1/country");
@@ -761,21 +771,30 @@ export function QuotesPage() {
                         <Trash2 size={13} />
                       </button>
                       <div className="grid grid-cols-3 gap-3 mb-3">
-                        <FormField label="Kalem Tipi">
-                          <SelectInput value={item.item} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, item: v } : x)))} options={opts(itemTypes)} />
+                        <FormField label="Kalem">
+                          <SelectInput
+                            value={item.item}
+                            onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, item: v } : x)))}
+                            options={opts(item.buysell === "1" ? financialItemsBuy : financialItemsSell)}
+                          />
                         </FormField>
                         <FormField label="Taşıma Tipi">
                           <SelectInput value={item.transport_type_id} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, transport_type_id: v } : x)))} options={opts(transportTypes)} />
                         </FormField>
                         <FormField label="Alış/Satış">
-                          <SelectInput value={item.buysell} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, buysell: v } : x)))} options={[{ value: "1", label: "Satış" }, { value: "0", label: "Alış" }]} />
+                          <SelectInput
+                            value={item.buysell}
+                            onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, buysell: v, item: "", account: null } : x)))}
+                            options={BUYSELL_OPTIONS}
+                          />
                         </FormField>
                       </div>
                       <div className="mb-3">
                         <AccountPicker
-                          label="Cari"
+                          label={item.buysell === "1" ? "Tedarikçiler" : "Müşteriler"}
                           value={item.account}
                           onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, account: v } : x)))}
+                          accountType={item.buysell === "1" ? 2 : 1}
                         />
                       </div>
                       <div className="grid grid-cols-4 gap-3">

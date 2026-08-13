@@ -40,6 +40,7 @@ public abstract class LookupControllerBase<TEntity> : ApiControllerBase where TE
     public async Task<IActionResult> All(
         [FromQuery] string? search,
         [FromQuery(Name = "per_page")] int? perPage,
+        [FromQuery] int? type,
         [FromQuery] int page = 1,
         CancellationToken cancellationToken = default)
     {
@@ -47,7 +48,7 @@ public abstract class LookupControllerBase<TEntity> : ApiControllerBase where TE
             return Forbidden();
 
         var result = await _service.AllAsync(
-            search, perPage, page, CurrentPath, OrderAscending, cancellationToken);
+            search, perPage, page, CurrentPath, OrderAscending, type, cancellationToken);
 
         return Ok(result, "Kayıtlar");
     }

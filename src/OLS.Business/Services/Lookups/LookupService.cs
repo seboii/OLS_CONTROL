@@ -22,7 +22,7 @@ public interface ILookupService<TEntity> where TEntity : class
 {
     Task<object> AllAsync(
         string? search, int? perPage, int page, string path, bool ascending,
-        CancellationToken cancellationToken = default);
+        int? type = null, CancellationToken cancellationToken = default);
 
     Task<TEntity?> SingleAsync(long id, CancellationToken cancellationToken = default);
 
@@ -48,7 +48,7 @@ public sealed class LookupService<TEntity> : ILookupService<TEntity> where TEnti
 
     public async Task<object> AllAsync(
         string? search, int? perPage, int page, string path, bool ascending,
-        CancellationToken cancellationToken = default)
+        int? type = null, CancellationToken cancellationToken = default)
     {
         var query = _db.Set<TEntity>().AsNoTracking();
 
@@ -58,6 +58,14 @@ public sealed class LookupService<TEntity> : ILookupService<TEntity> where TEnti
             var pattern = $"%{search}%";
             query = query.Where(e =>
                 EF.Functions.ILike(EF.Property<string>(e, LookupMap<TEntity>.NameProperty!), pattern));
+        }
+
+        // Yalnızca Type sütunu OLAN entity'lerde uygulanır (bugün yalnızca
+        // FinancialItem) — olsold: SelectAjax fetchParams={type: buysell},
+        // Alış/Satış'a göre farklı kalem listesi göstermek için.
+        if (type is not null && LookupMap<TEntity>.HasType)
+        {
+            query = query.Where(e => EF.Property<int?>(e, LookupMap<TEntity>.TypeProperty!) == type);
         }
 
         // Sıralama kaynak kodda modülden modüle değişiyor (çoğu id desc, bazıları asc).
@@ -131,6 +139,9 @@ internal static class LookupMap<TEntity> where TEntity : class
     public static string? NameProperty { get; }
     public static bool HasName => NameProperty is not null;
 
+    public static string? TypeProperty { get; }
+    public static bool HasType => TypeProperty is not null;
+
     private static readonly PropertyInfo? CreatedAt;
     private static readonly PropertyInfo? UpdatedAt;
 
@@ -142,6 +153,7 @@ internal static class LookupMap<TEntity> where TEntity : class
             .ToList();
 
         NameProperty = properties.Any(p => p.Name == "Name") ? "Name" : null;
+        TypeProperty = properties.Any(p => p.Name == "Type") ? "Type" : null;
         CreatedAt = properties.FirstOrDefault(p => p.Name == "CreatedAt");
         UpdatedAt = properties.FirstOrDefault(p => p.Name == "UpdatedAt");
 

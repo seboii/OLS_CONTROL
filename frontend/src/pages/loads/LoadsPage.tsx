@@ -127,6 +127,8 @@ const EMPTY_INVOICE_ITEM_ROW: InvoiceItemRow = {
 };
 
 const EMPTY_MOVEMENT_FORM = { destination_id: "", expedition_status_id: "", description: "", address: "" };
+const FINANCIAL_ITEM_BUY_QUERY = { type: "1" };
+const FINANCIAL_ITEM_SELL_QUERY = { type: "2" };
 
 const PER_PAGE = 8;
 const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler", "Faturalar", "Dosya Arşivi"];
@@ -178,7 +180,9 @@ export function LoadsPage() {
   const { options: departments } = useLookupOptions("/api/v1/department");
   const { options: romorkTypes } = useLookupOptions("/api/v1/romork_type");
   const { options: productTypes } = useLookupOptions("/api/v1/product_type");
-  const { options: itemTypes } = useLookupOptions("/api/v1/item_type");
+  // olsold: SelectAjax fetchParams={type: buysell} -- Alış/Satış'a göre farklı kalem listesi.
+  const { options: financialItemsBuy } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_BUY_QUERY);
+  const { options: financialItemsSell } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_SELL_QUERY);
   const { options: currencies } = useLookupOptions("/api/v1/currency");
   const { options: destinations } = useLookupOptions("/api/v1/destination");
   const { options: expeditionStatuses } = useLookupOptions("/api/v1/expedition_status");
@@ -610,21 +614,30 @@ export function LoadsPage() {
                                 <Trash2 size={13} />
                               </button>
                               <div className="grid grid-cols-3 gap-3 mb-3">
-                                <FormField label="Kalem Tipi">
-                                  <SelectInput value={item.item_id} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, item_id: v } : x)))} options={opts(itemTypes)} />
+                                <FormField label="Kalem">
+                                  <SelectInput
+                                    value={item.item_id}
+                                    onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, item_id: v } : x)))}
+                                    options={opts(item.buysell === "1" ? financialItemsBuy : financialItemsSell)}
+                                  />
                                 </FormField>
                                 <FormField label="Para Birimi">
                                   <SelectInput value={item.currency_code} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, currency_code: v } : x)))} options={opts(currencies)} />
                                 </FormField>
                                 <FormField label="Alış/Satış">
-                                  <SelectInput value={item.buysell} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, buysell: v } : x)))} options={[{ value: "1", label: "Alış" }, { value: "2", label: "Satış" }]} />
+                                  <SelectInput
+                                    value={item.buysell}
+                                    onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, buysell: v, item_id: "", account: null } : x)))}
+                                    options={[{ value: "1", label: "Alış" }, { value: "2", label: "Satış" }]}
+                                  />
                                 </FormField>
                               </div>
                               <div className="mb-3">
                                 <AccountPicker
-                                  label="Cari"
+                                  label={item.buysell === "1" ? "Tedarikçiler" : "Müşteriler"}
                                   value={item.account}
                                   onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, account: v } : x)))}
+                                  accountType={item.buysell === "1" ? 2 : 1}
                                 />
                               </div>
                               <div className="grid grid-cols-3 gap-3">
