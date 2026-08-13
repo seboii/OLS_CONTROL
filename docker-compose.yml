@@ -50,7 +50,24 @@ services:
       retries: 20
       timeout: 10s
 
-  # Sahte Siber şemasını bir kez kurar, sonra çıkar.
+  # Sahte Siber şemasını VE verisini bir kez kurar, sonra çıkar.
+  #
+  # Sıra ÖNEMLİ (dosyalar birbirinin şemasını ALTER ediyor):
+  #   1) init.sql / init-reference.sql   — temel + referans şema iskeleti
+  #   2) sample-movements.sql            — skn_yuk/skn_pozisyon/skn_yukaktarma'yı
+  #                                         ETL-okuma şemasıyla YENİDEN kurar + örnek
+  #                                         geçmiş veri ekler
+  #   3) reservation-fix.sql             — skn_rezervasyon'u transfer_to_siber'in
+  #                                         YAZDIĞI geniş şemayla kurar (bağımsız tablo)
+  #   4) loadtransfer-fix.sql/loadrelease-fix.sql/pozisyon-fix.sql/mapping-fix.sql
+  #                                       — (2)'nin kurduğu tabloları YAZMA tarafının
+  #                                         ihtiyaç duyduğu ek kolonlarla ALTER eder;
+  #                                         bu yüzden (2)'den SONRA gelmeli
+  #   5) sample-data.sql / sample-reservation.sql
+  #                                       — referans + rezervasyon VERİSİ, şema
+  #                                         tamamlandıktan SONRA eklenir
+  # einvoice-fix.sql/kzgelirgider-fix.sql bilinçli olarak ÇALIŞTIRILMIYOR — Uyumsoft
+  # e-fatura ve Reports/Hedef-ciro bu portun kapsamı dışında (bkz. TESLIM-RAPORU.md §1).
   siber-init:
     image: 'mcr.microsoft.com/mssql/server:2022-latest'
     container_name: ols-scoped-siber-init
@@ -61,11 +78,12 @@ services:
       - './docker/siber-mock:/init:ro'
     networks: [ols-scoped]
     entrypoint: >
-      /bin/bash -c "/opt/mssql-tools18/bin/sqlcmd -S siber-mock -U sa
-      -P '${SIBER_SA_PASSWORD:-Ols!Local2026}' -C -i /init/init.sql &&
-      /opt/mssql-tools18/bin/sqlcmd -S siber-mock -U sa
-      -P '${SIBER_SA_PASSWORD:-Ols!Local2026}' -C -i /init/init-reference.sql &&
-      echo 'sahte Siber semasi kuruldu'"
+      /bin/bash -c "set -e; for f in init.sql init-reference.sql sample-movements.sql
+      reservation-fix.sql loadtransfer-fix.sql loadrelease-fix.sql pozisyon-fix.sql
+      mapping-fix.sql sample-data.sql sample-reservation.sql; do
+      echo \">> $$f\";
+      /opt/mssql-tools18/bin/sqlcmd -S siber-mock -U sa -P '${SIBER_SA_PASSWORD:-Ols!Local2026}' -C -i /init/$$f;
+      done; echo 'sahte Siber semasi ve verisi kuruldu'"
     restart: 'no'
 
   api:

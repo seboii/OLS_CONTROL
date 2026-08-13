@@ -12,6 +12,7 @@ using OLS.Business.Services.Loads;
 using OLS.Business.Services.LoadTransfers;
 using OLS.Business.Services.Lookups;
 using OLS.Business.Services.Roles;
+using OLS.Business.Services.TransferData;
 using OLS.Business.Services.TransferSiber;
 using OLS.Business.Services.Users;
 using OLS.Business.Services.Website;
@@ -27,9 +28,18 @@ public static class DependencyInjection
     /// DashboardService.cs, yalnızca GERÇEK verilerden hesaplanan agregasyonlar,
     /// olsold'daki tam raporlama modülünün portu DEĞİL).
     /// Kapsam dışı bırakılanlar (Accounting, Excel, Goals, Messages, olsold'un tam
-    /// Reports modülü, TransferData/Siber ETL, TransitDeclarations, AI/OCR, Currency
-    /// admin+TCMB, PDKS/WorkingTracking) olsnew'de mevcut ama buraya bilinçli olarak
-    /// taşınmadı — bkz. docs/SECILI-MODUL-PARITE-MATRISI.md §0.
+    /// Reports modülü, TransitDeclarations, AI/OCR, Currency admin+TCMB,
+    /// PDKS/WorkingTracking) olsnew'de mevcut ama buraya bilinçli olarak taşınmadı —
+    /// bkz. docs/SECILI-MODUL-PARITE-MATRISI.md §0.
+    ///
+    /// KRİTİK YÖN DEĞİŞİKLİĞİ (bu oturumda): "TransferData/Siber ETL" bu listede
+    /// DAHA ÖNCE kapsam dışı sayılıyordu. Kullanıcı Teklif→Yük zincirinin (BR-002..005)
+    /// bu ortamda TAMAMEN SAHTE Siber ile eksiksiz çalıştığından emin olunmasını
+    /// istedi — inceleme sonucu bunun, referans/tanım tablolarının (payment_types,
+    /// work_types, departments, ...) hiçbirinde siber_id doldurulmadığı için
+    /// yapısal olarak İMKANSIZ olduğu ortaya çıktı; bu alanları dolduracak ETL
+    /// (olsold: TransferDataController) hiç portlanmamıştı. SiberImportService bu
+    /// boşluğu kapatır — bkz. TESLIM-RAPORU.md "Kritik yön değişikliği #3".
     /// </summary>
     public static IServiceCollection AddBusiness(
         this IServiceCollection services,
@@ -74,6 +84,8 @@ public static class DependencyInjection
         services.AddScoped<IContactFormService, ContactFormService>();
 
         services.AddScoped<IDashboardService, DashboardService>();
+
+        services.AddScoped<ISiberImportService, SiberImportService>();
 
         // 23 referans/tanım modülü (27'den EinvoicePrefix hariç) tek generic kayıtla karşılanır.
         services.AddScoped(typeof(ILookupService<>), typeof(LookupService<>));

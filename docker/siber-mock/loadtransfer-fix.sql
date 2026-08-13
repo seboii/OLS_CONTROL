@@ -11,13 +11,13 @@ ALTER TABLE skn_yuk ADD
     aracyuksekligi INT NULL;
 GO
 
--- skn_rezervasyon: dönüşüm öncesi karşılaştırma yapılan tablo
-DROP TABLE IF EXISTS skn_rezervasyon;
-CREATE TABLE skn_rezervasyon (
-    rezervasyonid NVARCHAR(64), istenenromorkcins NVARCHAR(64), isturu NVARCHAR(64),
-    musteriid NVARCHAR(64), gondericiid NVARCHAR(64), aliciid NVARCHAR(64),
-    odemesekliid NVARCHAR(64), durumid NVARCHAR(64), departmanid NVARCHAR(64));
-GO
+-- skn_rezervasyon: dönüşüm öncesi karşılaştırma yapılan tablo (ConvertOfferAsync
+-- ->FindRezervasyonAsync okuyor). BURADA YENİDEN OLUŞTURULMUYOR: reservation-fix.sql
+-- zaten geniş şemayı (transfer_to_siber'in INSERT'inin ihtiyaç duyduğu 31 kolon,
+-- bkz. SiberReservationRepository.InsertRezervasyonAsync) kuruyor ve ConvertOfferAsync'in
+-- okuduğu 9 kolonun hepsi onun içinde. Bu dosya DAHA ÖNCE dar bir şemayla burayı
+-- DROP+CREATE ediyordu — reservation-fix.sql'den SONRA çalışırsa transfer_to_siber'in
+-- INSERT'i eksik kolon yüzünden patlıyordu. Bulunup düzeltildi.
 
 -- sfy_modulkayit: fatura kalemlerinin modül kodu
 DROP TABLE IF EXISTS sfy_modulkayit;
