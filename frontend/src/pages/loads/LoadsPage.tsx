@@ -45,6 +45,10 @@ interface InvoiceItemDetail {
   net_price: number | null;
   total_price: number | null;
   quantity: number | null;
+  description: string | null;
+  item_id: NamedRef | null;
+  account_id: AccountOption | null;
+  currency_code: NamedRef | null;
 }
 
 interface LoadTransferDetail extends LoadTransferItem {
@@ -81,8 +85,18 @@ const EMPTY_PACKAGE_ROW: PackageRow = {
   volume: "", lademeter: "", width: "", height: "", length: "", stackable: "1",
 };
 
+type InvoiceItemRow = {
+  id: number | null; item_id: string; account: AccountOption | null; currency_code: string;
+  buysell: string; quantity: string; net_price: string; total_price: string; description: string;
+};
+
+const EMPTY_INVOICE_ITEM_ROW: InvoiceItemRow = {
+  id: null, item_id: "", account: null, currency_code: "", buysell: "1",
+  quantity: "1", net_price: "", total_price: "", description: "",
+};
+
 const PER_PAGE = 8;
-const TABS = ["Genel Bilgiler", "Paketler", "Görevliler"];
+const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler"];
 
 export function LoadsPage() {
   const { can } = useAuth();
@@ -116,12 +130,15 @@ export function LoadsPage() {
   const [secondCustomerRep, setSecondCustomerRep] = useState<UserOption | null>(null);
   const [packages, setPackages] = useState<PackageRow[]>([]);
   const [removedPackageIds, setRemovedPackageIds] = useState<number[]>([]);
+  const [invoiceItems, setInvoiceItems] = useState<InvoiceItemRow[]>([]);
 
   const { options: loadStatusTypes } = useLookupOptions("/api/v1/load_status_type");
   const { options: paymentTypes } = useLookupOptions("/api/v1/payment_type");
   const { options: departments } = useLookupOptions("/api/v1/department");
   const { options: romorkTypes } = useLookupOptions("/api/v1/romork_type");
   const { options: productTypes } = useLookupOptions("/api/v1/product_type");
+  const { options: itemTypes } = useLookupOptions("/api/v1/item_type");
+  const { options: currencies } = useLookupOptions("/api/v1/currency");
 
   function opts(list: { id: string | number; name: string }[]) {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
@@ -187,6 +204,19 @@ export function LoadsPage() {
           stackable: p.stackable != null ? String(p.stackable) : "1",
         })),
       );
+      setInvoiceItems(
+        d.load_transfer_invoice_item.map((f) => ({
+          id: f.id,
+          item_id: f.item_id ? String(f.item_id.id) : "",
+          account: f.account_id,
+          currency_code: f.currency_code ? String(f.currency_code.id) : "",
+          buysell: f.buysell ?? "1",
+          quantity: f.quantity != null ? String(f.quantity) : "1",
+          net_price: f.net_price != null ? String(f.net_price) : "",
+          total_price: f.total_price != null ? String(f.total_price) : "",
+          description: f.description ?? "",
+        })),
+      );
     } catch {
       addToast("Yük bilgileri yüklenemedi", "error");
       setDrawerOpen(false);
@@ -212,6 +242,24 @@ export function LoadsPage() {
       }
     }
     setPackages((list) => list.filter((_, xi) => xi !== i));
+  }
+
+  function addInvoiceItemRow(buysell: string) {
+    setInvoiceItems((list) => [...list, { ...EMPTY_INVOICE_ITEM_ROW, buysell }]);
+  }
+
+  async function removeInvoiceItemRow(i: number) {
+    const row = invoiceItems[i];
+    if (row.id) {
+      if (!window.confirm("Bu mali kalem silinsin mi?")) return;
+      try {
+        await api.delete("/api/v1/load_transfer/load_transfer_invoice_item", { deletion_id: [row.id] });
+      } catch (err) {
+        addToast(err instanceof Error ? err.message : "Mali kalem silinemedi", "error");
+        return;
+      }
+    }
+    setInvoiceItems((list) => list.filter((_, xi) => xi !== i));
   }
 
   const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
@@ -253,6 +301,17 @@ export function LoadsPage() {
             length: num(p.length),
             stackable: int(p.stackable),
           })),
+        invoice_items: invoiceItems.map((f) => ({
+          id: f.id,
+          item_id: int(f.item_id),
+          buysell: f.buysell,
+          account_id: f.account?.id ?? null,
+          quantity: num(f.quantity),
+          net_price: num(f.net_price),
+          total_price: num(f.total_price),
+          currency_code: int(f.currency_code),
+          description: f.description,
+        })),
       });
       addToast("Yük güncellendi");
       setDrawerOpen(false);
@@ -400,6 +459,74 @@ export function LoadsPage() {
                       </div>
                     ))
                   )}
+                </div>
+              )}
+
+              {tab === "Finans" && (
+                <div className="space-y-8">
+                  {([
+                    { key: "1", title: "Alış Hareketleri" },
+                    { key: "2", title: "Satış Hareketleri" },
+                  ] as const).map(({ key, title }) => {
+                    const rows = invoiceItems
+                      .map((item, i) => ({ item, i }))
+                      .filter(({ item }) => item.buysell === key);
+                    return (
+                      <div key={key}>
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">{title}</p>
+                          <button type="button" onClick={() => addInvoiceItemRow(key)} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                            <Plus size={12} />Kalem Ekle
+                          </button>
+                        </div>
+                        {rows.length === 0 ? (
+                          <p className="text-xs text-gray-400 text-center py-6">Hareket bulunamadı.</p>
+                        ) : (
+                          rows.map(({ item, i }) => (
+                            <div key={i} className="border border-gray-200 rounded-lg p-4 mb-2 relative">
+                              <button type="button" onClick={() => removeInvoiceItemRow(i)} className="absolute top-2 right-2 text-gray-300 hover:text-red-500">
+                                <Trash2 size={13} />
+                              </button>
+                              <div className="grid grid-cols-3 gap-3 mb-3">
+                                <FormField label="Kalem Tipi">
+                                  <SelectInput value={item.item_id} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, item_id: v } : x)))} options={opts(itemTypes)} />
+                                </FormField>
+                                <FormField label="Para Birimi">
+                                  <SelectInput value={item.currency_code} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, currency_code: v } : x)))} options={opts(currencies)} />
+                                </FormField>
+                                <FormField label="Alış/Satış">
+                                  <SelectInput value={item.buysell} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, buysell: v } : x)))} options={[{ value: "1", label: "Alış" }, { value: "2", label: "Satış" }]} />
+                                </FormField>
+                              </div>
+                              <div className="mb-3">
+                                <AccountPicker
+                                  label="Cari"
+                                  value={item.account}
+                                  onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, account: v } : x)))}
+                                />
+                              </div>
+                              <div className="grid grid-cols-3 gap-3">
+                                <FormField label="Miktar">
+                                  <TextInput value={item.quantity} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
+                                </FormField>
+                                <FormField label="Net Fiyat">
+                                  <TextInput value={item.net_price} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, net_price: v } : x)))} />
+                                </FormField>
+                                <FormField label="Toplam Fiyat">
+                                  <TextInput value={item.total_price} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, total_price: v } : x)))} />
+                                </FormField>
+                              </div>
+                              <div className="mt-3">
+                                <FormField label="Açıklama">
+                                  <TextInput value={item.description} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, description: v } : x)))} />
+                                </FormField>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
