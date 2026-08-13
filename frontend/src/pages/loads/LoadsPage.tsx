@@ -6,8 +6,8 @@ import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, type Column } from "@/components/ui/DataTable";
-import { Drawer } from "@/components/ui/Overlay";
-import { Badge, Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
+import { Drawer, Modal } from "@/components/ui/Overlay";
+import { Badge, Btn, FormField, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 
@@ -74,6 +74,17 @@ interface LoadTransferDetail extends LoadTransferItem {
   second_customer_representative: UserOption | null;
 }
 
+interface MovementDetail {
+  id: number;
+  description: string | null;
+  address: string | null;
+  created_at: string | null;
+  destination: NamedRef | null;
+  user: NamedRef | null;
+  expedition_status: NamedRef | null;
+  expedition_movement: { expedition?: { expedition_number: string | null } } | null;
+}
+
 type PackageRow = {
   id: number | null; product_type_id: string; quantity: string;
   gross_weight: string; net_weight: string; volume: string; lademeter: string;
@@ -95,8 +106,10 @@ const EMPTY_INVOICE_ITEM_ROW: InvoiceItemRow = {
   quantity: "1", net_price: "", total_price: "", description: "",
 };
 
+const EMPTY_MOVEMENT_FORM = { destination_id: "", expedition_status_id: "", description: "", address: "" };
+
 const PER_PAGE = 8;
-const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler"];
+const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler"];
 
 export function LoadsPage() {
   const { can } = useAuth();
@@ -131,6 +144,10 @@ export function LoadsPage() {
   const [packages, setPackages] = useState<PackageRow[]>([]);
   const [removedPackageIds, setRemovedPackageIds] = useState<number[]>([]);
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItemRow[]>([]);
+  const [movements, setMovements] = useState<MovementDetail[]>([]);
+  const [movementModalOpen, setMovementModalOpen] = useState(false);
+  const [movementForm, setMovementForm] = useState(EMPTY_MOVEMENT_FORM);
+  const [savingMovement, setSavingMovement] = useState(false);
 
   const { options: loadStatusTypes } = useLookupOptions("/api/v1/load_status_type");
   const { options: paymentTypes } = useLookupOptions("/api/v1/payment_type");
@@ -139,6 +156,8 @@ export function LoadsPage() {
   const { options: productTypes } = useLookupOptions("/api/v1/product_type");
   const { options: itemTypes } = useLookupOptions("/api/v1/item_type");
   const { options: currencies } = useLookupOptions("/api/v1/currency");
+  const { options: destinations } = useLookupOptions("/api/v1/destination");
+  const { options: expeditionStatuses } = useLookupOptions("/api/v1/expedition_status");
 
   function opts(list: { id: string | number; name: string }[]) {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
@@ -161,12 +180,20 @@ export function LoadsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearch, page]);
 
+  function fetchMovements(loadTransferId: number) {
+    api
+      .get<{ data: MovementDetail[] }>("/api/v1/load_transfer_movement", { load_transfer_id: loadTransferId })
+      .then((res) => setMovements(res.data))
+      .catch(() => setMovements([]));
+  }
+
   async function openDetail(id: number) {
     setEditingId(id);
     setTab(TABS[0]);
     setDrawerOpen(true);
     setDetailLoading(true);
     setRemovedPackageIds([]);
+    fetchMovements(id);
     try {
       const res = await api.get<DataMessage<LoadTransferDetail>>(`/api/v1/load_transfer/${id}`);
       const d = res.data;
@@ -260,6 +287,48 @@ export function LoadsPage() {
       }
     }
     setInvoiceItems((list) => list.filter((_, xi) => xi !== i));
+  }
+
+  function openMovementModal() {
+    setMovementForm(EMPTY_MOVEMENT_FORM);
+    setMovementModalOpen(true);
+  }
+
+  async function saveMovement() {
+    if (!editingId || !detail) return;
+    if (!movementForm.destination_id || !movementForm.expedition_status_id) {
+      addToast("Lütfen konum ve durum seçiniz", "error");
+      return;
+    }
+    setSavingMovement(true);
+    try {
+      const fd = new FormData();
+      fd.append("load_number", detail.load_number_work_type ?? detail.load_number ?? "");
+      fd.append("load_transfer_id", String(editingId));
+      fd.append("destination_id", movementForm.destination_id);
+      fd.append("expedition_status_id", movementForm.expedition_status_id);
+      fd.append("description", movementForm.description);
+      fd.append("address", movementForm.address);
+      await api.postForm("/api/v1/load_transfer_movement", fd);
+      addToast("Yük hareketi eklendi");
+      setMovementModalOpen(false);
+      fetchMovements(editingId);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Hareket kaydedilemedi", "error");
+    } finally {
+      setSavingMovement(false);
+    }
+  }
+
+  async function deleteMovement(id: number) {
+    if (!editingId) return;
+    if (!window.confirm("Bu hareket silinsin mi?")) return;
+    try {
+      await api.delete("/api/v1/load_transfer_movement", { id });
+      fetchMovements(editingId);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Hareket silinemedi", "error");
+    }
   }
 
   const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
@@ -536,10 +605,71 @@ export function LoadsPage() {
                   <UserPicker label="Satış Temsilcisi" value={secondCustomerRep} onChange={setSecondCustomerRep} />
                 </div>
               )}
+
+              {tab === "Hareketler" && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Hareketler</p>
+                    <button type="button" onClick={openMovementModal} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                      <Plus size={12} />Yeni Hareket Ekle
+                    </button>
+                  </div>
+                  {movements.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-8">Henüz hareket kaydı bulunmamaktadır.</p>
+                  ) : (
+                    movements.map((m) => (
+                      <div key={m.id} className="border border-gray-200 rounded-lg p-4 mb-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            {m.expedition_status?.name && (
+                              <div className="text-xs font-semibold text-blue-600 border-l-2 border-blue-500 pl-2 mb-2">{m.expedition_status.name}</div>
+                            )}
+                            <p className="text-sm font-medium">{m.destination?.name ?? "—"}</p>
+                            {m.address && <p className="text-xs text-gray-500 mt-1">{m.address}</p>}
+                            {m.description && <p className="text-xs text-gray-500 mt-1">{m.description}</p>}
+                            <p className="text-[11px] text-gray-400 mt-2">
+                              {m.created_at ? new Date(m.created_at).toLocaleString("tr-TR") : "—"} · {m.user?.name ?? "—"}
+                            </p>
+                            {m.expedition_movement?.expedition?.expedition_number && (
+                              <p className="text-[11px] text-blue-500 mt-1">
+                                {m.expedition_movement.expedition.expedition_number} numaralı sefer hareketinden otomatik oluşmuştur.
+                              </p>
+                            )}
+                          </div>
+                          <button type="button" onClick={() => deleteMovement(m.id)} className="text-gray-300 hover:text-red-500 shrink-0">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           )
         )}
       </Drawer>
+
+      <Modal open={movementModalOpen} onClose={() => setMovementModalOpen(false)} title="Yeni Hareket Ekle">
+        <div className="w-[420px] max-w-full space-y-4">
+          <FormField label="Durum" required>
+            <SelectInput value={movementForm.expedition_status_id} onChange={(v) => setMovementForm((f) => ({ ...f, expedition_status_id: v }))} options={opts(expeditionStatuses)} />
+          </FormField>
+          <FormField label="Konum" required>
+            <SelectInput value={movementForm.destination_id} onChange={(v) => setMovementForm((f) => ({ ...f, destination_id: v }))} options={opts(destinations)} />
+          </FormField>
+          <FormField label="Adres">
+            <TextareaInput value={movementForm.address} onChange={(v) => setMovementForm((f) => ({ ...f, address: v }))} rows={2} />
+          </FormField>
+          <FormField label="Açıklama">
+            <TextareaInput value={movementForm.description} onChange={(v) => setMovementForm((f) => ({ ...f, description: v }))} rows={2} />
+          </FormField>
+          <div className="flex gap-2 justify-end">
+            <Btn variant="secondary" onClick={() => setMovementModalOpen(false)}>İptal</Btn>
+            <Btn onClick={saveMovement} disabled={savingMovement}>{savingMovement ? "Kaydediliyor..." : "Kaydet"}</Btn>
+          </div>
+        </div>
+      </Modal>
     </>
   );
 }
