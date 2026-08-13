@@ -712,7 +712,7 @@ export function QuotesPage() {
                       {existingFiles.filter((f) => !removedFileIds.includes(f.id)).map((f) => (
                         <div key={f.id} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100 text-sm">
                           <FileIcon size={14} className="text-gray-400 shrink-0" />
-                          <a href={f.file ?? "#"} target="_blank" rel="noreferrer" className="flex-1 truncate text-blue-600 hover:underline">
+                          <a href={f.file ? `/storage/${f.file}` : "#"} target="_blank" rel="noreferrer" className="flex-1 truncate text-blue-600 hover:underline">
                             {f.org_name ?? f.file}
                           </a>
                           <button type="button" onClick={() => setRemovedFileIds((ids) => [...ids, f.id])} className="text-gray-300 hover:text-red-500">

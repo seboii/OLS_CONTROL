@@ -8,9 +8,9 @@ Hiçbir sonuç varsayılmadı; her iddia altındaki komut çalıştırılıp ç�
 | Proje | Test sayısı | Sonuç | Komut |
 |---|---|---|---|
 | `OLS.Business.Tests` | 29 | ✅ 29/29 geçti | `dotnet test tests/OLS.Business.Tests` |
-| `OLS.API.IntegrationTests` | 37 | ✅ 37/37 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
+| `OLS.API.IntegrationTests` | 38 | ✅ 38/38 geçti | `dotnet test tests/OLS.API.IntegrationTests` |
 | `OLS.DataAccess.Tests` | 0 | ⚪ test yok (bilinçli, bkz. "Neden DataAccess.Tests boş") | — |
-| **Toplam** | **66** | **✅ 66/66** | `dotnet test` (çözüm kökünde) |
+| **Toplam** | **67** | **✅ 67/67** | `dotnet test` (çözüm kökünde) |
 
 Ayrıca: `dotnet build` (tüm çözüm) — 0 hata, 2 pre-existing nullability uyarısı (bu oturumda dokunulmayan
 `TransferSiberService.cs`/`ExpeditionLoadMappingService.cs` dosyalarında, davranışı etkilemiyor).
@@ -65,7 +65,7 @@ hem `curl` hem tarayıcı ekran görüntüsüyle teyit edildi.
 
 ## 2. Otomatik test paketi
 
-### 2.1 `OLS.API.IntegrationTests` (37 test)
+### 2.1 `OLS.API.IntegrationTests` (38 test)
 
 Gerçek ASP.NET Core pipeline'ı üzerinden çalışır — `WebApplicationFactory<Program>` gerçek `Program.cs`'i
 (JWT auth, `[RequiresPermission]` filtreleri, CORS, rate limiting, EF Core migrasyonları, `DbSeeder`)
@@ -96,6 +96,7 @@ Postgres veritabanını paylaşır (izolasyon mekanizması ve bunu bulurken çı
 | | `GetDashboard_ActiveCustomers_MatchesRealAccountCount` | Panel sayısı, gerçek `/api/v1/account` toplamıyla birebir eşleşiyor (uydurma değil) |
 | `LoadTests` | `CreateLoad_WithPartiesRouteAndFinancialItems_RoundTripsCorrectly` | Teklif'in TAM alan kapsamı (taraflar+güzergah+çoklu mali kalem) gerçekten kaydedilip geri okunuyor; Türkçe ondalık (`"250,5"`, `"1.250,75"`) doğru ayrıştırılıyor |
 | | `CreateLoad_WithoutRequiredFields_ReturnsValidationErrors_NotServerError` | Eksik zorunlu alan → 400 + `errors` sözlüğü, 500 değil |
+| | `UpdateLoad_RemovingAFile_DeletesBothDatabaseRowAndPhysicalFile` | Canlıda bulunan gerçek bir hatanın regresyonu: dosya kaldırma DB satırıyla BİRLİKTE fiziksel dosyayı da siliyor (gerçek dosya yazıp `File.Exists` ile doğrulanıyor) |
 | `LoadTransferTests` | `UpdateLoadTransfer_WithCoreFieldsAndPackages_RoundTripsCorrectly` | Yük güncelleme uç noktası (çekirdek alanlar + paket ekleme) gerçek Postgres'e karşı doğru çalışıyor |
 | | `DeletePackage_RemovesItFromSubsequentRead` | Ayrı paket-silme uç noktası, sonraki okumada kaydın gerçekten gittiğini doğruluyor |
 | `ExpeditionLoadMappingTests` | `SaveMapping_WithMatchingRomorkType_LinksLoadAndAppearsInDetail` | Sefere yük bağlama + silme gerçek Postgres'e karşı doğru çalışıyor; `total_expedition_values`'un zarfın KÖKÜNDE döndüğü doğrulanıyor |

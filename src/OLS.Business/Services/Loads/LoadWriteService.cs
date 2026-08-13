@@ -22,10 +22,18 @@ namespace OLS.Business.Services.Loads;
 public interface ILoadWriteService
 {
     Task<long> CreateAsync(LoadWriteModel model, CancellationToken cancellationToken = default);
-    Task<long?> UpdateAsync(LoadWriteModel model, CancellationToken cancellationToken = default);
+    Task<LoadUpdateResult> UpdateAsync(LoadWriteModel model, CancellationToken cancellationToken = default);
     Task DeleteContentsAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
     Task DeleteFinancialItemsAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// <c>RemovedFileNames</c>: bu güncellemede listeden çıkarılan dosyaların
+/// diskteki adları. <c>OLS.Business</c>, <c>IFileStorage</c>'a (API katmanı)
+/// bağımlı olamaz — fiziksel silme çağrıyı yapan controller'a bırakılır
+/// (bkz. <see cref="LoadFileService.SyncAsync"/>'teki aynı desen).
+/// </summary>
+public sealed record LoadUpdateResult(long? Id, IReadOnlyList<string> RemovedFileNames);
 
 /// <summary>record: controller güncellemede <c>with { Id = … }</c> kullanıyor.</summary>
 public sealed record LoadWriteModel
@@ -144,14 +152,14 @@ public sealed class LoadWriteService : ILoadWriteService
         return load.Id;
     }
 
-    public async Task<long?> UpdateAsync(
+    public async Task<LoadUpdateResult> UpdateAsync(
         LoadWriteModel model, CancellationToken cancellationToken = default)
     {
         var id = model.Id ?? throw new ArgumentException("Id zorunlu", nameof(model));
 
         var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
         if (load is null)
-            return null;
+            return new LoadUpdateResult(null, []);
 
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
 
@@ -191,8 +199,10 @@ public sealed class LoadWriteService : ILoadWriteService
         _db.LoadEmails.RemoveRange(_db.LoadEmails.Where(e => e.LoadId == (int)load.Id));
 
         // Dosyalar: yalnızca listede OLMAYANLAR silinir (olsold existingFilesIds mantığı).
-        var removedFiles = _db.LoadFiles
-            .Where(f => f.LoadId == (int)load.Id && !model.KeepFileIds.Contains(f.Id));
+        // Fiziksel dosyalar burada DEĞİL, çağıran controller'da silinir (bkz. LoadUpdateResult).
+        var removedFiles = await _db.LoadFiles
+            .Where(f => f.LoadId == (int)load.Id && !model.KeepFileIds.Contains(f.Id))
+            .ToListAsync(cancellationToken);
         _db.LoadFiles.RemoveRange(removedFiles);
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -200,7 +210,13 @@ public sealed class LoadWriteService : ILoadWriteService
         await WriteChildrenAsync(load, model, now, cancellationToken);
 
         await transaction.CommitAsync(cancellationToken);
-        return load.Id;
+
+        var removedFileNames = removedFiles
+            .Where(f => !string.IsNullOrWhiteSpace(f.File))
+            .Select(f => f.File!)
+            .ToList();
+
+        return new LoadUpdateResult(load.Id, removedFileNames);
     }
 
     private async Task WriteChildrenAsync(

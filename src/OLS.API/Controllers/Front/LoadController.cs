@@ -175,12 +175,18 @@ public sealed class LoadController : ApiControllerBase
         var uploaded = await SaveFilesAsync(form, cancellationToken);
 
         var model = form.ToModel(userId, uploaded) with { Id = id };
-        var updated = await _write.UpdateAsync(model, cancellationToken);
+        var result = await _write.UpdateAsync(model, cancellationToken);
 
-        if (updated is null)
+        if (result.Id is null)
             return NotFoundError();
 
-        var load = await _loads.SingleAsync(updated.Value, cancellationToken);
+        // Kaydedilen kaldırılmış dosyaların DB satırı LoadWriteService'te silindi;
+        // fiziksel dosya OLS.Business'ın erişemediği IFileStorage'a bağımlı olduğu
+        // için burada, çağıran katmanda silinir (bkz. LoadUpdateResult).
+        foreach (var name in result.RemovedFileNames)
+            _files.Delete(name);
+
+        var load = await _loads.SingleAsync(result.Id.Value, cancellationToken);
         return Ok(load, "Güncelleme Başarılı");
     }
 

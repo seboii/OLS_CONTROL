@@ -87,7 +87,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-66/66 otomatik test geçiyor (29 OLS.Business.Tests + 37 OLS.API.IntegrationTests). Kapsanan: auth
+67/67 otomatik test geçiyor (29 OLS.Business.Tests + 38 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
@@ -96,7 +96,8 @@ agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), 
 bağlamanın (BR-006/007 romork tipi eşleşme kuralı dahil) doğru çalıştığı, Fatura kalem eşlemesinin
 (+ kalem durumunun alış/satışa göre doğru değiştiği) ve dipnot CRUD'unun doğru çalıştığı, Teklif→Yük
 dönüşüm zincirinin BR-002/003/004/005 kurallarının (doğrudan servis örneklemesi + sahte Siber
-depoları ile, bkz. §8) ve gerçek "Siber-503" davranışının doğru çalıştığı. Kapsanmayan
+depoları ile, bkz. §8) ve gerçek "Siber-503" davranışının doğru çalıştığı, Teklif dosya yükleme/
+kaldırmanın (gerçek disk + DB round-trip, bkz. §8) doğru çalıştığı. Kapsanmayan
 (bilinçli, dürüstçe not edildi): dönüşümün MUTLU YOLU — gerçek Siber'e yazma + 15 alanlık rezervasyon
 karşılaştırması (bkz. §8 Siber kimlik eşleşmesi kısıtı, bu ortamda hâlâ kurulamıyor; yalnızca RET
 kuralları test edildi, kabul yolu değil), Sefer oluşturma/güncellemenin KENDİSİ (bkz. §8 — boş
@@ -203,6 +204,28 @@ gerçek Siber-mock senkronu dahil) çalıştığı doğrulandı, otomatik testle
   HER ZAMAN reddediyor (`ExpeditionWriteService.CreateAsync` → "Sefer türü bulunamadı") — kullanıcı
   alanı atlarsa neden başarısız olduğunu anlayamazdı. `*` ile zorunlu işaretlendi.
 
+### Dosya yükleme uçtan uca test edildi — iki gerçek hata bulundu ve düzeltildi
+
+Teklif'in Dosyalar sekmesi canlı Docker'da uçtan uca denendi (yükleme → kaydetme → indirme →
+kaldırma → kaydetme): DataTransfer API'siyle tarayıcıda gerçek bir dosya enjekte edilip yüklendi.
+
+1. **Dosya bağlantısı hiç çalışmıyordu.** `QuotesPage.tsx`, indirme linkini `href={f.file}` olarak
+   kuruyordu — backend'in döndürdüğü `file` alanı YALNIZCA saklanan dosya adı (ör.
+   `8def9...609273.txt`), tam yol değil. Gerçek dosyalar `/storage/{ad}` altında sunuluyor (nginx
+   `location ^~ /storage/` → API'nin `app.UseStaticFiles(...RequestPath="/storage")`). Sonuç:
+   linke tıklamak dosyayı DEĞİL, React uygulamasının kendi `index.html`'ini döndürüyordu. `href={
+   \`/storage/${f.file}\`}` olarak düzeltildi, canlıda gerçek dosya içeriğinin döndüğü doğrulandı.
+2. **Dosya kaldırma diskte yetim bırakıyordu.** `LoadWriteService.UpdateAsync`, listeden çıkarılan
+   dosyaların veritabanı satırını siliyordu ama FİZİKSEL dosyaya hiç dokunmuyordu — `OLS.Business`
+   katmanı `IFileStorage`'a (API katmanı) mimari olarak erişemediği için silme çağrısını yapacak bir
+   mekanizma yoktu. Canlıda bir dosya yükleyip kaldırılarak, `docker exec` ile diskte kalan yetim
+   dosya doğrulandı. Düzeltme: `LoadWriteService.UpdateAsync` artık `LoadUpdateResult` (id + silinen
+   dosya adları) döndürüyor; `LoadController.Update` bu adlar için `IFileStorage.Delete` çağırıyor —
+   `LoadFileController.Upload`'daki (ayrı, zaten doğru olan) uçtaki aynı desen. Canlıda hem DB satırının
+   hem fiziksel dosyanın gittiği doğrulandı; `LoadTests.UpdateLoad_RemovingAFile_
+   DeletesBothDatabaseRowAndPhysicalFile` ile de kilitlendi (gerçek dosya yazıp okuyarak, `File.Exists`
+   ile).
+
 ### Diğer eksikler
 
 - 8 modül × 3 viewport tam görsel matrisi (yalnızca Müşteriler tam kontrol edildi — bkz. §7).
@@ -219,7 +242,8 @@ gerçek Siber-mock senkronu dahil) çalıştığı doğrulandı, otomatik testle
 - Siber-503 davranışı artık test edildi: `POST /api/v1/transfer_to_siber/loadSave`, Siber
   yapılandırılmamışken gerçekten `503 Service Unavailable` döndüğü doğrulandı
   (`TransferSiberTests.LoadSave_WhenSiberNotConfigured_ReturnsServiceUnavailable`).
-- Dosya yükleme (Teklif dosyaları, kullanıcı avatarı) uçtan uca tarayıcıda test edilmedi.
+- Teklif dosya yükleme artık uçtan uca test edildi (yukarıdaki bölüm — iki gerçek hata bulundu ve
+  düzeltildi). Kullanıcı avatarı yükleme hâlâ uçtan uca tarayıcıda test edilmedi.
 
 ## 9. Güvenlik notları
 

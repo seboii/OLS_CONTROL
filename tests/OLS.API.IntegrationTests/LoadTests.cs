@@ -1,7 +1,11 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace OLS.API.IntegrationTests;
 
@@ -96,5 +100,78 @@ public sealed class LoadTests
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         body.GetProperty("errors").GetProperty("customer_id").GetArrayLength().Should().BeGreaterThan(0);
         body.GetProperty("errors").GetProperty("load_content").GetArrayLength().Should().BeGreaterThan(0);
+    }
+
+    private static MultipartFormDataContent RequiredFieldsForm(long accountId) => new()
+    {
+        { new StringContent("1"), "work_type_id" },
+        { new StringContent("1"), "loading_type_id" },
+        { new StringContent("1"), "payment_type_id" },
+        { new StringContent("4"), "status_type_id" },
+        { new StringContent("1"), "department_id" },
+        { new StringContent(accountId.ToString()), "customer_id" },
+        { new StringContent("2026-09-01"), "offer_date" },
+        { new StringContent("2026-09-30"), "offer_validity_date" },
+        { new StringContent("2026-09-01"), "marketing_notification_date" },
+        { new StringContent("1"), "load_content[0][quantity]" },
+    };
+
+    /// <summary>
+    /// Bu oturumda BULUNAN gerçek bir hatanın regresyon testi: <c>LoadWriteService.
+    /// UpdateAsync</c>, listeden çıkarılan bir dosyanın veritabanı satırını siliyordu
+    /// ama FİZİKSEL dosyayı diskte bırakıyordu (canlı Docker'da bir dosya yükleyip
+    /// kaldırarak bulundu — `docker exec` ile diskte yetim dosya doğrulandı). Kök
+    /// neden: <c>OLS.Business</c>, <c>IFileStorage</c>'a (API katmanı) erişemiyor;
+    /// silme çağrısını controller'a bırakan bir sonuç tipi eksikti. Düzeltme:
+    /// <c>LoadUpdateResult.RemovedFileNames</c> eklendi, <c>LoadController.Update</c>
+    /// bu isimler için <c>IFileStorage.Delete</c> çağırıyor.
+    /// </summary>
+    [Fact]
+    public async Task UpdateLoad_RemovingAFile_DeletesBothDatabaseRowAndPhysicalFile()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountName = $"Dosya Test Cari {Guid.NewGuid():N}";
+        using var accountForm = new MultipartFormDataContent { { new StringContent(accountName), "name" } };
+        var accountResponse = await admin.PostAsync("/api/v1/account", accountForm);
+        accountResponse.EnsureSuccessStatusCode();
+        var accountId = (await accountResponse.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        using var createForm = RequiredFieldsForm(accountId);
+        var fileBytes = new ByteArrayContent(Encoding.UTF8.GetBytes("dosya silme regresyon testi - " + Guid.NewGuid()));
+        fileBytes.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        createForm.Add(fileBytes, "files", "regresyon-test.txt");
+
+        var createResponse = await admin.PostAsync("/api/v1/load", createForm);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var loadId = (await createResponse.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        var afterCreate = (await (await admin.GetAsync($"/api/v1/load/{loadId}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("load_file");
+        afterCreate.GetArrayLength().Should().Be(1);
+        var storedFileName = afterCreate[0].GetProperty("file").GetString();
+        storedFileName.Should().NotBeNullOrEmpty();
+
+        using var scope = _factory.Services.CreateScope();
+        var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var storageRoot = config["Storage:PublicPath"] ?? "/app/storage/app/public";
+        var storedPath = Path.Combine(storageRoot, storedFileName!);
+
+        // Sağlık kontrolü: dosya gerçekten diske yazılmış mı (yoksa aşağıdaki "silindi"
+        // iddiası anlamsız olur — hiç var olmayan bir şeyin yokluğunu kanıtlamak olurdu).
+        File.Exists(storedPath).Should().BeTrue("dosya gerçekten diske yazılmış olmalı");
+
+        // Güncelleme: existing_file_ids GÖNDERİLMEZ -> dosya listeden çıkarılmış demektir.
+        using var updateForm = RequiredFieldsForm(accountId);
+        var updateResponse = await admin.PostAsync($"/api/v1/load/{loadId}", updateForm);
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var afterUpdate = (await (await admin.GetAsync($"/api/v1/load/{loadId}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("load_file");
+        afterUpdate.GetArrayLength().Should().Be(0);
+
+        File.Exists(storedPath).Should().BeFalse("fiziksel dosya da silinmiş olmalı, yalnızca DB satırı değil");
     }
 }
