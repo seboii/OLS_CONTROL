@@ -64,9 +64,12 @@ public sealed class TransferSiberService : ITransferSiberService
         if (load.TransferToSiber == 1 && load.LoadNumber is not null)
             return TransferSiberResult.Fail("Yük oluşturulmuş teklifde güncelleme yapamazsınız.");
 
-        var refs = await LoadReferencesAsync(load, cancellationToken);
+        var refs = await LoadReferencesAsync(load, currentUserId, cancellationToken);
 
-        if (ValidateRequired(load, refs) is { } missing)
+        var hasContents = await _db.LoadContents.AnyAsync(c => c.LoadId == load.Id, cancellationToken);
+        var hasFinancialItems = await _db.LoadFinancialItems.AnyAsync(f => f.LoadId == load.Id, cancellationToken);
+
+        if (ValidateRequired(load, refs, hasContents, hasFinancialItems) is { } missing)
             return TransferSiberResult.Fail(missing);
 
         var now = _clock.Now;
@@ -111,7 +114,7 @@ public sealed class TransferSiberService : ITransferSiberService
             BosaltmaUlkeId = load.TargetCountryId?.ToString(),
             CalismaSekli = load.WayOfWorking,
             InsTime = now,
-            InsUser = refs.CurrentUserSiberCode,
+            InsUser = refs.InsUserSiberCode,
         };
 
         if (isUpdate)
@@ -253,10 +256,16 @@ public sealed class TransferSiberService : ITransferSiberService
         string? LoadingTypeCode, string? LoadTransferTypeCode, string? PaymentTypeSiberId,
         string? CustomerSiberId, string? CompanyPayFreightSiberId, string? SenderSiberId,
         string? ReceiverSiberId, string? StatusTypeSiberId, string? DepartmentSiberId,
-        string? CustomerRepName, string? SalesRepCode, string? CurrentUserSiberCode);
+        string? CustomerRepName, string? CustomerRepCode, string? SalesRepCode,
+        string? InsUserSiberCode);
 
+    /// <summary>
+    /// <paramref name="currentUserId"/>: olsold <c>insuser</c>'ı <c>Auth::user()</c>'dan
+    /// (o an işlemi yapan kullanıcı) alır — teklifin 1. görevlisinden DEĞİL. Daha önce
+    /// burada yanlışlıkla görevli[0]'ın kodu kullanılıyordu.
+    /// </summary>
     private async Task<OfferRefs> LoadReferencesAsync(
-        DataAccess.Entities.Load load, CancellationToken cancellationToken)
+        DataAccess.Entities.Load load, long currentUserId, CancellationToken cancellationToken)
     {
         var chargePeople = await _db.LoadChargePeople.AsNoTracking()
             .Where(p => p.LoadId == (int)load.Id)
@@ -264,6 +273,11 @@ public sealed class TransferSiberService : ITransferSiberService
             .Join(_db.Users, p => p.UserId, u => (int)u.Id,
                 (p, u) => new { u.SiberName, u.SiberCode })
             .ToListAsync(cancellationToken);
+
+        var insUserSiberCode = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == currentUserId)
+            .Select(u => u.SiberCode)
+            .FirstOrDefaultAsync(cancellationToken);
 
         return new OfferRefs(
             await CodeAsync(_db.Instructions.Where(i => i.Id == load.InstructionId).Select(i => i.Code), cancellationToken),
@@ -279,25 +293,49 @@ public sealed class TransferSiberService : ITransferSiberService
             await CodeAsync(_db.StatusTypes.Where(s => s.Id == load.StatusTypeId).Select(s => s.SiberId), cancellationToken),
             await CodeAsync(_db.Departments.Where(d => d.Id == load.DepartmentId).Select(d => d.SiberId), cancellationToken),
             chargePeople.ElementAtOrDefault(0)?.SiberName,
+            chargePeople.ElementAtOrDefault(0)?.SiberCode,
             chargePeople.ElementAtOrDefault(1)?.SiberCode,
-            chargePeople.ElementAtOrDefault(0)?.SiberCode);
+            insUserSiberCode);
     }
 
     private static async Task<string?> CodeAsync(
         IQueryable<string?> query, CancellationToken cancellationToken) =>
         await query.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
 
-    /// <summary>olsold'daki zorunlu alan listesi; mesajlar birebir korunur.</summary>
-    private static string? ValidateRequired(DataAccess.Entities.Load load, OfferRefs r)
+    /// <summary>
+    /// olsold'daki zorunlu alan listesi ($fields dizisi, TransferSiberController::save);
+    /// mesajlar VE SIRA birebir korunur. Önceki sürüm bu 21 kontrolden yalnızca 8'ini
+    /// içeriyordu (ör. talimat/römork/iş türü/tarihler/gönderici/alıcı hiç
+    /// doğrulanmıyordu) — eksik alanlarla teklif sessizce Siber'e aktarılabiliyordu.
+    /// Ön/son taşıma ve çalışma şekli olsold'da da <c>=== null || === ''</c> ile
+    /// kontrol ediliyor; bu üç alan şemada NOT NULL + default 0 olduğundan kontrol
+    /// kaynakta da fiilen hiç tetiklenmiyor (0, null/''e eşit değil) — burada da
+    /// aynı şekilde atlanır (davranış birebir, ölü kod tekrar edilmedi).
+    /// </summary>
+    private static string? ValidateRequired(
+        DataAccess.Entities.Load load, OfferRefs r, bool hasContents, bool hasFinancialItems)
     {
+        if (r.InstructionCode is null) return "Talimat gelme şekli boş olamaz";
+        if (r.RomorkTypeCode is null) return "İstenen Romörk Cinsi boş olamaz";
+        if (r.WorkTypeCode is null) return "İş Türü boş olamaz";
+        if (r.LoadingTypeCode is null) return "Yükleme Tipi boş olamaz";
+        if (r.LoadTransferTypeCode is null) return "Yüktür kodu boş olamaz";
+        if (load.MarketingNotificationDate is null) return "Pazarlama bildirim tarihi boş olamaz";
+        if (load.OfferDate is null) return "Talimat gelis tarihi boş olamaz";
+        if (load.OfferValidityDate is null) return "Geçerlilik tarihi boş olamaz";
         if (r.PaymentTypeSiberId is null) return "Ödeme şekli boş olamaz";
-        if (load.FrontTransportationByUs < 0) return "Ön taşıma tarafımızdan yapılır boş olamaz";
-        if (load.FinalTransportationByUs < 0) return "Son taşıma tarafımızdan yapılır boş olamaz";
         if (r.CustomerSiberId is null) return "Müşteri boş olamaz";
+        if (r.SenderSiberId is null) return "Gönderici boş olamaz";
+        if (r.ReceiverSiberId is null) return "Alıcı boş olamaz";
         if (r.StatusTypeSiberId is null) return "Durum boş olamaz";
         if (r.CustomerRepName is null) return "Müşteri temsilcisi boş olamaz";
+        if (r.CustomerRepCode is null) return "Müşteri temsilcisi kodu boş olamaz";
         if (r.SalesRepCode is null) return "Satış temsilcisi kodu boş olamaz";
         if (r.DepartmentSiberId is null) return "Departman boş olamaz";
+        if (load.DepartureCountryId is null) return "Yükleme ülke boş olamaz";
+        if (load.TargetCountryId is null) return "Varış ülke boş olamaz";
+        if (!hasContents) return "Yük içerikleri boş olamaz";
+        if (!hasFinancialItems) return "Yük finansal kalemleri boş olamaz";
 
         return null;
     }

@@ -97,10 +97,10 @@ public sealed class TransferSiberTests
     }
 
     /// <summary>
-    /// Canlı Docker'da bulunan gerçek davranışın (bkz. TESLIM-RAPORU.md §8 "Siber kimlik
-    /// eşleşmesi kısıtı") doğrudan servis seviyesinde regresyon testi: payment_types
-    /// tablosunda hiçbir satırın siber_id'si dolu değilse (bu ortamda GERÇEKTEN böyle),
-    /// transfer_to_siber HER ZAMAN bu mesajla reddeder.
+    /// ValidateRequired'ın olsold'daki tam 21 kontrollük listesinde (bkz.
+    /// TransferSiberService.cs) "Ödeme şekli boş olamaz" 9. sırada — bu yüzden
+    /// öncesindeki 8 alan (talimat/römork/iş türü/yükleme tipi/yüktür/üç tarih)
+    /// burada bilinçli olarak DOLU verilir; yalnızca ödeme tipi eksik bırakılır.
     /// </summary>
     [Fact]
     public async Task TransferOfferAsync_WithoutPaymentType_ReturnsPaymentTypeRequiredError()
@@ -109,10 +109,26 @@ public sealed class TransferSiberTests
         var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
         var clock = scope.ServiceProvider.GetRequiredService<OLS.Business.Common.IClock>();
 
+        var instruction = new Instruction { Name = "E-posta", Code = "1" };
+        var romorkType = new RomorkType { Name = "Tenteli", Code = "1" };
+        var workType = new WorkType { Name = "İhracat", Code = "IHR", GroupCode = "ISTURU", AdditionalCode = "IHR" };
+        var loadingType = new LoadingType { Name = "Komple", Code = "1" };
+        var loadTransferType = new LoadTransferType { Name = "Parsiyel", Code = "1" };
+        db.AddRange(instruction, romorkType, workType, loadingType, loadTransferType);
+        await db.SaveChangesAsync();
+
         var load = new Load
         {
             TransferToSiber = 0,
             PaymentTypeId = null,
+            InstructionId = (int)instruction.Id,
+            RomorkTypeId = (int)romorkType.Id,
+            WorkTypeId = (int)workType.Id,
+            LoadingTypeId = (int)loadingType.Id,
+            LoadTransferTypeId = (int)loadTransferType.Id,
+            MarketingNotificationDate = DateOnly.FromDateTime(DateTime.Now),
+            OfferDate = DateOnly.FromDateTime(DateTime.Now),
+            OfferValidityDate = DateOnly.FromDateTime(DateTime.Now.AddDays(30)),
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now,
         };
@@ -125,6 +141,57 @@ public sealed class TransferSiberTests
 
         result.IsSuccess.Should().BeFalse();
         result.ErrorMessage.Should().Be("Ödeme şekli boş olamaz");
+    }
+
+    /// <summary>
+    /// Gönderici (sender) kontrolü daha önce ValidateRequired'da hiç yoktu —
+    /// eksik göndericili bir teklif sessizce Siber'e aktarılabiliyordu. Ödeme
+    /// tipinden SONRA gelen bu kontrole ulaşmak için öncesindeki tüm alanlar
+    /// (müşteri dahil) doldurulur.
+    /// </summary>
+    [Fact]
+    public async Task TransferOfferAsync_WithoutSender_ReturnsSenderRequiredError()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+        var clock = scope.ServiceProvider.GetRequiredService<OLS.Business.Common.IClock>();
+
+        var instruction = new Instruction { Name = "E-posta", Code = "1" };
+        var romorkType = new RomorkType { Name = "Tenteli", Code = "1" };
+        var workType = new WorkType { Name = "İhracat", Code = "IHR", GroupCode = "ISTURU", AdditionalCode = "IHR" };
+        var loadingType = new LoadingType { Name = "Komple", Code = "1" };
+        var loadTransferType = new LoadTransferType { Name = "Parsiyel", Code = "1" };
+        var paymentType = new PaymentType { Name = "Peşin", SiberId = Guid.NewGuid().ToString() };
+        var customer = new Account { Name = "Test Müşteri", SiberId = Guid.NewGuid().ToString() };
+        db.AddRange(instruction, romorkType, workType, loadingType, loadTransferType, paymentType, customer);
+        await db.SaveChangesAsync();
+
+        var load = new Load
+        {
+            TransferToSiber = 0,
+            InstructionId = (int)instruction.Id,
+            RomorkTypeId = (int)romorkType.Id,
+            WorkTypeId = (int)workType.Id,
+            LoadingTypeId = (int)loadingType.Id,
+            LoadTransferTypeId = (int)loadTransferType.Id,
+            PaymentTypeId = (int)paymentType.Id,
+            CustomerId = (int)customer.Id,
+            SenderId = null,
+            MarketingNotificationDate = DateOnly.FromDateTime(DateTime.Now),
+            OfferDate = DateOnly.FromDateTime(DateTime.Now),
+            OfferValidityDate = DateOnly.FromDateTime(DateTime.Now.AddDays(30)),
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now,
+        };
+        db.Loads.Add(load);
+        await db.SaveChangesAsync();
+
+        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock);
+
+        var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
+
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Be("Gönderici boş olamaz");
     }
 
     [Fact]

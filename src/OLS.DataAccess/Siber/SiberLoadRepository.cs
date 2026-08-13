@@ -59,6 +59,15 @@ public sealed class SiberRezervasyon
     public string? OdemeSekliId { get; init; }
     public string? DurumId { get; init; }
     public string? DepartmanId { get; init; }
+    public string? TalimatGelisSekli { get; init; }
+    public string? YuklemeTip { get; init; }
+    public string? YukTurKod { get; init; }
+    public string? NavlunFirmaId { get; init; }
+    public string? YuklemeUlkeId { get; init; }
+    public string? BosaltmaUlkeId { get; init; }
+    public int? OnTasimaTarafimizdanYapilir { get; init; }
+    public int? SonTasimaTarafimizdanYapilir { get; init; }
+    public int? CalismaSekli { get; init; }
 }
 
 public sealed class SiberModulKayit
@@ -167,7 +176,13 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             SELECT rezervasyonid AS RezervasyonId, istenenromorkcins AS IstenenRomorkCins,
                    isturu AS IsTuru, musteriid AS MusteriId, gondericiid AS GondericiId,
                    aliciid AS AliciId, odemesekliid AS OdemeSekliId, durumid AS DurumId,
-                   departmanid AS DepartmanId
+                   departmanid AS DepartmanId, talimatgelissekli AS TalimatGelisSekli,
+                   yuklemetip AS YuklemeTip, yukturkod AS YukTurKod,
+                   navlunfirmaid AS NavlunFirmaId, yuklemeulkeid AS YuklemeUlkeId,
+                   bosaltmaulkeid AS BosaltmaUlkeId,
+                   ontasimatarafimizdanyapilir AS OnTasimaTarafimizdanYapilir,
+                   sontasimatarafimizdanyapilir AS SonTasimaTarafimizdanYapilir,
+                   calismasekli AS CalismaSekli
             FROM skn_rezervasyon WHERE rezervasyonid = @id
             """,
             new { id = rezervasyonId });

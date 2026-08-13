@@ -398,7 +398,7 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
         RomorkType? RomorkType, Department? Department, LoadTransferType? LoadTransferType,
         StatusType? StatusType, string? CurrentUserSiberName, string? CurrentUserSiberCode,
         bool HasContents, bool HasFinancialItems, string? ChargePersonSiberName,
-        string? ChargePersonSiberCode, string? SalesRepSiberCode);
+        string? ChargePersonSiberCode, string? SalesRepSiberCode, Account? CompanyPayFreight);
 
     private async Task<OfferContext> LoadContextAsync(Load load, CancellationToken cancellationToken)
     {
@@ -429,12 +429,34 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             await _db.LoadFinancialItems.AnyAsync(f => f.LoadId == load.Id, cancellationToken),
             chargePeople.ElementAtOrDefault(0)?.SiberName,
             chargePeople.ElementAtOrDefault(0)?.SiberCode,
-            chargePeople.ElementAtOrDefault(1)?.SiberCode);
+            chargePeople.ElementAtOrDefault(1)?.SiberCode,
+            await _db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == load.CompanyPayFreightId, cancellationToken));
     }
 
-    /// <summary>olsold'daki zorunlu alan listesi; ilk eksik alanın mesajı döner.</summary>
+    /// <summary>
+    /// olsold'daki zorunlu alan listesi ($fields dizisi, LoadTransferController::save);
+    /// mesajlar VE SIRA birebir korunur. Önceki sürüm yalnızca son 9 kontrolü
+    /// içeriyordu — talimat/römork/iş türü/yükleme tipi/yüktür/tarihler/ödeme
+    /// şekli/müşteri/gönderici/alıcı hiç doğrulanmıyordu.
+    /// "Çalışma şekli boş olamaz" kaldırıldı: olsold'da <c>way_of_working</c> NOT
+    /// NULL + default 0 olduğundan ve kontrol <c>=== null || === ''</c> kullandığından
+    /// (0, ikisine de eşit değil) kaynakta da fiilen hiç tetiklenmiyordu — burada 0
+    /// ("Spot") geçerli bir seçimken hatalı biçimde reddediliyordu, düzeltildi.
+    /// </summary>
     private static string? ValidateRequired(Load load, OfferContext c)
     {
+        if (c.Instruction?.Code is null) return "Talimat gelme şekli boş olamaz";
+        if (c.RomorkType?.Code is null) return "İstenen Romörk Cinsi boş olamaz";
+        if (c.WorkType?.Code is null) return "İş Türü boş olamaz";
+        if (c.LoadingType?.Code is null) return "Yükleme Tipi boş olamaz";
+        if (c.LoadTransferType?.Code is null) return "Yüktür kodu boş olamaz";
+        if (load.MarketingNotificationDate is null) return "Pazarlama bildirim tarihi boş olamaz";
+        if (load.OfferDate is null) return "Talimat gelis tarihi boş olamaz";
+        if (load.OfferValidityDate is null) return "Geçerlilik tarihi boş olamaz";
+        if (c.PaymentType?.SiberId is null) return "Ödeme şekli boş olamaz";
+        if (c.Customer?.SiberId is null) return "Müşteri boş olamaz";
+        if (c.Sender?.SiberId is null) return "Gönderici boş olamaz";
+        if (c.Receiver?.SiberId is null) return "Alıcı boş olamaz";
         if (c.StatusType?.SiberId is null) return "Durum boş olamaz";
         if (c.ChargePersonSiberName is null) return "Müşteri temsilcisi boş olamaz";
         if (c.ChargePersonSiberCode is null) return "Müşteri temsilcisi kodu boş olamaz";
@@ -444,14 +466,18 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
         if (load.TargetCountryId is null) return "Varış ülke boş olamaz";
         if (!c.HasContents) return "Yük içerikleri boş olamaz";
         if (!c.HasFinancialItems) return "Yük finansal kalemleri boş olamaz";
-        if (load.WayOfWorking == 0) return "Çalışma şekli boş olamaz";
 
         return null;
     }
 
     /// <summary>
     /// Teklifin yerel verisi Siber'deki rezervasyonla tutarlı mı?
-    /// olsold dokuz alanı büyük harfe çevirerek karşılaştırıyordu.
+    /// olsold on sekiz alanı büyük harfe çevirerek karşılaştırıyordu (biri —
+    /// departmanid — kaynakta yanlışlıkla iki kez tekrarlanmış, tek kontrol
+    /// yeterli). Önceki sürüm yalnızca 9'unu içeriyordu — talimat/yükleme
+    /// tipi/yüktür/navlun firma/ülkeler/taşıma bayrakları/çalışma şekli hiç
+    /// karşılaştırılmıyordu; Siber'deki veri bu alanlarda uyuşmasa bile
+    /// dönüşüm sessizce devam ederdi.
     /// </summary>
     private static bool MatchesReservation(
         Load load, OfferContext c, SiberRezervasyon? reservation)
@@ -462,12 +488,21 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
         return Same(load.SiberId, reservation.RezervasyonId)
             && Same(c.RomorkType?.Code, reservation.IstenenRomorkCins)
             && Same(c.WorkType?.Code, reservation.IsTuru)
+            && Same(c.Instruction?.Code, reservation.TalimatGelisSekli)
+            && Same(c.LoadingType?.Code, reservation.YuklemeTip)
+            && Same(c.LoadTransferType?.Code, reservation.YukTurKod)
+            && Same(c.PaymentType?.SiberId, reservation.OdemeSekliId)
+            && load.FrontTransportationByUs == (reservation.OnTasimaTarafimizdanYapilir ?? 0)
+            && load.FinalTransportationByUs == (reservation.SonTasimaTarafimizdanYapilir ?? 0)
             && Same(c.Customer?.SiberId, reservation.MusteriId)
+            && Same(c.CompanyPayFreight?.SiberId, reservation.NavlunFirmaId)
             && Same(c.Sender?.SiberId, reservation.GondericiId)
             && Same(c.Receiver?.SiberId, reservation.AliciId)
-            && Same(c.PaymentType?.SiberId, reservation.OdemeSekliId)
             && Same(c.StatusType?.SiberId, reservation.DurumId)
-            && Same(c.Department?.SiberId, reservation.DepartmanId);
+            && Same(c.Department?.SiberId, reservation.DepartmanId)
+            && Same(load.DepartureCountryId?.ToString(), reservation.YuklemeUlkeId)
+            && Same(load.TargetCountryId?.ToString(), reservation.BosaltmaUlkeId)
+            && load.WayOfWorking == (reservation.CalismaSekli ?? 0);
     }
 
     private static bool Same(string? local, string? siber) =>
