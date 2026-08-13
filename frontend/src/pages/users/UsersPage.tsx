@@ -169,11 +169,14 @@ export function UsersPage() {
       key: "avatar",
       header: "",
       width: "w-10",
-      render: (r) => (
-        <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">
-          {initials(r.name, r.surname)}
-        </div>
-      ),
+      render: (r) =>
+        r.avatar ? (
+          <img src={`/storage/${r.avatar}`} alt={r.name ?? ""} className="w-7 h-7 rounded-full object-cover" />
+        ) : (
+          <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">
+            {initials(r.name, r.surname)}
+          </div>
+        ),
     },
     { key: "name", header: "Ad Soyad", sortable: true, render: (r) => <span className="font-semibold">{r.name} {r.surname}</span> },
     { key: "email", header: "E-posta", render: (r) => <span className="text-xs text-gray-500">{r.email}</span> },

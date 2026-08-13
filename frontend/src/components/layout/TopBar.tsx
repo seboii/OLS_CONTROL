@@ -43,9 +43,13 @@ export function TopBar({ moduleLabel, onMenuToggle }: { moduleLabel: string; onM
           onClick={() => setUserOpen((o) => !o)}
           className="flex items-center gap-2 pl-2 pr-2.5 py-1 rounded-lg hover:bg-gray-100 transition-colors"
         >
-          <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] text-white font-bold">
-            {initials(user.name, user.surname)}
-          </div>
+          {user.avatar ? (
+            <img src={`/storage/${user.avatar}`} alt={user.name} className="w-6 h-6 rounded-full object-cover" />
+          ) : (
+            <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center text-[10px] text-white font-bold">
+              {initials(user.name, user.surname)}
+            </div>
+          )}
           <span className="text-xs font-medium text-gray-700 hidden sm:block">{user.name}</span>
           <ChevronDown size={12} className="text-gray-400 hidden sm:block" />
         </button>

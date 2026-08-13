@@ -87,7 +87,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-67/67 otomatik test geçiyor (29 OLS.Business.Tests + 38 OLS.API.IntegrationTests). Kapsanan: auth
+70/70 otomatik test geçiyor (29 OLS.Business.Tests + 41 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
@@ -97,13 +97,14 @@ bağlamanın (BR-006/007 romork tipi eşleşme kuralı dahil) doğru çalıştı
 (+ kalem durumunun alış/satışa göre doğru değiştiği) ve dipnot CRUD'unun doğru çalıştığı, Teklif→Yük
 dönüşüm zincirinin BR-002/003/004/005 kurallarının (doğrudan servis örneklemesi + sahte Siber
 depoları ile, bkz. §8) ve gerçek "Siber-503" davranışının doğru çalıştığı, Teklif dosya yükleme/
-kaldırmanın (gerçek disk + DB round-trip, bkz. §8) doğru çalıştığı. Kapsanmayan
+kaldırmanın (gerçek disk + DB round-trip, bkz. §8) doğru çalıştığı, avatar yükleme/kaldırmanın ve
+BR-012'nin (mevcut şifre yanlışsa reddetme + şifrenin gerçekten değiştiği) doğru çalıştığı. Kapsanmayan
 (bilinçli, dürüstçe not edildi): dönüşümün MUTLU YOLU — gerçek Siber'e yazma + 15 alanlık rezervasyon
 karşılaştırması (bkz. §8 Siber kimlik eşleşmesi kısıtı, bu ortamda hâlâ kurulamıyor; yalnızca RET
 kuralları test edildi, kabul yolu değil), Sefer oluşturma/güncellemenin KENDİSİ (bkz. §8 — boş
 `expedition_types`/`expedition_statuses`), `ValidateRequired`'daki DİĞER sekiz alan kontrolü (yalnızca
-ödeme şekli örneklendi, aynı desen), BR-010, profil şifre değişikliği (BR-012), dosya yükleme
-doğrulama. Ayrıntı: TEST-RAPORU.md.
+ödeme şekli örneklendi, aynı desen), BR-010, dosya yükleme doğrulama (belge türü/boyut kısıtları).
+Ayrıntı: TEST-RAPORU.md.
 
 ## 7. Görsel parite durumu (özet)
 
@@ -237,13 +238,30 @@ kaldırma → kaydetme): DataTransfer API'siyle tarayıcıda gerçek bir dosya e
   `ISiberReservationRepository` ile (`IsConfigured=true` ama hiçbir Siber G/Ç metodu ÇAĞRILAMAZ,
   çağrılırsa test `NotSupportedException` ile gürültülü başarısız olur — testin gerçekten BR
   kontrollerini, gerçek bir Siber round-trip'i DEĞİL, kilitlediğinin kanıtı). `ValidateRequired`'daki
-  kalan sekiz alan kontrolü ve BR-010/012/013 için hâlâ ayrı test yok. BR-006/007 (Sefer-Yük romork
-  tipi eşleşmesi) `ExpeditionLoadMappingTests.cs` ile test edildi.
+  kalan sekiz alan kontrolü ve BR-010/013 için hâlâ ayrı test yok. BR-006/007 (Sefer-Yük romork
+  tipi eşleşmesi) `ExpeditionLoadMappingTests.cs`, BR-012 (profil şifre değişikliğinde mevcut şifre
+  kontrolü) `ProfileTests.cs` ile test edildi.
 - Siber-503 davranışı artık test edildi: `POST /api/v1/transfer_to_siber/loadSave`, Siber
   yapılandırılmamışken gerçekten `503 Service Unavailable` döndüğü doğrulandı
   (`TransferSiberTests.LoadSave_WhenSiberNotConfigured_ReturnsServiceUnavailable`).
 - Teklif dosya yükleme artık uçtan uca test edildi (yukarıdaki bölüm — iki gerçek hata bulundu ve
-  düzeltildi). Kullanıcı avatarı yükleme hâlâ uçtan uca tarayıcıda test edilmedi.
+  düzeltildi). Kullanıcı avatarı yükleme de artık hem uygulandı hem test edildi (aşağıdaki bölüm).
+
+### Avatar hiçbir yerde gösterilmiyordu — backend zaten doğruydu, frontend hiç kullanmıyordu
+
+Bu oturumda bulundu: `ProfileController`/`IFileStorage` avatar yükleme/kaldırmayı (üç yollu: kaldır/
+değiştir/koru) doğru şekilde uyguluyordu, ama frontend'in HİÇBİR yerinde gerçek avatar görseli
+gösterilmiyordu — `TopBar.tsx`, `UsersPage.tsx` ve `ProfilePage.tsx`'in hepsi HER ZAMAN isim
+baş harflerini gösteriyordu, `avatar` alanını okumuyordu bile. Ayrıca `ProfilePage.tsx`'te avatar
+yüklemek/kaldırmak için hiçbir UI yoktu. Üçü de düzeltildi/eklendi:
+- `TopBar.tsx` ve `UsersPage.tsx`: gerçek `avatar` doluysa `/storage/{avatar}` gösterir, yoksa
+  (kaynaktaki gibi) baş harflere döner.
+- `ProfilePage.tsx` "Genel" sekmesi: mevcut avatarı gösterir, "Değiştir" (dosya seçici + anlık
+  önizleme) ve "Kaldır" düğmeleri eklendi, `general/update` uç noktasının zaten var olan `avatar`/
+  `avatar_remove` alanlarına bağlandı. Kaydettikten sonra `useAuth()`'un artık dışa açılan
+  `refresh()`'i çağrılıyor — TopBar'daki avatar SAYFA YENİLEMEDEN güncelleniyor.
+Canlıda uçtan uca doğrulandı (gerçek PNG yükleme → üç yerde de görünme → kaldırma → hem DB alanının
+hem fiziksel dosyanın gittiği `docker exec` ile teyit edildi). `ProfileTests.cs` ile kilitlendi.
 
 ## 9. Güvenlik notları
 
@@ -257,10 +275,9 @@ kaldırma → kaydetme): DataTransfer API'siyle tarayıcıda gerçek bir dosya e
 ## 10. Önerilen sonraki adımlar (öncelik sırasıyla)
 
 1. Kalan 7 modül için 3-viewport görsel kontrolünü tamamlamak (yalnızca Müşteriler tam kontrol edildi).
-2. Dosya yükleme (Teklif dosyaları, kullanıcı avatarı) için uçtan uca tarayıcı testi eklemek.
-3. Sefer Genel Bilgiler'i gerçekten kaydedilebilir hâle getirmek için `expedition_statuses`'a en az
+2. Sefer Genel Bilgiler'i gerçekten kaydedilebilir hâle getirmek için `expedition_statuses`'a en az
    bir gerçek satır eklemek gerekip gerekmediğine karar vermek (bkz. §8 — olsold'da da seeder'ı yok,
    bu yüzden veri UYDURMADAN yapılabilecek bir şey değil; kullanıcıya danışılmalı).
-4. `ValidateRequired`'ın kalan sekiz alan kontrolü ve BR-010/012/013 için ek entegrasyon testleri.
-5. "AI'dan teklif" özelliğinin gerekip gerekmediğine karar vermek — gerekiyorsa backend adaptör
+3. `ValidateRequired`'ın kalan sekiz alan kontrolü ve BR-010/013 için ek entegrasyon testleri.
+4. "AI'dan teklif" özelliğinin gerekip gerekmediğine karar vermek — gerekiyorsa backend adaptör
   üzerinden, tarayıcıya asla anahtar sızdırmadan.
