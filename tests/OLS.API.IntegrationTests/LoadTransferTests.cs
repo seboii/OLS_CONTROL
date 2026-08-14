@@ -86,6 +86,107 @@ public sealed class LoadTransferTests
         packages[0].GetProperty("quantity").GetInt32().Should().Be(4);
     }
 
+    /// <summary>
+    /// Regresyon: <c>LoadTransferDetailDto</c> önceden romork_type_id/
+    /// instruction_id/delivery_method_id/load_transfer_type_id/way_of_working/
+    /// front+final_transportation_by_us/departure+target_country_id/paketlerin
+    /// case_type_id'sini HİÇ döndürmüyordu (yazma tarafı destekliyordu) — bu da
+    /// formu AÇIP dokunmadan Kaydet'in bu 10 alanı sessizce boşaltmasına yol
+    /// açıyordu (canlı Docker'da gerçek bir kayıtta doğrulandı). Bu test tam da
+    /// bunu kilitler: hepsi set edilip GET'te dönüp dönmediği tek tek kontrol
+    /// edilir — DTO'da biri eksik kalırsa bu test kırılır.
+    /// </summary>
+    [Fact]
+    public async Task UpdateLoadTransfer_SetsAllPreviouslyMissingReadFields_AllRoundTripCorrectly()
+    {
+        var id = await SeedLoadTransferAsync();
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        async Task<long> CreateLookupAsync(string path, string name)
+        {
+            var response = await admin.PostAsJsonAsync(path, new { name });
+            response.EnsureSuccessStatusCode();
+            return (await response.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("data").GetProperty("id").GetInt64();
+        }
+
+        var romorkTypeId = await CreateLookupAsync("/api/v1/romork_type", $"Test Römork {Guid.NewGuid():N}");
+        var instructionId = await CreateLookupAsync("/api/v1/instruction", $"Test Talimat {Guid.NewGuid():N}");
+        var deliveryMethodId = await CreateLookupAsync("/api/v1/load_transfer_deliver_method", $"Test Teslimat {Guid.NewGuid():N}");
+        var loadTransferTypeId = await CreateLookupAsync("/api/v1/load_transfer_type", $"Test Yük Türü {Guid.NewGuid():N}");
+        var loadTypeId = await CreateLookupAsync("/api/v1/loading_type", $"Test Yük Tipi {Guid.NewGuid():N}");
+        var caseTypeId = await CreateLookupAsync("/api/v1/case_type", $"Test Kap Tipi {Guid.NewGuid():N}");
+
+        Guid departureCountryId, targetCountryId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+            var departure = new Country { Id = Guid.NewGuid(), Name = $"Test Ülke A {Guid.NewGuid():N}" };
+            var target = new Country { Id = Guid.NewGuid(), Name = $"Test Ülke B {Guid.NewGuid():N}" };
+            db.Countries.AddRange(departure, target);
+            await db.SaveChangesAsync();
+            departureCountryId = departure.Id;
+            targetCountryId = target.Id;
+        }
+
+        var updateResponse = await admin.PostAsJsonAsync($"/api/v1/load_transfer/{id}", new
+        {
+            romork_type_id = romorkTypeId,
+            instruction_id = instructionId,
+            delivery_method_id = deliveryMethodId,
+            load_transfer_type_id = loadTransferTypeId,
+            load_type_id = loadTypeId,
+            way_of_working = 1,
+            front_transportation_by_us = 1,
+            final_transportation_by_us = 0,
+            departure_country_id = departureCountryId.ToString(),
+            target_country_id = targetCountryId.ToString(),
+            packages = new[]
+            {
+                new { quantity = 2, case_type_id = caseTypeId },
+            },
+        });
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detail = (await (await admin.GetAsync($"/api/v1/load_transfer/{id}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        detail.GetProperty("romork_type_id").GetProperty("id").GetInt64().Should().Be(romorkTypeId);
+        detail.GetProperty("instruction_id").GetProperty("id").GetInt64().Should().Be(instructionId);
+        detail.GetProperty("delivery_method_id").GetProperty("id").GetInt64().Should().Be(deliveryMethodId);
+        detail.GetProperty("load_transfer_type_id").GetProperty("id").GetInt64().Should().Be(loadTransferTypeId);
+        detail.GetProperty("load_type_id").GetProperty("id").GetInt64().Should().Be(loadTypeId);
+        detail.GetProperty("way_of_working").GetInt32().Should().Be(1);
+        detail.GetProperty("front_transportation_by_us").GetInt32().Should().Be(1);
+        detail.GetProperty("final_transportation_by_us").GetInt32().Should().Be(0);
+        detail.GetProperty("departure_country_id").GetProperty("id").GetGuid().Should().Be(departureCountryId);
+        detail.GetProperty("target_country_id").GetProperty("id").GetGuid().Should().Be(targetCountryId);
+        detail.GetProperty("load_transfer_package")[0].GetProperty("case_type_id").GetProperty("id").GetInt64().Should().Be(caseTypeId);
+
+        // Kritik regresyon: formu AÇIP DOKUNMADAN tekrar Kaydet'e basmak (bu
+        // alanları içeren tam gövdeyle geri göndermek) hiçbirini bozmamalı.
+        var noOpUpdateResponse = await admin.PostAsJsonAsync($"/api/v1/load_transfer/{id}", new
+        {
+            romork_type_id = romorkTypeId,
+            instruction_id = instructionId,
+            delivery_method_id = deliveryMethodId,
+            load_transfer_type_id = loadTransferTypeId,
+            load_type_id = loadTypeId,
+            way_of_working = 1,
+            front_transportation_by_us = 1,
+            final_transportation_by_us = 0,
+            departure_country_id = departureCountryId.ToString(),
+            target_country_id = targetCountryId.ToString(),
+        });
+        noOpUpdateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detailAfterNoOpSave = (await (await admin.GetAsync($"/api/v1/load_transfer/{id}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        detailAfterNoOpSave.GetProperty("romork_type_id").GetProperty("id").GetInt64().Should().Be(romorkTypeId);
+        detailAfterNoOpSave.GetProperty("way_of_working").GetInt32().Should().Be(1);
+        detailAfterNoOpSave.GetProperty("target_country_id").GetProperty("id").GetGuid().Should().Be(targetCountryId);
+    }
+
     [Fact]
     public async Task DeletePackage_RemovesItFromSubsequentRead()
     {
