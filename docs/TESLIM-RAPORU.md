@@ -211,17 +211,21 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
     yüklenen dosyanın HEM Yük HEM orijinal Teklif görünümünde aynı kayıt olduğu teyit edildi). Otomatik
     test: `LoadTransferTests.cs` (güncelleme + paket ekleme/silme) — bu 5 yeni sekme için ayrı otomatik
     regresyon testi henüz yazılmadı, yalnızca canlı doğrulandı.
-  - **[EN CİDDİ BULGU, sonraki güncellemede]** `LoadTransferDetailDto` (okuma) `romork_type_id`/
-    `instruction_id`/`delivery_method_id`/`load_transfer_type_id`/`way_of_working`/`front_transportation_
-    by_us`/`final_transportation_by_us`/`departure_country_id`/`target_country_id`/paketlerin
-    `case_type_id`'si HİÇ YOKTU — yazma tarafı zaten destekliyordu. Formu AÇIP dokunmadan Kaydet'e basmak
-    bu alanları SESSİZCE boşaltıyordu; bu oturumda DAHA ÖNCE yapılan Görevliler/Finans/Hareketler
-    testleri sırasında canlı bir kaydın bu alanlarını GERÇEKTEN sıfırladığı DB'de doğrulandı. Genel
-    Bilgiler'e ayrıca kaynakta çalışan ama arayüzde hiç olmayan 5 alan eklendi: Yük Tipi, Yük Türü,
+  - **[EN CİDDİ BULGU, düzeltildi + regresyon testi eklendi]** `LoadTransferDetailDto` (okuma)
+    `romork_type_id`/`instruction_id`/`delivery_method_id`/`load_transfer_type_id`/`way_of_working`/
+    `front_transportation_by_us`/`final_transportation_by_us`/`departure_country_id`/`target_country_id`/
+    paketlerin `case_type_id`'si HİÇ YOKTU — yazma tarafı zaten destekliyordu. Formu AÇIP dokunmadan
+    Kaydet'e basmak bu alanları SESSİZCE boşaltıyordu; bu oturumda DAHA ÖNCE yapılan Görevliler/Finans/
+    Hareketler testleri sırasında canlı bir kaydın bu alanlarını GERÇEKTEN sıfırladığı DB'de doğrulandı.
+    Genel Bilgiler'e ayrıca kaynakta çalışan ama arayüzde hiç olmayan 5 alan eklendi: Yük Tipi, Yük Türü,
     Talimat, Teslimat Şekli (`/api/v1/load_transfer_deliver_method`), Çalışma Şekli, Kalkış/Varış
     Ülkesi. `work_type` bilinçli olarak eklenmedi — kaynağın KENDİ update metodunda yorum satırıyla
     devre dışı (dönüşümde sabitleniyor, kaynak da göstermesine rağmen kaydetmiyor). Tüm 10 alan
-    ac+dokunmadan+kaydet ile korundugu canlı teyit edildi (bkz. §1 Kritik yön değişikliği #4).
+    ac+dokunmadan+kaydet ile korundugu canlı teyit edildi (bkz. §1 Kritik yön değişikliği #4). Otomatik
+    regresyon testi: `LoadTransferTests.UpdateLoadTransfer_SetsAllPreviouslyMissingReadFields_
+    AllRoundTripCorrectly` — tüm 10 alanı set edip GET'te dönüp dönmediğini VE aç-dokunma-tekrar-kaydet
+    senaryosunda sıfırlanmadığını doğruluyor. Mutasyon testiyle (bir alanın ataması geçici olarak null'a
+    çevrilip testin gerçekten kırıldığı, geri alınca tekrar geçtiği) tautolojik olmadığı kanıtlandı.
 - **Sefer** (`TripsPage.tsx`) — KISMEN TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
   Drawer'ı eklendi (önceden yalnızca "Yeni Sefer" oluşturma vardı, mevcut kaydı açmanın hiçbir yolu
   yoktu), 2 sekmeli (Genel Bilgiler/Bağlı Yükler). Bağlı Yükler sekmesi TAM ÇALIŞIYOR: sefere
