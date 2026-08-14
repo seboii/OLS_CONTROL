@@ -69,6 +69,27 @@ public sealed class AccountDetailDto
 
     [JsonPropertyName("user_account_mapping")]
     public IReadOnlyList<UserAccountMappingDto> UserAccountMapping { get; init; } = [];
+
+    /// <summary>olsold: AccountFormDrawer.vue "Faturalar" sekmesi (yalnızca düzenlemede, salt-okunur).</summary>
+    [JsonPropertyName("invoice")]
+    public IReadOnlyList<AccountInvoiceDto> Invoice { get; init; } = [];
+}
+
+public sealed class AccountInvoiceDto
+{
+    [JsonPropertyName("id")] public long Id { get; init; }
+    [JsonPropertyName("invoice_id")] public string? InvoiceId { get; init; }
+    [JsonPropertyName("box_type")] public short BoxType { get; init; }
+    [JsonPropertyName("commercial_type")] public int CommercialType { get; init; }
+    [JsonPropertyName("target_title")] public string? TargetTitle { get; init; }
+    [JsonPropertyName("target_identity_no")] public string? TargetIdentityNo { get; init; }
+    [JsonPropertyName("payable_amount")] public decimal? PayableAmount { get; init; }
+    [JsonPropertyName("tax_exclusive_amount")] public decimal? TaxExclusiveAmount { get; init; }
+    [JsonPropertyName("tax_amount")] public decimal? TaxAmount { get; init; }
+    [JsonPropertyName("tax_rate")] public decimal? TaxRate { get; init; }
+    [JsonPropertyName("document_currency_code")] public string? DocumentCurrencyCode { get; init; }
+    [JsonPropertyName("invoice_type")] public AccountTypeDto? InvoiceType { get; init; }
+    [JsonPropertyName("invoice_status")] public AccountTypeDto? InvoiceStatus { get; init; }
 }
 
 public sealed class CountryDto

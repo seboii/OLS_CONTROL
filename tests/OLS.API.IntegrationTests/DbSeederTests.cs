@@ -62,7 +62,15 @@ public sealed class DbSeederTests
             "Mali Kalemler'de Satış seçiliyken Kalem seçicisi taze bir kurulumda boş görünmemeli");
     }
 
-    /// <summary>Seed ikinci kez (aynı veritabanına) çalışsa da tekrar hesap üretmemeli.</summary>
+    /// <summary>
+    /// Seed ikinci kez (aynı veritabanına) çalışsa da tekrar hesap üretmemeli.
+    ///
+    /// NOT — mutlak sayı yerine ÖNCESİ/SONRASI farkı ölçülüyor: bu koleksiyondaki
+    /// diğer testler ([Collection("OlsApi")] AYNI veritabanını paylaşıyor) kendi
+    /// amaçları için Acente tipinde başka hesaplar oluşturabilir (bkz.
+    /// AccountFormTests) — bu testin asıl iddiası "ikinci seed çağrısı SIFIR yeni
+    /// kayıt eklemeli", "toplam sayı tam olarak 1'dir" değil.
+    /// </summary>
     [Fact]
     public async Task RunningSeedTwice_DoesNotCreateDuplicateAcenteAccount()
     {
@@ -73,18 +81,25 @@ public sealed class DbSeederTests
         var environment = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<OlsApiFactory>>();
 
+        async Task<int> AcenteAccountCountAsync()
+        {
+            var acenteTypeId = await db.AccountTypes
+                .Where(t => t.Name == "Acente")
+                .Select(t => (int?)t.Id)
+                .FirstOrDefaultAsync();
+
+            return await db.AccountTypeMappings
+                .Where(m => m.AccountTypeId == acenteTypeId)
+                .CountAsync();
+        }
+
         await OLS.Business.Seed.DbSeeder.SeedAsync(db, hasher, configuration, environment, logger);
+        var countAfterFirstSeed = await AcenteAccountCountAsync();
+
         await OLS.Business.Seed.DbSeeder.SeedAsync(db, hasher, configuration, environment, logger);
+        var countAfterSecondSeed = await AcenteAccountCountAsync();
 
-        var acenteTypeId = await db.AccountTypes
-            .Where(t => t.Name == "Acente")
-            .Select(t => (int?)t.Id)
-            .FirstOrDefaultAsync();
-
-        var acenteAccountCount = await db.AccountTypeMappings
-            .Where(m => m.AccountTypeId == acenteTypeId)
-            .CountAsync();
-
-        acenteAccountCount.Should().Be(1);
+        countAfterSecondSeed.Should().Be(countAfterFirstSeed,
+            "ikinci seed çağrısı ek bir Acente hesabı üretmemeli — DIĞER testlerin kendi hesapları etkilenmeden");
     }
 }

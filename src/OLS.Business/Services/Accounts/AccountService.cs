@@ -526,6 +526,29 @@ public sealed class AccountService : IAccountService
             })
             .ToListAsync(cancellationToken);
 
+        var invoices = await _db.Invoices.AsNoTracking()
+            .Where(i => i.AccountId == account.Id)
+            .OrderByDescending(i => i.Id)
+            .Select(i => new AccountInvoiceDto
+            {
+                Id = i.Id,
+                InvoiceId = i.InvoiceId,
+                BoxType = i.BoxType,
+                CommercialType = i.CommercialType,
+                TargetTitle = i.TargetTitle,
+                TargetIdentityNo = i.TargetIdentityNo,
+                PayableAmount = i.PayableAmount,
+                TaxExclusiveAmount = i.TaxExclusiveAmount,
+                TaxAmount = i.TaxAmount,
+                TaxRate = i.TaxRate,
+                DocumentCurrencyCode = i.DocumentCurrencyCode,
+                InvoiceType = i.InvoiceType == null ? null
+                    : new AccountTypeDto { Id = i.InvoiceType.Id, Name = i.InvoiceType.Name ?? string.Empty },
+                InvoiceStatus = i.InvoiceStatus == null ? null
+                    : new AccountTypeDto { Id = i.InvoiceStatus.Id, Name = i.InvoiceStatus.Name ?? string.Empty },
+            })
+            .ToListAsync(cancellationToken);
+
         return new AccountDetailDto
         {
             Id = account.Id,
@@ -552,6 +575,7 @@ public sealed class AccountService : IAccountService
             AccountTypeMappingId = typeMappings,
             AccountContactPerson = contacts,
             UserAccountMapping = userMappings,
+            Invoice = invoices,
         };
     }
 
