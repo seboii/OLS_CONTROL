@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { Plus, Shield } from "lucide-react";
+import { Plus, Shield, Upload, Trash2 } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useDebouncedValue } from "@/lib/hooks";
+import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
 import { Drawer } from "@/components/ui/Overlay";
-import { Badge, Btn, FormField, Tabs, TextInput } from "@/components/ui/primitives";
+import { Badge, Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
+
+interface NamedRef {
+  id: string;
+  name: string | null;
+}
 
 interface UserItem {
   id: number;
@@ -17,6 +22,11 @@ interface UserItem {
   phone: string | null;
   status: boolean;
   avatar: string | null;
+}
+
+interface UserDetail extends UserItem {
+  pkds_id: string | null;
+  phone_country_id: NamedRef | null;
 }
 
 interface PermissionRow {
@@ -61,9 +71,25 @@ export function UsersPage() {
   const [tab, setTab] = useState("Profil");
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
-  const [form, setForm] = useState({ name: "", surname: "", email: "", phone: "", password: "" });
+  const [form, setForm] = useState({ name: "", surname: "", email: "", phone: "", password: "", phone_country_id: "", pkds_id: "" });
   const [permRows, setPermRows] = useState<PermissionRow[]>([]);
   const [permLoading, setPermLoading] = useState(false);
+  const [existingAvatar, setExistingAvatar] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [removeAvatar, setRemoveAvatar] = useState(false);
+
+  const { options: countries } = useLookupOptions("/api/v1/country");
+
+  useEffect(() => {
+    if (!avatarFile) {
+      setAvatarPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(avatarFile);
+    setAvatarPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [avatarFile]);
 
   function load() {
     setLoading(true);
@@ -84,9 +110,12 @@ export function UsersPage() {
 
   function openNew() {
     setEditingId(null);
-    setForm({ name: "", surname: "", email: "", phone: "", password: "" });
+    setForm({ name: "", surname: "", email: "", phone: "", password: "", phone_country_id: "", pkds_id: "" });
     setErrors({});
     setPermRows([]);
+    setExistingAvatar(null);
+    setAvatarFile(null);
+    setRemoveAvatar(false);
     setTab("Profil");
     setDrawerOpen(true);
   }
@@ -106,10 +135,22 @@ export function UsersPage() {
 
   async function openEdit(u: UserItem) {
     setEditingId(u.id);
-    setForm({ name: u.name ?? "", surname: u.surname ?? "", email: u.email ?? "", phone: u.phone ?? "", password: "" });
     setErrors({});
     setTab("Profil");
     setDrawerOpen(true);
+    try {
+      const res = await api.get<DataMessage<UserDetail>>(`/api/v1/user/${u.id}`);
+      const d = res.data;
+      setForm({
+        name: d.name ?? "", surname: d.surname ?? "", email: d.email ?? "", phone: d.phone ?? "",
+        password: "", phone_country_id: d.phone_country_id?.id ?? "", pkds_id: d.pkds_id ?? "",
+      });
+      setExistingAvatar(d.avatar);
+    } catch {
+      addToast("Kullanıcı bilgileri yüklenemedi", "error");
+    }
+    setAvatarFile(null);
+    setRemoveAvatar(false);
     await loadPermissions(u.id);
   }
 
@@ -122,7 +163,11 @@ export function UsersPage() {
     fd.append("surname", form.surname);
     fd.append("email", form.email);
     fd.append("phone", form.phone);
+    if (form.phone_country_id) fd.append("phone_country_id", form.phone_country_id);
+    if (form.pkds_id) fd.append("pkds_id", form.pkds_id);
     if (form.password) fd.append("password", form.password);
+    if (avatarFile) fd.append("avatar", avatarFile);
+    else if (removeAvatar) fd.append("avatar_remove", "1");
     try {
       if (editingId) {
         await api.postForm("/api/v1/user/update", fd);
@@ -161,6 +206,22 @@ export function UsersPage() {
     } catch {
       addToast("Yetki güncellenemedi", "error");
       setPermRows((rowsState) => rowsState.map((r) => (r.id === row.id ? { ...r, [crud]: row[crud] } : r)));
+    }
+  }
+
+  // olsold: UserRole.vue "Tümünü Seç" satırı — permission_page_id GÖNDERMEDEN
+  // çağırmak backend'de (RoleController) o kullanıcının TÜM satırlarını
+  // tek seferde günceller.
+  async function toggleAllPermissions(crud: "read" | "create" | "update" | "delete") {
+    if (!editingId) return;
+    const newValue = permRows.every((r) => r[crud] === 1) ? 0 : 1;
+    const previous = permRows;
+    setPermRows((rowsState) => rowsState.map((r) => ({ ...r, [crud]: newValue })));
+    try {
+      await api.put("/api/v1/role", { crud, is_data: newValue, user_id: editingId });
+    } catch {
+      addToast("Yetki güncellenemedi", "error");
+      setPermRows(previous);
     }
   }
 
@@ -233,6 +294,41 @@ export function UsersPage() {
         <Tabs tabs={editingId ? ["Profil", "Yetkiler"] : ["Profil"]} active={tab} onChange={setTab} className="px-6" />
         {tab === "Profil" && (
           <div className="p-6 grid grid-cols-2 gap-4">
+            <div className="col-span-2">
+              <FormField label="Profil Fotoğrafı">
+                <div className="flex items-center gap-3">
+                  {avatarPreview ? (
+                    <img src={avatarPreview} alt="" className="w-14 h-14 rounded-full object-cover" />
+                  ) : !removeAvatar && existingAvatar ? (
+                    <img src={`/storage/${existingAvatar}`} alt="" className="w-14 h-14 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-14 h-14 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-lg font-bold">
+                      {initials(form.name, form.surname)}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-600 cursor-pointer hover:border-blue-300 hover:text-blue-600 transition-colors">
+                      <Upload size={13} />Değiştir
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/gif,image/webp,image/svg+xml"
+                        className="hidden"
+                        onChange={(e) => { const f = e.target.files?.[0]; if (f) { setAvatarFile(f); setRemoveAvatar(false); } }}
+                      />
+                    </label>
+                    {(avatarPreview || (!removeAvatar && existingAvatar)) && (
+                      <button
+                        type="button"
+                        onClick={() => { setAvatarFile(null); setRemoveAvatar(true); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs text-gray-400 hover:border-red-200 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={13} />Kaldır
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </FormField>
+            </div>
             <FormField label="Ad" required error={errors.name?.[0]}>
               <TextInput value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} error={!!errors.name} />
             </FormField>
@@ -242,11 +338,21 @@ export function UsersPage() {
             <FormField label="E-posta" required error={errors.email?.[0]}>
               <TextInput value={form.email} onChange={(v) => setForm((f) => ({ ...f, email: v }))} type="email" error={!!errors.email} />
             </FormField>
-            <FormField label="Telefon">
-              <TextInput value={form.phone} onChange={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="+90 5XX XXX XX XX" />
-            </FormField>
             <FormField label={editingId ? "Yeni Şifre" : "Şifre"} required={!editingId} error={errors.password?.[0]} hint={editingId ? "Boş bırakılırsa mevcut şifre korunur." : undefined}>
               <TextInput value={form.password} onChange={(v) => setForm((f) => ({ ...f, password: v }))} type="password" error={!!errors.password} />
+            </FormField>
+            <FormField label="Ülke Kodu">
+              <SelectInput
+                value={form.phone_country_id}
+                onChange={(v) => setForm((f) => ({ ...f, phone_country_id: v }))}
+                options={[{ value: "", label: "Seçiniz" }, ...countries.map((c) => ({ value: String(c.id), label: c.name }))]}
+              />
+            </FormField>
+            <FormField label="Telefon">
+              <TextInput value={form.phone} onChange={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="5XX XXX XX XX" />
+            </FormField>
+            <FormField label="PDKS Numarası">
+              <TextInput value={form.pkds_id} onChange={(v) => setForm((f) => ({ ...f, pkds_id: v }))} />
             </FormField>
           </div>
         )}
@@ -268,6 +374,20 @@ export function UsersPage() {
                     </tr>
                   </thead>
                   <tbody>
+                    <tr className="border-b border-gray-100">
+                      <td className="py-2.5 pr-3 font-semibold text-gray-700">Tümünü Seç</td>
+                      {(["read", "create", "update", "delete"] as const).map((crud) => (
+                        <td key={crud} className="py-2.5 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={permRows.length > 0 && permRows.every((r) => r[crud] === 1)}
+                            disabled={!canManageRoles || permRows.length === 0}
+                            onChange={() => toggleAllPermissions(crud)}
+                            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                          />
+                        </td>
+                      ))}
+                    </tr>
                     {permRows.map((row, i) => (
                       <tr key={row.id} className={i % 2 === 0 ? "bg-gray-50/50" : ""}>
                         <td className="py-2.5 pr-3 font-medium text-gray-700">{row.permission_page_name}</td>
