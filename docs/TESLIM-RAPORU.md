@@ -120,6 +120,14 @@ verinin baştan beri doğru geldiği görüldü. Bu, önceki oturumda `<select>`
 `<input>` sürümü — ders: seçici/picker bileşenlerinin dolu/boş durumunu HER ZAMAN gerçek DOM
 `value`/`selectedOptions` sorgusuyla doğrula, düz metin dökümüyle değil.
 
+Ayrıca bu güncellemede: (a) kullanıcının talebiyle tüm `ols-scoped-dotnet` ağacı olsold'un yapım
+şirketinin adı için tarandı (dosya adı + dosya içeriği) — SIFIR eşleşme, port zaten temiz; (b) eksik
+olduğu bilinen "E-Posta Ayarları" sekmesi eklendi (Teklif'in Gönderilecek/CC e-posta listesi) — backend
+`LoadDetailDto`'ya `email_to`/`email_cc` okuma alanları eklendi (`LoadEmails` tablosu, yazma tarafı
+zaten hazırdı), frontend'e yeni `EmailChipInput` bileşeni eklendi; canlı Docker'da ekle→kaydet→yeniden
+aç ve sil→kaydet→DB doğrulaması ile tam döngü test edildi, ayrıca bu save'in Görevliler gibi diğer
+sekmelerin verisini bozmadığı ayrıca doğrulandı. Ayrıntı: §8 Teklif bölümü.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 58 tablo, EF Core/Npgsql +
@@ -224,9 +232,14 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   kullanması, Acente/Navlun Ödeyen Firma/Mali Kalem Cari seçicilerinin `account_type_id`'ye göre hiç
   filtrelenmemesi. DÜRÜST NOT — sekme YAPISI kaynaktan farklı: olsold'un gerçek `OfferFormDrawer.vue`'sunda
   Taraflar/Güzergah ayrı sekme değil, Genel Bilgiler içinde; buradaki alan kapsamı birebir ama gruplama
-  farklı. Ayrıca olsold'da olup burada HÂLÂ eklenmeyen: "E-Posta Ayarları" sekmesi (backend `EmailTo`/
-  `EmailCc` alanlarını zaten destekliyor, frontend'den hiç gönderilmiyor), "İlgili E-Posta" sekmesi
-  (yalnızca teklif AI'dan/mail'den oluştuysa görünür, `saveAi` bu kapsamda zaten YOK — bkz. §4 AI satırı).
+  farklı. **[Kritik yön değişikliği #6'da eklendi]** "E-Posta Ayarları" sekmesi artık var: backend
+  `LoadDetailDto`'ya `email_to`/`email_cc` (okuma, `LoadEmails` tablosundan) eklendi — yazma tarafı
+  (`EmailTo`/`EmailCc`) zaten destekliyordu, yalnızca frontend'den hiç gönderilmiyordu ve okuma tarafı
+  hiç yoktu. Frontend'de yeni `EmailChipInput` bileşeni (yaz+Ekle+silinebilir chip listesi) kaynağın
+  `AutoComplete multiple` serbest-metin-çoğul davranışına işlevsel eşdeğer. Canlı Docker'da ekle→
+  kaydet→yeniden aç ve sil→kaydet→DB'de 0 satır ile tam döngü doğrulandı. Hâlâ eklenmeyen tek şey:
+  "İlgili E-Posta" sekmesi (yalnızca teklif AI'dan/mail'den oluştuysa görünür, `saveAi` bu kapsamda
+  zaten YOK — bkz. §4 AI satırı) — bilinçli olarak dışarıda, işlevsel bir karşılığı olmadığından.
 - **Yük** (`LoadsPage.tsx`) — TAMAMLANDI: 7 sekmeli (Genel Bilgiler/Paketler/Finans/Görevliler/
   Hareketler/Faturalar/Dosya Arşivi — son 5'i bu güncellemede eklendi, önceden yalnızca ilk 2 vardı ve
   form salt-okunurdu) düzenleme formu; Teklif→Yük dönüşüm tetikleyicisi (Teklifler ekranında `siber_id`
