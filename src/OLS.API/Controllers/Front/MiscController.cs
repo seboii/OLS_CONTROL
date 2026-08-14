@@ -81,7 +81,10 @@ public sealed class LoadFileController : ApiControllerBase
 /// olsold: <c>Front\Permission\PermissionController::save</c>
 ///
 /// Geliştirici aracı: yeni modül eklendiğinde yetki sayfasını açar ve tüm
-/// kullanıcılara dört hakkı da verir.
+/// kullanıcılara dört hakkı da verir. Kaynakta yetki kontrolü YOKTU (yalnızca
+/// giriş yapmış olmak yeterliydi) — ama bu uç TÜM kullanıcıların yetki setini
+/// toplu değiştiren bir yan etki taşıyor; docs/API-PARITE-MATRISI.md bunun için
+/// en azından <c>role_management</c>(create) planlamıştı, burada uygulanıyor.
 /// </summary>
 [Authorize]
 [Route("api/v1/permission")]
@@ -95,6 +98,7 @@ public sealed class PermissionPageController : ApiControllerBase
     }
 
     [HttpPost]
+    [RequiresPermission(PermissionAction.Create, "role_management")]
     public async Task<IActionResult> Save(
         [FromBody] PermissionPageRequest request, CancellationToken cancellationToken)
     {

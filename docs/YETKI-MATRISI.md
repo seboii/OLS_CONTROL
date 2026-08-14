@@ -30,7 +30,7 @@ Rol tabanlı DEĞİL — **sayfa-slug × CRUD bayrağı** modeli (olsold'un `Rol
 | Sefer | `expedition_management` | Sefer Yönetimi | `ExpeditionController` (`LoadTransferController.cs` içinde), `ExpeditionLoadMappingController` |
 | Fatura | `invoice_management` | Fatura Yönetimi | `InvoiceController`, `InvoiceFooterController` |
 | Araç | `car_management` | Araç Yönetimi | `CarController` |
-| Kullanıcılar | `user_management` | Kullanıcı Yönetimi | `UserController` |
+| Kullanıcılar | `user_management` | Kullanıcı Yönetimi | `UserController`, `UserGoalController` (Hedefler sekmesi — kaynakta `delete()`'in yetki kontrolü yorum satırındaydı, burada gerçek `user_management` yetkisi uygulanıyor) |
 | Kullanıcılar → Yetkiler sekmesi | `role_management` | Rol/Yetki Yönetimi | `RoleController`: **kendi** yetkini okumak HER ZAMAN serbest (slug kontrolü atlanır); **başkasının** yetkisini okumak `role_management`/read ister; yetki GÜNCELLEMEK (kendi dahil) her zaman `role_management`/update ister |
 | Destek Talebi | `support_request_management` | Destek Talebi Yönetimi | `ContactFormController` (liste/detay/durum güncelleme — anonim form gönderimi hariç, o `[AllowAnonymous]`) |
 

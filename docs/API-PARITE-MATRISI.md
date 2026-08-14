@@ -100,7 +100,7 @@ Durum kodları:
 |---|---|---|---|
 | `POST /api/v1/car` | `CarController::save` | PORT-DUZELT | Kaynak: FK'lar guard'sız çözülüyor (dangling FK → uncaught Error) — HEDEF'te güvenli çözüm |
 | `PUT /api/v1/car` | `::update` | PORT | Zaten guard'lı (`optional()`) |
-| `DELETE /api/v1/car` | `::delete` | KOPYALANMAYACAK-BUG→PORT-DUZELT | `car_management` slug'ı seed'de yok (kod bunu itiraf ediyor) → fiilen herkese açık. **HEDEF'te gerçek sayfa+yetki seed edilecek** |
+| `DELETE /api/v1/car` | `::delete` | KOPYALANMAYACAK-BUG→PORT-DUZELT | **[FAZ 5 güvenlik taramasında doğrulandı]** `car_management` artık `DbSeeder.cs`'de gerçekten seed ediliyor, `CarController`'ın tüm uçları buna bağlı — fiilen herkese açık durumu artık yok |
 | `GET /api/v1/car` | `::all` | PORT | |
 | `GET /api/v1/car/{id}` | `::single` | PORT | |
 | `POST/PUT/DELETE /api/v1/car_type[...]` | `CarTypeController` | CALISMIYOR-LEGACY→PORT | save/update/delete fatal (yanlış `CaseType` importu). olsnew'in generic `LookupControllerBase` altyapısı ile çalışır hale getirilmiş — taşınacak |
@@ -123,17 +123,18 @@ Durum kodları:
 | `GET /api/v1/user/list` | — | CALISMIYOR-LEGACY | `FrontUserController::list` metodu yok VE rota `/user/{id}`'den sonra tanımlı olsa bile Laravel önce `single('list')`'e düşürüyor → olsold'da da işlevsiz. Portlanmadı |
 | `GET /api/v1/role` | `UserPermissionController::single` | PORT-DUZELT | Kaynak: yetkisiz istekte tanımsız değişkenlerle 200 dönüyor (buggy scoping) — HEDEF'te düzgün 403 |
 | `PUT /api/v1/role` | `::update` | PORT-DUZELT | Kaynak: `permission_page_id` aslında `user_permissions.id`'yi bekliyor (yanıltıcı ad, **tel kontratı için korunacak**); yetkisiz de her zaman `{result:'success'}` dönüyor — HEDEF'te gerçek sonuç; `__lang()` tanımsız fonksiyon çağrısı (fatal risk) düzeltilecek |
-| `POST /api/v1/permission` | `PermissionController::save` | PORT-DUZELT | Kaynakta yetki kontrolü yok, yeni sayfa herkese tam yetki veriyor (geliştirici aracı) — HEDEF'te en azından `role_management`(create) yetkisi eklenecek |
+| `POST /api/v1/permission` | `PermissionController::save` | PORT-DUZELT | **[Doğrulandı]** Kaynakta yetki kontrolü yoktu, yeni sayfa herkese tam yetki veriyor (geliştirici aracı) — `role_management`(create) yetkisi eklendi (`PermissionEnforcementTests.cs`, 2 test, mutasyon testiyle doğrulandı) |
 | `GET/POST/POST/POST/POST/DELETE /api/v1/profile[...]` | `ProfileController` | PORT | Kimlik her zaman token'dan; BR-012 (mevcut parola kontrolü) testli |
+| `POST/PUT/DELETE/GET/GET /api/v1/user_goal[...]` | `UserGoalController` | YENI | Kaynakta `UserGoalController` (`/api/v1/user_goal`) var ama olsnew'e hiç taşınmamıştı — Kullanıcılar formunun "Hedefler" sekmesinin (`UserTarget.vue`) verisi, genel Reports/Hedef-ciro modülünden AYRI (bkz. SECILI-MODUL-PARITE-MATRISI.md §7 satır 134). Kaynakta `delete()`'in yetki kontrolü yorum satırındaydı — burada gerçek `user_management` yetkisi + kaynağın tarih-aralığı çakışma kuralı birebir (`UserGoalTests.cs`, 6 test) |
 
 ## Destek Talebi (WebsiteContactForm)
 
 | Method+Path | Controller::method | Durum | Not |
 |---|---|---|---|
 | `POST /api/website/contact/form` | `ContactFormController::store` | PORT | Anonim, kasıtlı |
-| `GET /api/website/contact/form` | `::index` | KOPYALANMAYACAK-BUG→PORT-DUZELT | **SEC-003: kaynakta tamamen anonim** (herkes tüm PII'yi okuyabiliyor). olsnew `[Authorize]` eklemiş (iyi) ama CRUD yetki sayfası yok — HEDEF'te gerçek `support_request_management`(read) eklenecek |
-| `GET /api/website/contact/form/{id}` | `::show` | KOPYALANMAYACAK-BUG→PORT-DUZELT | Aynı; GET'in `is_read` yan etkisi korunuyor, yetki eklenecek |
-| `PATCH /api/website/contact/form/{id}/answered` | `::updateAnsweredStatus` | KOPYALANMAYACAK-BUG→PORT-DUZELT | Aynı; `support_request_management`(update) eklenecek |
+| `GET /api/website/contact/form` | `::index` | KOPYALANMAYACAK-BUG→PORT-DUZELT | **SEC-003: kaynakta tamamen anonim** (herkes tüm PII'yi okuyabiliyor). Gerçek `support_request_management`(read) yetkisi eklendi. **[Bu güncellemede eklendi]** kaynağın işlevsiz arama kutusu artık gerçekten filtreliyor (`ContactFormTests.cs`, 5 test) |
+| `GET /api/website/contact/form/{id}` | `::show` | KOPYALANMAYACAK-BUG→PORT-DUZELT | Aynı; GET'in `is_read` yan etkisi korunuyor, `support_request_management`(read) yetkisi eklendi |
+| `PATCH /api/website/contact/form/{id}/answered` | `::updateAnsweredStatus` | KOPYALANMAYACAK-BUG→PORT-DUZELT | Aynı; `support_request_management`(update) yetkisi eklendi |
 
 ---
 

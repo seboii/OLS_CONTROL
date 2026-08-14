@@ -70,6 +70,52 @@ public sealed class PermissionEnforcementTests
         body.GetProperty("errors").GetProperty("plate_number").GetArrayLength().Should().BeGreaterThan(0);
     }
 
+    /// <summary>
+    /// Regresyon: olsold: <c>Front\Permission\PermissionController::save</c> hiç yetki
+    /// kontrolü yapmıyordu (yalnızca giriş yapmış olmak yeterliydi) — ama bu uç TÜM
+    /// kullanıcıların yetki setini toplu değiştiren bir yan etki taşıyor
+    /// (docs/API-PARITE-MATRISI.md bunun için en azından role_management(create)
+    /// planlamıştı). docs/SECILI-MODUL-PARITE-MATRISI.md ile çelişen bu notu
+    /// uzlaştırırken bulundu, burada kilitleniyor.
+    /// </summary>
+    [Fact]
+    public async Task CreatePermissionPage_AsFreshUserWithoutRoleManagementPermission_Returns403()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var email = $"permpage-noperm-{Guid.NewGuid():N}@example.test";
+        await admin.CreateUserAsync(email);
+        var token = await _factory.LoginAsync(email, "Test!2026Pw");
+        using var client = _factory.CreateAuthorizedClient(token);
+
+        var response = await client.PostAsJsonAsync("/api/v1/permission", new
+        {
+            permission_page_name = $"Test Sayfası {Guid.NewGuid():N}",
+            permission_page_slug = $"test_page_{Guid.NewGuid():N}",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task CreatePermissionPage_AfterGrantingRoleManagementCreatePermission_Succeeds()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var email = $"permpage-withperm-{Guid.NewGuid():N}@example.test";
+        var userId = await admin.CreateUserAsync(email);
+        await admin.GrantPermissionAsync(userId, "role_management", "create");
+
+        var token = await _factory.LoginAsync(email, "Test!2026Pw");
+        using var client = _factory.CreateAuthorizedClient(token);
+
+        var response = await client.PostAsJsonAsync("/api/v1/permission", new
+        {
+            permission_page_name = $"Test Sayfası {Guid.NewGuid():N}",
+            permission_page_slug = $"test_page_{Guid.NewGuid():N}",
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
     [Fact]
     public async Task UnknownPermissionSlug_IsOpenByDefault_MatchingLegacyRoleHelperBehavior()
     {

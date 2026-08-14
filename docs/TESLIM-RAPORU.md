@@ -292,8 +292,7 @@ kontrol edildi:
   notu STALE çıktı — `DbSeeder.cs`'de zaten var.
 - `[Authorize]` var ama `[RequiresPermission]` YOK görünen 3 uç (`PermissionPageController.Save`,
   `OfferEmailController.Save`, `LoadFileController.Upload`) tek tek olsold kaynağıyla karşılaştırıldı:
-  üçü de kaynakta ZATEN yalnızca `auth:api` ile korunuyor, hiçbir `RoleHelper::permission` çağrısı
-  yok — birebir korunuyor, düzeltme gerekmedi.
+  üçü de kaynakta ZATEN yalnızca `auth:api` ile korunuyor, hiçbir `RoleHelper::permission` çağrısı yok.
 - Dosya yükleme (`FileStorage.cs`): uzantı beyaz listesi, boyut sınırı, HER ZAMAN yeniden üretilen
   rastgele dosya adı (orijinal ad asla yol olarak kullanılmıyor), hem kaydetme hem silmede yol
   gezinmesi koruması (`Path.GetFileName`) — kaynaktan daha güvenli, ek düzeltme gerekmedi.
@@ -303,8 +302,17 @@ kontrol edildi:
   hata verir), üretim `appsettings.json`'ında sır yok, CORS `*` değil iki yerel origin'e kısıtlı.
 
 Sonuç: sistematik taramada YENİ bir güvenlik açığı bulunmadı — her şüpheli nokta ya zaten
-düzeltilmiş ya da kaynakla bilinçli birebir olduğu doğrulandı. Bu, önceki fazlarda yapılan
-düzeltmelerin (SEC-003 vb.) münferit olmadığını, sistemli bir taramadan geçtiğini kanıtlıyor.
+düzeltilmiş ya da kaynakla bilinçli birebir olduğu doğrulandı.
+
+**Düzeltme (yukarıdaki #11'in kendisinde — docs/TESLIM-RAPORU.md'yi docs/API-PARITE-MATRISI.md ile
+uzlaştırırken bulundu):** "üçü de birebir korunuyor, düzeltme gerekmedi" ifadesi `PermissionPageController.
+Save` için YANLIŞTI. Kaynakla birebir olmak DOĞRU tespitti ama `API-PARITE-MATRISI.md` bu uç için ayrıca
+"en azından `role_management`(create) yetkisi eklenecek" diye bir plan içeriyordu — bu uç, yeni bir yetki
+sayfası oluşturduğunda TÜM mevcut kullanıcılara o sayfada dört hakkı da otomatik veren bir yan etki
+taşıyor; "kaynakla aynı" olmak bu durumda yeterli gerekçe değildi. Plan uygulandı:
+`[RequiresPermission(Create,"role_management")]` eklendi, canlı Docker'da hem yetkili (admin, 200) hem
+yetkisiz (taze sıfır-yetkili kullanıcı, 403) uçtan uca doğrulandı. `PermissionEnforcementTests.cs`'e 2
+yeni test eklendi (mutasyon testiyle doğrulandı) — toplam 95/95 test geçiyor.
 
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
@@ -322,7 +330,7 @@ düzeltmelerin (SEC-003 vb.) münferit olmadığını, sistemli bir taramadan ge
 - **İki kritik hata canlı ortamda bulunup düzeltildi ve regresyon testiyle kilitlendi** — ayrıntı
   [docs/TEST-RAPORU.md](TEST-RAPORU.md) §1: `/api/v1/role` zarf uyuşmazlığı (sidebar tamamen boş
   görünüyordu), `super_admin` yetki sayfasının seed edilmemesi (yeni cariler kimseye görünmüyordu).
-- **93 otomatik test, hepsi geçiyor** (64 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
+- **95 otomatik test, hepsi geçiyor** (66 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
   pipeline'ı üzerinden, hiçbir katman mock'lanmadan. Test geliştirme sürecinde 3 ayrı gerçek ortam/
   test-edilebilirlik sorunu daha bulunup düzeltildi (bkz. TEST-RAPORU.md §3) — en önemlisi, testlerin
   başlangıçta sessizce GERÇEK dev veritabanına yazdığının fark edilip kalıcı olarak düzeltilmesi.
@@ -354,7 +362,7 @@ düzeltmelerin (SEC-003 vb.) münferit olmadığını, sistemli bir taramadan ge
 
 ```
 dotnet build                                    → 0 hata, 2 pre-existing nullability uyarısı
-dotnet test                                     → 93/93 geçti (29 birim + 64 entegrasyon), ~1.3 dk
+dotnet test                                     → 95/95 geçti (29 birim + 66 entegrasyon), ~1.3 dk
 docker compose up -d --build                    → 4 servis (postgres/siber-mock/api/frontend) sağlıklı
 curl -X POST .../api/v1/login (admin)           → 200, gerçek JWT
 GET /api/v1/account (Docker API, canlı)         → 200, gerçek cari listesi
@@ -365,7 +373,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-93/93 otomatik test geçiyor (29 OLS.Business.Tests + 64 OLS.API.IntegrationTests). Kapsanan: auth
+95/95 otomatik test geçiyor (29 OLS.Business.Tests + 66 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
