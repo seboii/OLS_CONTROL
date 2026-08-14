@@ -95,6 +95,8 @@ interface LoadDetail {
   way_of_working: number | null;
   front_transportation_by_us: number | null;
   final_transportation_by_us: number | null;
+  email_to: string[];
+  email_cc: string[];
 }
 
 interface LoadChargePersonDetail {
@@ -132,7 +134,7 @@ function useStatusTypeMap() {
 }
 
 const PER_PAGE = 8;
-const TABS = ["Genel Bilgiler", "Taraflar", "Güzergah", "Görevliler", "Mali Kalemler", "Dosya Arşivi"];
+const TABS = ["Genel Bilgiler", "Taraflar", "Güzergah", "Görevliler", "Mali Kalemler", "Dosya Arşivi", "E-Posta Ayarları"];
 const WAY_OF_WORKING_OPTIONS = [
   { value: "0", label: "Spot" },
   { value: "1", label: "Yıllık" },
@@ -149,6 +151,41 @@ const BUYSELL_OPTIONS = [
 ];
 const FINANCIAL_ITEM_BUY_QUERY = { type: "1" };
 const FINANCIAL_ITEM_SELL_QUERY = { type: "2" };
+
+/** olsold: "E-Posta Ayarları" sekmesindeki AutoComplete multiple (serbest metin, chip listesi). */
+function EmailChipInput({ label, emails, onChange }: { label: string; emails: string[]; onChange: (emails: string[]) => void }) {
+  const [value, setValue] = useState("");
+
+  function add() {
+    const trimmed = value.trim();
+    if (trimmed && !emails.includes(trimmed)) onChange([...emails, trimmed]);
+    setValue("");
+  }
+
+  return (
+    <div>
+      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">{label}</p>
+      <div className="flex gap-2 mb-2">
+        <TextInput value={value} onChange={setValue} placeholder="ornek@sirket.com" />
+        <Btn variant="secondary" onClick={add}>Ekle</Btn>
+      </div>
+      {emails.length === 0 ? (
+        <p className="text-xs text-gray-400">Henüz e-posta eklenmedi.</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {emails.map((email, i) => (
+            <span key={i} className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-1 rounded-full bg-blue-50 text-blue-700 text-xs">
+              {email}
+              <button type="button" onClick={() => onChange(emails.filter((_, xi) => xi !== i))} className="text-blue-400 hover:text-red-500">
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function QuotesPage() {
   const { can } = useAuth();
@@ -195,6 +232,9 @@ export function QuotesPage() {
   const [existingFiles, setExistingFiles] = useState<LoadFileDetail[]>([]);
   const [removedFileIds, setRemovedFileIds] = useState<number[]>([]);
   const [newFiles, setNewFiles] = useState<File[]>([]);
+  // olsold "E-Posta Ayarları" sekmesi: offer_data.email.to / .cc (serbest metin, çoğul).
+  const [emailTo, setEmailTo] = useState<string[]>([]);
+  const [emailCc, setEmailCc] = useState<string[]>([]);
 
   const { options: workTypes } = useLookupOptions("/api/v1/work_type");
   const { options: loadingTypes } = useLookupOptions("/api/v1/loading_type");
@@ -256,6 +296,8 @@ export function QuotesPage() {
     setNewFiles([]);
     setOperationOfficer(null);
     setSalesReps([]);
+    setEmailTo([]);
+    setEmailCc([]);
     setErrors({});
   }
 
@@ -339,6 +381,8 @@ export function QuotesPage() {
         })),
       );
       setExistingFiles(d.load_file);
+      setEmailTo(d.email_to ?? []);
+      setEmailCc(d.email_cc ?? []);
     } catch {
       addToast("Teklif detayı yüklenemedi", "error");
       setDrawerOpen(false);
@@ -427,6 +471,9 @@ export function QuotesPage() {
       fd.append(`load_charge_person[${i + 1}][user_id]`, String(rep.id));
       fd.append(`load_charge_person[${i + 1}][user_type]`, "2");
     });
+
+    emailTo.forEach((email) => fd.append("email_to[]", email));
+    emailCc.forEach((email) => fd.append("email_cc[]", email));
 
     existingFiles
       .filter((f) => !removedFileIds.includes(f.id))
@@ -870,6 +917,13 @@ export function QuotesPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {tab === "E-Posta Ayarları" && (
+              <div className="space-y-6">
+                <EmailChipInput label="Gönderilecek" emails={emailTo} onChange={setEmailTo} />
+                <EmailChipInput label="CC" emails={emailCc} onChange={setEmailCc} />
               </div>
             )}
           </div>

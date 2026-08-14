@@ -105,6 +105,13 @@ public sealed class LoadDetailDto
 
     [JsonPropertyName("load_file")]
     public IReadOnlyList<LoadFileDto> LoadFile { get; init; } = [];
+
+    /// <summary>olsold: "E-Posta Ayarları" sekmesi (offer_data.email.to/.cc).</summary>
+    [JsonPropertyName("email_to")]
+    public IReadOnlyList<string> EmailTo { get; init; } = [];
+
+    [JsonPropertyName("email_cc")]
+    public IReadOnlyList<string> EmailCc { get; init; } = [];
 }
 
 /// <summary>id + name taşıyan basit referans tabloları (iş tipi, departman vb.).</summary>

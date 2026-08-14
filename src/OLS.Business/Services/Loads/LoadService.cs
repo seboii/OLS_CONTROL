@@ -313,6 +313,16 @@ public sealed class LoadService : ILoadService
                     MimeType = f.MimeType, OrgName = f.OrgName, CreatedAt = f.CreatedAt,
                 })
                 .ToListAsync(cancellationToken),
+
+            EmailTo = await _db.LoadEmails.AsNoTracking()
+                .Where(e => e.LoadId == (int)l.Id && e.Key == "to")
+                .Select(e => e.Email!)
+                .ToListAsync(cancellationToken),
+
+            EmailCc = await _db.LoadEmails.AsNoTracking()
+                .Where(e => e.LoadId == (int)l.Id && e.Key == "cc")
+                .Select(e => e.Email!)
+                .ToListAsync(cancellationToken),
         };
     }
 
