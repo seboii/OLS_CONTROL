@@ -9,10 +9,15 @@ titizlikle, somut olarak listelendi.
 **İçeride (9 ekran):** Dashboard, Müşteri (Cari), Teklif, Yük, Sefer, Fatura, Araç, Kullanıcılar, Destek
 Talebi — artı bunların ortak altyapısı (auth, yetki modeli, coğrafya/lookup verileri).
 
-**Dışarıda (bilinçli):** olsold'un ayrı Reports/Hedef-ciro yönetimi (Dashboard'dan FARKLI — bkz. aşağıda),
-PDKS, kurum-içi mesajlaşma (Socket.IO/Mongo), Excel yönetimi, muhasebe planı admin ekranları, gümrük
-modülleri (transit beyanname/ordino/yetki mektubu), CMS, test/demo sayfaları, ilgisiz cron/job'lar.
+**Dışarıda (bilinçli):** olsold'un ayrı Reports/Hedef-ciro YÖNETİM EKRANI (Dashboard'dan FARKLI — bkz.
+aşağıda), PDKS, kurum-içi mesajlaşma (Socket.IO/Mongo), Excel yönetimi, muhasebe planı admin ekranları,
+gümrük modülleri (transit beyanname/ordino/yetki mektubu), CMS, test/demo sayfaları, ilgisiz cron/job'lar.
 Gerekçe: [docs/SECILI-MODUL-PARITE-MATRISI.md](SECILI-MODUL-PARITE-MATRISI.md).
+
+**İstisna (Kritik yön değişikliği #9):** "Hedef-ciro" ile AYNI `user_goal` veri modelini kullanan ama
+AYRI bir yer — Kullanıcılar formunun kendi "Hedefler" sekmesi (kaynakta `UserTarget.vue`, kullanıcı
+başına aylık satış hedefi CRUD'u) — İÇERİDE: bu, ayrı bir Reports ekranı değil, kapsam-içi Kullanıcılar
+modülünün görsel/işlevsel bir parçası. Ayrıntı: SECILI-MODUL-PARITE-MATRISI.md §7 satır 134.
 
 **Kritik yön değişikliği #1 (oturum ortasında):** Frontend başlangıçta yanlışlıkla olsnew'in Vue3+PrimeVue
 arayüzü baz alınarak inşa edilmişti. Kullanıcı bunu düzeltti: gerçek hazır tasarım
@@ -128,9 +133,182 @@ zaten hazırdı), frontend'e yeni `EmailChipInput` bileşeni eklendi; canlı Doc
 aç ve sil→kaydet→DB doğrulaması ile tam döngü test edildi, ayrıca bu save'in Görevliler gibi diğer
 sekmelerin verisini bozmadığı ayrıca doğrulandı. Ayrıntı: §8 Teklif bölümü.
 
+**Kritik yön değişikliği #7 (bu güncellemede — Sefer'de "Silinen Hareketler" hatası soruşturulurken
+TÜM Hareketler sekmesinin hiç var olmadığı ortaya çıktı):** Kullanıcı, Yük'te düzeltilen "Silinen
+Hareketler" hatasının (bkz. Kritik yön değişikliği #5) Sefer'de de olup olmadığının doğrulanmasını
+istedi — hipotezi, Sefer'in Hareketler sekmesinin zaten var olup yalnızca `deleted_movements`i
+okumadığıydı (Yük'teki BİREBİR aynı hata deseni). `grep -rn "movement" frontend/src/pages/trips/
+TripsPage.tsx` SIFIR eşleşme verdi: hipotez KISMEN yanlış çıktı — sorun yalnızca okumama değil,
+**Hareketler sekmesinin TAMAMEN yokluğuydu** (`DETAIL_TABS = ["Genel Bilgiler", "Bağlı Yükler"]`,
+üçüncü sekme hiç yoktu). Kök neden araştırılınca bunun önceden §8'de "bilinçli kapsam dışı: Hareketler
+sekmesi (aynı `expedition_statuses` boş-tablo kısıtı)" olarak belgelendiği bulundu — ama bu gerekçenin
+KENDİSİ STALE çıktı: Kritik yön değişikliği #3 bu boş-tablo kısıtını "gerçek değil, taşınmamış ETL"
+olarak çözüp `expedition_statuses`/`expedition_types`'ı doldurduktan SONRA, §8'deki bu Sefer/Hareketler
+notu hiç güncellenmemişti. Backend zaten tamdı (`ExpeditionController.Movements/SaveMovement/
+DeleteMovement`, tam CRUD, Kritik yön değişikliği #5'te `MappedUserDto` ile genişletilmiş DTO) —
+Yük'ün Hareketler sekmesiyle BİREBİR AYNI kök durum (bkz. §8 Yük/Hareketler notu): sadece frontend hiç
+bağlanmamıştı.
+
+`olsold/resources/js/components/Expedition/ExpeditionFormMovements.vue` satır satır okunup kaynağın
+gerçek davranışı doğrulandı: Yük'ün hareket kartından TEK farkı, "X numaralı sefer hareketinden
+otomatik oluşmuştur" rozetinin YOK olmasıdır (bu rozet yalnızca Yük tarafında anlamlı — Sefer
+hareketleri bu rozetin KAYNAĞI, hedefi değil; `LoadFormMovements.vue`'de karşılaştırmalı doğrulandı).
+`ExpeditionFormDrawer.vue`'den sekme sırası da netleşti: Bilgiler → Sefer İçeriği (Bağlı Yükler) →
+Hareketler — port'taki sıra buna göre düzeltildi (Hareketler üçüncü sekme, "Bağlı Yükler" ikinci
+sekme olarak kaldı).
+
+`TripsPage.tsx`'e Yük'ün Hareketler sekmesiyle birebir aynı desen eklendi: hareket listesi, "Yeni
+Hareket Ekle" modalı (Durum + Konum zorunlu select, Adres/Açıklama), silme (soft delete), ve
+`v-if="deletedMovements.length > 0"` davranışını taşıyan "Silinen Hareketler" butonu + modalı.
+Backend'de HİÇBİR değişiklik gerekmedi. `npx tsc -b --force` temiz. Canlı Docker'da uçtan uca
+doğrulandı (gerçek Sefer kaydı SEF-2 üzerinde): POST ile hareket oluşturuldu (201, kart doğru render
+oldu — "Açık" durumu + "Istanbul Depo" konumu + "Sistem Yöneticisi (admin@ols-scoped.local)" oluşturan
+bilgisi), silindi (soft delete — `window.confirm` bu tarayıcı-otomasyonu ortamında native dialog
+gösteremediği için silme adımı doğrudan API'ye karşı doğrulandı, DB'de `deleted_at` dolduğu teyit
+edildi), sonrasında "Silinen Hareketler" butonu belirdi ve modal kaynakla birebir alanları gösterdi
+(durum rozeti, konum, "Oluşturan: ad soyad (email)", "Oluşturulma Tarihi", kırmızı "Silinme Tarihi",
+açıklama). **Metodoloji notu:** aynı doğrulamada, tarayıcı paneli compositing yapmıyorken (arka planda/
+görünür değilken) framer-motion'ın `AnimatePresence` çıkış animasyonunun `requestAnimationFrame`
+throttling'i yüzünden onlarca saniye "takılı" görünebildiği fark edildi (modal DOM'da kalıp
+"Kaydediliyor..." gösterebiliyor) — gerçek bir state hatası DEĞİL; `computer.screenshot` ile paneli
+gerçekten compositing'e zorlamak veya ağ/DB durumuna bakmak (DOM'a değil) doğru teşhis yöntemi.
+
+**Kritik yön değişikliği #8 (bu güncellemede — Fatura/Müşteri/Araç'ın satır satır alan denetimi):**
+Aynı yöntem (§1 Kritik yön değişikliği #4'te kurulan: kaynağın gerçek `*FormDrawer.vue`'sü satır
+satır taranıp bu portun karşılığıyla tek tek karşılaştırılması) sırayla Fatura, Müşteri, Araç'a
+uygulandı. En ciddi bulgu, Müşteri'de gerçek bir veri kaybı hatasıydı:
+
+**Fatura (`InvoicesPage.tsx` / `InvoiceFormDrawer.vue`, `InvoiceFormInvoiceItems.vue`):**
+1. Kalem eşleme seçicisi (`load_transfer_invoice_item` arama) kaynakta `status=pending` +
+   `buysell` (fatura `box_type`'ından türetilen) + cari filtreleriyle daraltılıyordu — port hiçbirini
+   uygulamıyordu, ZATEN başka bir faturaya bağlanmış veya alış/satış yönü uyuşmayan kalemler de
+   listede görünüyor, seçilirse ÇİFT FATURALANDIRMA riski oluşuyordu. Filtreler eklendi; ayrıca
+   zaten-eklenmiş kalemler için "Eklendi" rozeti eklendi. Regresyon testi:
+   `InvoiceTests.ListInvoiceItems_FiltersByStatusAndBuysell_ExcludesNonMatchingItems`.
+2. Detay sekme adları kaynaktan sapmıştı: "Genel Bilgiler"→"Bilgiler", "Dipnotlar"→"Ek Bilgiler"
+   (+ içindeki "Maddeler"/"Yeni Madde Ekle" alt başlıkları) — düzeltildi.
+3. Kaynağın 3 sekmeli liste yapısı (Gelen/Giden/**Onay Bekleyen** Faturalar) portta yalnızca 2
+   sekmeydi (Onay Bekleyen hiç yoktu) — `invoice_status_id` kaynakta hardcoded `7` idi, bu portta
+   farklı sırada seed edildiği için doğrudan taşınamazdı; isimden (`invoice_statuses.name ==
+   "Onay Bekliyor"`) çözülerek eklendi.
+
+**Müşteri (`CustomersPage.tsx` / `AccountFormDrawer.vue`, 632 satır) — [EN CİDDİ, gerçek veri kaybı]:**
+1. **Hesap Türü alanı kaynakta ÇOKLU seçim (`MultiSelect`), portta TEKİL seçimdi**
+   (`account_type_mapping: v ? [v] : []`) — bir cari aynı anda birden fazla tipte olabilir (kaynakta
+   normal bir durum). Canlı test verisinde GERÇEKTEN çoklu-tipli bir cari vardı ("Test Lojistik A.Ş."
+   → Müşteri+Alıcı+Gönderici); bu formu AÇIP dokunmadan Kaydet'e basmak (Yük'teki 9-alan hatasıyla
+   AYNI "sessiz veri kaybı" deseni) 3 tipi sessizce 1'e düşürüyordu. Çoklu-seçim chip-toggle UI'sine
+   düzeltildi. Regresyon testi: `AccountFormTests.cs` (3 test — ekle, koru, değiştir; "koru" testi
+   tam olarak canlıdaki senaryoyu — aç→dokunma→kaydet→tüm tipler kalsın mı — kilitliyor).
+2. Görevli (Charge Person) ve Faturalar sekmeleri hiç yoktu — backend zaten destekliyordu
+   (`account_charge_person`, `AccountDetailDto.Invoice`), eklendi.
+3. Avatar yükleme/gösterme hiç yoktu (diğer modüllerde zaten kurulan desenle eklendi).
+4. `tax_office` serbest-metin bir alandı, kaynakta gerçek bir `tax_office_id` lookup'ı — veri
+   bütünlüğü sorunu (elle yazılan metin normalize edilmiyordu), `SelectInput`'a çevrildi.
+
+**Araç (`VehiclesPage.tsx` / `car/form.vue`):**
+1. "Kiralanan Firma" (`customer_id`) alanı formda hiç yoktu — backend destekliyordu, eklendi.
+2. `cars.customer_id` yerel Account id'si DEĞİL, cari'nin Siber id'sini tutuyor
+   (`CarService.SingleAsync`'in `Accounts.Where(a => a.SiberId == c.CustomerId)` eşleşmesinden
+   görülüyor) — `AccountOption`/`AccountListItemDto`'ya (önceden yalnızca detay DTO'sunda olan)
+   `siber_id` eklenerek `AccountPicker` bu id'yi doğru gönderecek şekilde genişletildi. Regresyon
+   testi: `CarTests.CreateCar_WithCustomerSiberId_ResolvesBackToTheSameAccountOnRead`.
+
+Tüm bulgular canlı Docker'a karşı yazma→okuma round-trip'le doğrulandı. Commit'ler: Fatura
+(`306952f`, `5b04b9f`), Müşteri (`4434e29`), Araç (`60e54c8`).
+
+**Kritik yön değişikliği #9 (bu güncellemede — Kullanıcılar'ın satır satır alan denetimi + "Hedefler"
+sekmesi kapsam çelişkisinin çözümü):** Aynı yöntem `UserFormDrawer.vue`'ye (301 satır) uygulandı.
+
+**Bulunan alan eksikleri** (backend zaten destekliyordu, frontend hiç kullanmıyordu):
+1. Profil fotoğrafı yükleme/gösterme/kaldırma hiç yoktu.
+2. "Ülke Kodu" (`phone_country_id`) ve "PDKS Numarası" (`pkds_id`) alanları formda yoktu; ayrıca
+   liste satırı bu alanları taşımadığından düzenleme açılışında ayrı bir `GET /api/v1/user/{id}`
+   çağrısıyla hidratlanmaları gerekiyordu — o da yoktu.
+3. `UserRole.vue`'nin "Tümünü Seç" sütun başlığı (bir sütun için tek tıkla kullanıcının TÜM sayfa
+   yetkilerini toplu güncelleme) yoktu — backend (`RoleController`) bunu zaten destekliyordu
+   (`permission_page_id` gönderilmezse `user_id`'ye ait tüm satırlar güncellenir).
+Üçü de eklendi; canlı Docker'da uçtan uca doğrulandı (avatar round-trip, PDKS/ülke kodu
+kaydet→yeniden aç, Tümünü Seç'in DB'de 23/23 satırı güncellediği hem DB hem DOM'dan teyit edildi).
+Regresyon testi: `UserFormTests.cs` (2 test, ikisi de mutasyon testiyle doğrulandı). Commit: `8dafc3a`.
+
+**"Hedefler" sekmesi — kapsam çelişkisi bulundu ve kullanıcıya soruldu:** `UserFormDrawer.vue`'nin
+kaynakta ayrı bir sekmesi daha var — `UserTarget.vue` (223 satır, `api/v1/user_goal`): kullanıcı
+başına aylık satış hedefi (tutar + tarih aralığı) ekleme/düzenleme/silme. Bu portta HİÇ yoktu.
+Projenin kendi belgeleri bu konuda birbiriyle ÇELİŞİYORDU:
+- `SECILI-MODUL-PARITE-MATRISI.md` §7 satır 134 (erken planlama, FAZ 1/2): "İstisnai kapsam-içi
+  bağımlılık: 'hedef takibi' genel olarak kapsam dışı ama bu sekme UserFormDrawer'ın görsel/işlevsel
+  parçası olduğu için taşınacak (aksi halde form eksik görünür)."
+- `DependencyInjection.cs`'in özet yorumu: "Goals"u genel dışlanmışlar listesine dahil ediyordu —
+  ama bu YANLIŞ bir genellemeydi: §0 genel kararlar tablosunda "Goals" hiç geçmiyor, atıf verdiği
+  §7 satır 134'ün tam tersini söylüyor.
+
+Bu belirsizlik kod okumasıyla çözülemeyecek türden bir kapsam kararıydı — kullanıcıya soruldu,
+eklenmesi onaylandı. Backend: `UserGoal` entity + migration (`user_goals`), `UserGoalService`
+(CRUD + kaynağın tarih-aralığı çakışma kuralı — "Bu tarih aralığında zaten bir kayıt bulunmaktadır."
+— birebir), `UserGoalController` (`/api/v1/user_goal`). Kaynakta `delete()`'in yetki kontrolü YORUM
+SATIRINDAYDI (üstelik yanlış slug'la, `transport_type_management`) — fiilen herkese açıktı; burada
+`user_management` altında gerçek CRUD yetkisi uygulanıyor (formun geri kalanıyla aynı sayfa).
+Kaynağın `all()` yanıtındaki `total_price_sum` alanı (o kullanıcının Teklif-durumundaki satış
+kalemlerinin toplamı) `UserTarget.vue` tarafından hiç render edilmediği doğrulandı (ölü alan) —
+taşınmadı. Frontend: "Hedefler" sekmesi — hedef kartları, "Yeni Hedef Ekle" modalı (ay seçici →
+ayın 1'i/son günü, kaynağın `setNewDate`'iyle birebir), Düzenle/Sil. Canlı Docker'da uçtan uca
+doğrulandı: ekleme, çakışan tarih aralığının kaynağın kendi hata metniyle reddi, düzenleme, silme.
+Regresyon testi: `UserGoalTests.cs` (6 test, çakışma kontrolü mutasyon testiyle doğrulandı).
+Commit: `68a7abf`. §1'deki kapsam listesi ve `DependencyInjection.cs`'in yorumu bu kararı
+yansıtacak şekilde güncellendi.
+
+**Kritik yön değişikliği #10 (bu güncellemede — Destek Talebi'nin satır satır alan denetimi):**
+Aynı yöntem `FormsTable.vue` (96 satır) + `FormDetailDrawer.vue`'ye (152 satır) uygulandı (bkz.
+SECILI-MODUL-PARITE-MATRISI.md §8 — Destek Talebi = Website Contact Form, ayrı bir ticket modülü
+olsold'da hiç yok).
+1. Liste kolonları kaynaktan sapmıştı: port kaynakta olmayan "Talep No"/"Mesaj" kolonları
+   eklemişti, kaynağın "Kullanıcı/Tarih/Telefon/E-Posta/Okunma Durumu/Yanıtlanma Durumu" kolon
+   sırasını birebir yansıtmıyordu. "Durum" rozeti kaynakta HİÇ geçmeyen "Çözüldü"/"Açık" metnini
+   kullanıyordu — hem kaynakla hem bu sayfanın KENDİ detay panelindeki "Yanıtlandı"/"Yanıtlanmadı"
+   metniyle tutarsızdı. Tümü kaynağa birebir düzeltildi.
+2. Detay panelinde gönderim tarihi (`created_at`) alanı hiç gösterilmiyordu — kaynakta bu alan VAR
+   (kopyala-yapıştır hatasıyla yanlışlıkla "Telefon Numarası" diye ETİKETLENMİŞ olsa da, veri
+   kaynakta gerçekten gösteriliyor). Alan eklendi, ama kaynağın etiket HATASI değil verisi taşındı
+   (doğru "Tarih" etiketiyle).
+3. `FormsTable.vue`'nin arama kutusu kaynakta GÖRSEL AMA İŞLEVSİZDİ — `ContactFormController::index`
+   hiçbir istek parametresi okumuyordu (kutuya yazmak hiçbir şeyi filtrelemiyordu). Bilinçli olarak
+   gerçek arama eklendi (ad/soyad/e-posta/telefon/mesaj, LIKE joker karakteri kaçırmalı).
+Kaynağın admin uçlarının (index/show/updateAnsweredStatus) TAMAMEN anonim olması (gerçek bir
+güvenlik açığı, SEC-003) zaten önceki bir FAZ'da `[RequiresPermission]` ile kapatılmıştı — bu
+oturumda yalnızca teyit edildi, dokunulmadı. Regresyon testi: `ContactFormTests.cs` (5 test — anonim
+gönderim, okundu yan etkisi, yanıtlanma toggle, arama filtresi mutasyon testiyle doğrulanmış, ve
+kimliksiz erişimin 401 döndüğü). Commit: `4545dc1`.
+
+**Kritik yön değişikliği #11 (bu güncellemede — FAZ 5: sistematik güvenlik taraması):** Yukarıdaki
+modül denetimleri sırasında bulunan güvenlik düzeltmeleri (SEC-003, RoleController'ın gerçek 403'ü,
+UserGoal'ın gerçek yetkisi) OPORTUNİSTİKTİ — modül denetimi sırasında rastlanan sorunlardı, sistematik
+bir tarama değildi. Bu güncellemede API'deki TÜM 21 controller'ın yetkilendirme kapsamı tek tek
+kontrol edildi:
+- 8 modülün tüm CRUD uçları + 23+ referans/tanım modülünün paylaşımlı `LookupControllerBase<T>`'i
+  (attribute yerine gövde-içi `HasPermissionAsync` deseni kullanıyor — ilk bakışta eksik görünüp
+  doğrulamayla GERÇEKTEN doğru bulundu) dahil, her yazma ucunun gerçek bir yetki kontrolü olduğu
+  teyit edildi. `car_management` slug'ının seed edilmediğine dair SECILI-MODUL-PARITE-MATRISI.md
+  notu STALE çıktı — `DbSeeder.cs`'de zaten var.
+- `[Authorize]` var ama `[RequiresPermission]` YOK görünen 3 uç (`PermissionPageController.Save`,
+  `OfferEmailController.Save`, `LoadFileController.Upload`) tek tek olsold kaynağıyla karşılaştırıldı:
+  üçü de kaynakta ZATEN yalnızca `auth:api` ile korunuyor, hiçbir `RoleHelper::permission` çağrısı
+  yok — birebir korunuyor, düzeltme gerekmedi.
+- Dosya yükleme (`FileStorage.cs`): uzantı beyaz listesi, boyut sınırı, HER ZAMAN yeniden üretilen
+  rastgele dosya adı (orijinal ad asla yol olarak kullanılmıyor), hem kaydetme hem silmede yol
+  gezinmesi koruması (`Path.GetFileName`) — kaynaktan daha güvenli, ek düzeltme gerekmedi.
+- Rate limiting (`auth`: 10/dk, `public-form`: 5/dk) doğru kapsamda: uygulamadaki YEGANE iki gerçek
+  anonim uç (giriş, iletişim formu) — geri kalan her uç zaten `[Authorize]` gerektiriyor.
+- JWT anahtarı yalnızca yapılandırmadan okunuyor (sabit-kodlanmış yedek YOK, eksikse başlangıçta
+  hata verir), üretim `appsettings.json`'ında sır yok, CORS `*` değil iki yerel origin'e kısıtlı.
+
+Sonuç: sistematik taramada YENİ bir güvenlik açığı bulunmadı — her şüpheli nokta ya zaten
+düzeltilmiş ya da kaynakla bilinçli birebir olduğu doğrulandı. Bu, önceki fazlarda yapılan
+düzeltmelerin (SEC-003 vb.) münferit olmadığını, sistemli bir taramadan geçtiğini kanıtlıyor.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
-- **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 58 tablo, EF Core/Npgsql +
+- **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
   Dapper/Siber, JWT auth (jti iptal listesi), sayfa-slug×CRUD yetki modeli, snake_case JSON, `/api/v1`
   öneki, `TurkishDecimal` para ayrıştırıcı, `IClock` soyutlaması, rate limiting, correlation-id
   middleware'i. `dotnet build` (tüm çözüm): **0 hata**.
@@ -144,7 +322,7 @@ sekmelerin verisini bozmadığı ayrıca doğrulandı. Ayrıntı: §8 Teklif bö
 - **İki kritik hata canlı ortamda bulunup düzeltildi ve regresyon testiyle kilitlendi** — ayrıntı
   [docs/TEST-RAPORU.md](TEST-RAPORU.md) §1: `/api/v1/role` zarf uyuşmazlığı (sidebar tamamen boş
   görünüyordu), `super_admin` yetki sayfasının seed edilmemesi (yeni cariler kimseye görünmüyordu).
-- **49 otomatik test, hepsi geçiyor** (20 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
+- **93 otomatik test, hepsi geçiyor** (64 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
   pipeline'ı üzerinden, hiçbir katman mock'lanmadan. Test geliştirme sürecinde 3 ayrı gerçek ortam/
   test-edilebilirlik sorunu daha bulunup düzeltildi (bkz. TEST-RAPORU.md §3) — en önemlisi, testlerin
   başlangıçta sessizce GERÇEK dev veritabanına yazdığının fark edilip kalıcı olarak düzeltilmesi.
@@ -176,7 +354,7 @@ sekmelerin verisini bozmadığı ayrıca doğrulandı. Ayrıntı: §8 Teklif bö
 
 ```
 dotnet build                                    → 0 hata, 2 pre-existing nullability uyarısı
-dotnet test                                     → 49/49 geçti (29 birim + 20 entegrasyon), ~1.2 dk
+dotnet test                                     → 93/93 geçti (29 birim + 64 entegrasyon), ~1.3 dk
 docker compose up -d --build                    → 4 servis (postgres/siber-mock/api/frontend) sağlıklı
 curl -X POST .../api/v1/login (admin)           → 200, gerçek JWT
 GET /api/v1/account (Docker API, canlı)         → 200, gerçek cari listesi
@@ -187,7 +365,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-71/71 otomatik test geçiyor (29 OLS.Business.Tests + 42 OLS.API.IntegrationTests). Kapsanan: auth
+93/93 otomatik test geçiyor (29 OLS.Business.Tests + 64 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
@@ -205,6 +383,14 @@ bu spesifik uçtan-uca senaryo henüz OTOMATİK bir xUnit testine dönüştürü
 MatchesReservation'ın RET yolları otomatik test altında. Kapsanmayan (bilinçli, dürüstçe not edildi):
 `SiberImportService`'in kendisi için otomatik test (yalnızca canlı/manuel doğrulandı — bkz. §8), BR-010,
 dosya yükleme doğrulama (belge türü/boyut kısıtları). Ayrıntı: TEST-RAPORU.md.
+
+**Bu güncellemede eklenen testler** (§1 Kritik yön değişikliği #8-#11): `AccountFormTests.cs`
+(Müşteri'nin çoklu Hesap Türü koruma/değiştirme senaryosu), `CarTests.cs` (Araç'ın Siber id
+eşleşmesi), `UserFormTests.cs` (avatar/PDKS/ülke kodu round-trip + Tümünü Seç'in yalnızca hedeflenen
+sütunu güncellediği), `UserGoalTests.cs` (Hedefler CRUD + tarih-aralığı çakışma kuralı, 6 test),
+`ContactFormTests.cs` (Destek Talebi CRUD + arama filtresi + kimliksiz erişim reddi, 5 test) —
+hepsi en az bir mutasyon testiyle (bulguyu geçici olarak geri alıp testin gerçekten kırıldığını,
+düzeltmeyi geri koyunca tekrar geçtiğini kanıtlayarak) doğrulandı.
 
 ## 7. Görsel parite durumu (özet)
 
@@ -290,28 +476,65 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
     AllRoundTripCorrectly` — tüm 10 alanı set edip GET'te dönüp dönmediğini VE aç-dokunma-tekrar-kaydet
     senaryosunda sıfırlanmadığını doğruluyor. Mutasyon testiyle (bir alanın ataması geçici olarak null'a
     çevrilip testin gerçekten kırıldığı, geri alınca tekrar geçtiği) tautolojik olmadığı kanıtlandı.
-- **Sefer** (`TripsPage.tsx`) — KISMEN TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
-  Drawer'ı eklendi (önceden yalnızca "Yeni Sefer" oluşturma vardı, mevcut kaydı açmanın hiçbir yolu
-  yoktu), 2 sekmeli (Genel Bilgiler/Bağlı Yükler). Bağlı Yükler sekmesi TAM ÇALIŞIYOR: sefere
-  eklenebilecek (henüz bağlanmamış) yükleri arayan bir seçici, ekleme/çıkarma, toplam adet/ağırlık/
-  hacim özeti — hem PostgreSQL hem GERÇEK Siber-mock senkronuyla canlı doğrulandı (bkz. aşağıdaki
-  not — bu, Teklif→Yük dönüşümünün AKSİNE, Siber kimlik eşlemesine bağımlı değil). "Sefer Tipi" alanı
-  artık zorunlu işaretlendi (backend'in gerçekte zorunlu tuttuğu ama frontend'in yıldızlamadığı bir
-  alan olduğu bu oturumda bulundu). Otomatik test: `ExpeditionLoadMappingTests.cs` (bağlama+silme +
-  BR-006/007 romork tipi eşleşmeme senaryosu). HÂLÂ EKSİK — bilinçli kapsam dışı: Hareketler sekmesi
-  (aynı `expedition_statuses` boş-tablo kısıtı).
-- **Fatura** (`InvoicesPage.tsx`) — KISMEN TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
-  Drawer'ı eklendi, 3 sekmeli (Genel Bilgiler/Kalemler/Dipnotlar). Kalemler sekmesi bir "Fatura'nın
-  kendi satırları" DEĞİL — kaynağın gerçek veri modelini yansıtıyor: mevcut `load_transfer_invoice_item`
-  kayıtlarını arayıp faturaya EŞLEYEN bir seçici (`load_transfer_invoice_maps`), backend'in "her
-  güncellemede eşlemeleri baştan kur" davranışına uygun olarak yerelde biriktirilip Kaydet'te toplu
-  gönderiliyor. Dipnotlar sekmesi bağımsız, anında kaydedilen CRUD (kendi REST uçları var). Müşteri
-  alanı da `AccountPicker`'a yükseltildi (hem oluşturma hem düzenleme formunda). Canlıda uçtan uca
-  doğrulandı: gerçek bir kalem eklenip kaydedildi (DB'de `load_transfer_invoice_maps` satırı VE
-  kalemin durumu `invoice_issued`'a geçtiği doğrulandı — kaynağın alış/satış kuralı birebir), sonra
-  kaldırılıp tekrar boşaltıldığı doğrulandı; dipnot eklenip silindi. Otomatik test: `InvoiceTests.cs`
-  (3 test). HÂLÂ EKSİK — bilinçli kapsam dışı: PDF önizleme, Uyumsoft draft/send/cancel/approve UI'si
-  (backend'de zaten hiç portlanmadı — bkz. `InvoiceController.cs` üstündeki yorum).
+- **Sefer** (`TripsPage.tsx`) — TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme Drawer'ı
+  eklendi (önceden yalnızca "Yeni Sefer" oluşturma vardı, mevcut kaydı açmanın hiçbir yolu yoktu),
+  3 sekmeli (Genel Bilgiler/Bağlı Yükler/Hareketler — kaynakta `ExpeditionFormDrawer.vue`'nin
+  Bilgiler/Sefer İçeriği/Hareketler sekmeleriyle aynı sıra). Bağlı Yükler sekmesi TAM ÇALIŞIYOR:
+  sefere eklenebilecek (henüz bağlanmamış) yükleri arayan bir seçici, ekleme/çıkarma, toplam
+  adet/ağırlık/hacim özeti — hem PostgreSQL hem GERÇEK Siber-mock senkronuyla canlı doğrulandı (bu,
+  Teklif→Yük dönüşümünün AKSİNE, Siber kimlik eşlemesine bağımlı değil). "Sefer Tipi" alanı artık
+  zorunlu işaretlendi (backend'in gerçekte zorunlu tuttuğu ama frontend'in yıldızlamadığı bir alan
+  olduğu bu oturumda bulundu). Otomatik test: `ExpeditionLoadMappingTests.cs` (bağlama+silme +
+  BR-006/007 romork tipi eşleşmeme senaryosu).
+  - **Hareketler**: **[Kritik yön değişikliği #7'de eklendi]** Sekme daha önce TAMAMEN yoktu — bu
+    satırda önceden "bilinçli kapsam dışı: aynı `expedition_statuses` boş-tablo kısıtı" olarak
+    belgeleniyordu; bu gerekçe STALE çıktı (Kritik yön değişikliği #3 bu kısıtı zaten çözmüştü, not
+    hiç güncellenmemişti — ayrıntı: §1). Backend (`ExpeditionController.Movements/SaveMovement/
+    DeleteMovement`, tam CRUD) zaten tamdı, Yük'ün Hareketler sekmesiyle birebir aynı desende
+    frontend'e bağlandı: liste, "Yeni Hareket Ekle" (Durum+Konum zorunlu), silme, ve
+    `deletedMovements.length > 0` koşullu "Silinen Hareketler" görünümü. Canlı Docker'da uçtan uca
+    doğrulandı (oluştur→sil→silinenlerde görün tam döngüsü, gerçek SEF-2 kaydı üzerinde).
+  - **Genel Bilgiler kaydı**: bu satırda önceden "ortam kısıtı yüzünden ÇALIŞTIRILAMIYOR" olarak
+    belgeleniyordu — bu da AYNI STALE kökten çıktı (Kritik yön değişikliği #3). Bu oturumda
+    `PUT /api/v1/expedition` canlı Docker'a karşı (dokunmadan Kaydet'e basarak) çalıştırıldı → 200 OK,
+    ve DB'de `romork_id/work_type/department_id/status_id/expedition_type_id` alanlarının round-trip
+    sonrası dolu kaldığı doğrulandı (silent-wipe yok). Hâlâ eksik: bu akış için `LoadTests.cs`
+    tarzında ayrı bir otomatik regresyon testi yazılmadı, yalnızca canlı doğrulandı.
+- **Fatura** (`InvoicesPage.tsx`) — TAMAMLANDI: satıra tıklayınca açılan ayrı bir detay/düzenleme
+  Drawer'ı eklendi, 3 sekmeli (kaynakla birebir isimlendirilmiş "Bilgiler"/"Kalemler"/"Ek Bilgiler" —
+  **[Kritik yön değişikliği #8'de düzeltildi]** önceden "Genel Bilgiler"/"Dipnotlar" idi). Kalemler
+  sekmesi bir "Fatura'nın kendi satırları" DEĞİL — kaynağın gerçek veri modelini yansıtıyor: mevcut
+  `load_transfer_invoice_item` kayıtlarını arayıp faturaya EŞLEYEN bir seçici (`load_transfer_invoice_maps`),
+  backend'in "her güncellemede eşlemeleri baştan kur" davranışına uygun olarak yerelde biriktirilip
+  Kaydet'te toplu gönderiliyor. **[Kritik yön değişikliği #8'de düzeltildi]** bu seçici önceden HİÇ
+  filtrelenmiyordu (kaynakta `status=pending` + `buysell` + cari filtreli) — zaten başka bir faturaya
+  bağlı veya yönü uyuşmayan kalemler de seçilebiliyordu (çift faturalandırma riski); filtreler + zaten-
+  eklenmiş kalemler için "Eklendi" rozeti eklendi. Ek Bilgiler sekmesi bağımsız, anında kaydedilen CRUD
+  (kendi REST uçları var). Müşteri alanı da `AccountPicker`'a yükseltildi. **[Kritik yön değişikliği
+  #8'de eklendi]** kaynağın 3 sekmeli liste yapısı (Gelen/Giden/**Onay Bekleyen**) portta 2 sekmeydi —
+  Onay Bekleyen filtresi eklendi (`invoice_statuses.name == "Onay Bekliyor"`tan çözülerek, kaynaktaki
+  hardcoded `7` yerine). Canlıda uçtan uca doğrulandı: gerçek bir kalem eklenip kaydedildi (DB'de
+  `load_transfer_invoice_maps` satırı VE kalemin durumu `invoice_issued`'a geçtiği doğrulandı —
+  kaynağın alış/satış kuralı birebir), sonra kaldırılıp tekrar boşaltıldığı doğrulandı; dipnot eklenip
+  silindi. Otomatik test: `InvoiceTests.cs` (4 test). HÂLÂ EKSİK — bilinçli kapsam dışı: PDF önizleme,
+  Uyumsoft draft/send/cancel/approve UI'si (backend'de zaten hiç portlanmadı — bkz. `InvoiceController.cs`
+  üstündeki yorum).
+- **Müşteri** (`CustomersPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #8): çoklu Hesap Türü seçimi
+  (tekilden çoklu chip-toggle'a düzeltildi — EN CİDDİ bulgu, gerçek veri kaybı), Görevli + Faturalar
+  sekmeleri eklendi, avatar yükleme eklendi, `tax_office` serbest metinden gerçek lookup'a çevrildi.
+  Otomatik test: `AccountFormTests.cs` (3 test).
+- **Araç** (`VehiclesPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #8): "Kiralanan Firma" alanı
+  eklendi, `AccountOption`'a `siber_id` eklenerek cari-Siber id eşlemesi doğru çözülüyor. Otomatik
+  test: `CarTests.cs` (1 test).
+- **Kullanıcılar** (`UsersPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #9): avatar/PDKS/ülke kodu
+  alanları + "Tümünü Seç" toplu yetki güncellemesi eklendi; ayrıca kaynakta var olup portta hiç
+  bulunmayan "Hedefler" sekmesi (aylık satış hedefi CRUD'u, `api/v1/user_goal`) — kullanıcı onayıyla —
+  eklendi (bkz. §1, kapsam çelişkisinin çözümü). Otomatik test: `UserFormTests.cs` (2 test) +
+  `UserGoalTests.cs` (6 test).
+- **Destek Talebi** (`SupportPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #10): liste kolonları ve
+  "Durum" rozeti metni kaynakla birebir eşleştirildi (önceden kaynakta hiç geçmeyen "Çözüldü"/"Açık"
+  kullanıyordu), detay panelindeki eksik gönderim-tarihi alanı eklendi, kaynakta görsel-ama-işlevsiz
+  olan arama kutusu gerçek bir filtreye bağlandı. Otomatik test: `ContactFormTests.cs` (5 test).
 
 **Bu oturumda bulunan bir hata daha:** Fatura oluşturma formunda "Vade Tarihi" zorunlu
 İŞARETLENMEMİŞTİ ama backend boş bırakılırsa HER ZAMAN reddediyor (`InvoiceController.Validate` →
@@ -319,9 +542,15 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
 formunda `*` eklendi) — `InvoiceTests.CreateInvoice_WithoutExecutionDate_ReturnsValidationError` ile
 regresyon testi de eklendi.
 
-"Birebir" alan parite şartı Teklif için tam karşılanıyor; Yük ve Fatura için çekirdek+ilişkili-kayıt
-alanlarında karşılanıyor (Hareketler, PDF/Uyumsoft kasıtlı olarak dışarıda); Sefer için Bağlı Yükler
-tam karşılanıyor ama Genel Bilgiler kaydı ortam kısıtı yüzünden ÇALIŞTIRILAMIYOR (bkz. yukarıdaki not).
+"Birebir" alan parite şartı Teklif için tam karşılanıyor; Yük için çekirdek+ilişkili-kayıt
+alanlarında (Hareketler DAHİL, bkz. Kritik yön değişikliği #5) karşılanıyor (yalnızca PDF/Uyumsoft
+kasıtlı olarak dışarıda); Fatura için çekirdek+ilişkili-kayıt alanlarında karşılanıyor (PDF/Uyumsoft
+kasıtlı olarak dışarıda); Sefer için Bağlı Yükler VE Hareketler tam karşılanıyor (bkz. Kritik yön
+değişikliği #7), Genel Bilgiler kaydı da artık çalışıyor (bkz. yukarıdaki not — önceki "ortam kısıtı"
+iddiası staleydi); Müşteri, Araç, Kullanıcılar ve Destek Talebi için de tam karşılanıyor (bkz. Kritik
+yön değişikliği #8-#10) — Kullanıcılar'ın "Hedefler" sekmesi dahil, kullanıcı onayıyla kapsama eklendi.
+Sekiz modülün SEKİZİ de artık bu titizlikte (kaynağın gerçek `*FormDrawer.vue`'sü satır satır
+karşılaştırılarak) denetlendi.
 
 ### Teklif→Yük dönüşümü artık gerçekten çalışıyor (önceki "Siber kimlik eşleşmesi kısıtı" ÇÖZÜLDÜ)
 
@@ -457,13 +686,21 @@ hem fiziksel dosyanın gittiği `docker exec` ile teyit edildi). `ProfileTests.c
   (bkz. §6).
 - Şifreler asla düz metin loglanmaz/saklanmaz; bcrypt maliyeti 12.
 - CORS allow-list (`*` değil), rate limiting (auth: 10/dk, public-form: 5/dk) aktif.
+- **Sistematik güvenlik taraması (Kritik yön değişikliği #11):** API'deki tüm 21 controller'ın
+  yetkilendirme kapsamı tek tek doğrulandı (8 modülün CRUD uçları + 23+ referans/tanım modülünün
+  paylaşımlı `LookupControllerBase<T>`'i dahil). `[Authorize]` var ama `[RequiresPermission]` YOK
+  görünen 3 uç tek tek olsold kaynağıyla karşılaştırıldı — üçü de kaynakta zaten yalnızca `auth:api`
+  ile korunuyor, birebir korunduğu doğrulandı. Dosya yükleme (uzantı beyaz listesi + boyut sınırı +
+  her zaman yeniden üretilen rastgele dosya adı + yol gezinmesi koruması), JWT anahtarı (yalnızca
+  yapılandırmadan, sabit-kodlanmış yedek yok), rate limiting kapsamı (yalnızca gerçek anonim iki uç)
+  ayrıca doğrulandı. Sonuç: yeni bir açık bulunmadı — bkz. §1 Kritik yön değişikliği #11.
 
 ## 10. Önerilen sonraki adımlar (öncelik sırasıyla)
 
 1. Kalan 7 modül için 3-viewport görsel kontrolünü tamamlamak (yalnızca Müşteriler tam kontrol edildi).
-2. Sefer Genel Bilgiler'i gerçekten kaydedilebilir hâle getirmek için `expedition_statuses`'a en az
-   bir gerçek satır eklemek gerekip gerekmediğine karar vermek (bkz. §8 — olsold'da da seeder'ı yok,
-   bu yüzden veri UYDURMADAN yapılabilecek bir şey değil; kullanıcıya danışılmalı).
-3. `ValidateRequired`'ın kalan sekiz alan kontrolü ve BR-010/013 için ek entegrasyon testleri.
-4. "AI'dan teklif" özelliğinin gerekip gerekmediğine karar vermek — gerekiyorsa backend adaptör
+2. `ValidateRequired`'ın kalan sekiz alan kontrolü ve BR-010/013 için ek entegrasyon testleri.
+3. "AI'dan teklif" özelliğinin gerekip gerekmediğine karar vermek — gerekiyorsa backend adaptör
   üzerinden, tarayıcıya asla anahtar sızdırmadan.
+4. Sefer Genel Bilgiler kaydı ve Hareketler sekmesi için özel otomatik regresyon testleri yazmak
+   (Kritik yön değişikliği #7'de yalnızca canlı Docker'da doğrulandı, `ExpeditionLoadMappingTests.cs`
+   gibi ayrı bir test dosyası henüz yok — bkz. §8).
