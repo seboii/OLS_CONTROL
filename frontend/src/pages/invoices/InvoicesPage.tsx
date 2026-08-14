@@ -62,14 +62,22 @@ interface InvoiceFooterRow {
 }
 
 const PER_PAGE = 8;
-// olsold: pages/invoices.vue Tab etiketleri ("Gelen Faturalar"/"Giden Faturalar") —
-// Alış/Satış DEĞİL, gelen/giden evrak yönü.
+// olsold: pages/invoices.vue 3 Tab — "Gelen Faturalar"/"Giden Faturalar" (gelen/
+// giden evrak yönü, Alış/Satış DEĞİL) ve "Onay Bekleyen Faturalar" (invoice-type=0
+// SABİT + invoice_status="Onay Bekliyor" filtresi bir arada — kaynak bunu ayrı bir
+// Tab olarak gösteriyor, burada aynı filtre seçicisinde özel bir değer olarak temsil
+// edildi). Kaynak durum id'sini (7) SABİT KULLANMIYORUZ — Siber'e özgü, bu portta
+// aynı sıra garantili değil; bunun yerine seed'in verdiği kararlı isimle eşleşiyor.
 const BOX_TABS = [
   { value: "", label: "Tümü" },
   { value: "0", label: "Gelen Faturalar" },
   { value: "1", label: "Giden Faturalar" },
+  { value: "pending_approval", label: "Onay Bekleyen Faturalar" },
 ];
-const DETAIL_TABS = ["Genel Bilgiler", "Kalemler", "Dipnotlar"];
+// olsold: InvoiceFormDrawer.vue TabList — "Bilgiler"/"Kalemler"/"Ek Bilgiler"
+// (Dipnotlar/Genel Bilgiler DEĞİL; "Fatura Önizleme" Uyumsoft e-fatura PDF
+// önizlemesi, kapsam dışı).
+const DETAIL_TABS = ["Bilgiler", "Kalemler", "Ek Bilgiler"];
 
 export function InvoicesPage() {
   const { can } = useAuth();
@@ -100,13 +108,17 @@ export function InvoicesPage() {
   });
 
   const { options: invoiceTypes } = useLookupOptions("/api/v1/invoice_type");
+  const { options: invoiceStatuses } = useLookupOptions("/api/v1/invoice_status");
+  const pendingApprovalStatusId = invoiceStatuses.find((s) => s.name === "Onay Bekliyor")?.id;
+  const isPendingApprovalFilter = boxType === "pending_approval";
 
   function load() {
     setLoading(true);
     api
       .get<DataMessage<Paginated<InvoiceItem>>>("/api/v1/invoice", {
         search: debouncedSearch || undefined,
-        box_type: boxType || undefined,
+        box_type: isPendingApprovalFilter ? "0" : boxType || undefined,
+        invoice_status_id: isPendingApprovalFilter ? pendingApprovalStatusId : undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -121,7 +133,7 @@ export function InvoicesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, boxType, page]);
+  }, [debouncedSearch, boxType, page, pendingApprovalStatusId]);
 
   function openNew() {
     setForm({ box_type: "1", commercial_type: "0", invoice_type_id: "", invoice_create_date: "", invoice_execution_date: "", message: "" });
@@ -165,7 +177,7 @@ export function InvoicesPage() {
     }
   }
 
-  // --- Detay/düzenleme drawer'ı (Genel Bilgiler + Kalemler + Dipnotlar) ---
+  // --- Detay/düzenleme drawer'ı (Bilgiler + Kalemler + Ek Bilgiler) ---
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -294,7 +306,7 @@ export function InvoicesPage() {
     setPickerOpen(false);
   }
 
-  // --- Dipnotlar (footer) — bağımsız, anında kaydedilen CRUD ---
+  // --- Ek Bilgiler / Maddeler (footer) — bağımsız, anında kaydedilen CRUD ---
 
   const [footers, setFooters] = useState<InvoiceFooterRow[]>([]);
   const [footersLoading, setFootersLoading] = useState(false);
@@ -306,7 +318,7 @@ export function InvoicesPage() {
     api
       .get<DataMessage<InvoiceFooterRow[]>>("/api/v1/invoice/footer", { invoice_id: invoiceId })
       .then((res) => setFooters(res.data))
-      .catch(() => addToast("Dipnotlar yüklenemedi", "error"))
+      .catch(() => addToast("Maddeler yüklenemedi", "error"))
       .finally(() => setFootersLoading(false));
   }
 
@@ -321,7 +333,7 @@ export function InvoicesPage() {
       setNewFooterValue("");
       loadFooters(detailId);
     } catch (err) {
-      addToast(err instanceof Error ? err.message : "Dipnot eklenemedi", "error");
+      addToast(err instanceof Error ? err.message : "Madde eklenemedi", "error");
     } finally {
       setFooterSaving(false);
     }
@@ -329,7 +341,7 @@ export function InvoicesPage() {
 
   async function removeFooter(id: number) {
     if (!detailId) return;
-    if (!window.confirm("Bu dipnot silinsin mi?")) return;
+    if (!window.confirm("Bu madde silinsin mi?")) return;
     try {
       await api.delete("/api/v1/invoice/footer", { deletion_id: [id] });
       loadFooters(detailId);
@@ -429,7 +441,7 @@ export function InvoicesPage() {
         subtitle={detail?.invoice_account?.name ?? undefined}
         width="w-[640px]"
         footer={
-          detailTab !== "Dipnotlar" && canUpdate ? (
+          detailTab !== "Ek Bilgiler" && canUpdate ? (
             <div className="flex gap-2">
               <Btn onClick={handleDetailSave} disabled={detailSaving || detailLoading}>{detailSaving ? "Kaydediliyor..." : "Kaydet"}</Btn>
               <Btn variant="secondary" onClick={() => setDetailOpen(false)}>İptal</Btn>
@@ -443,7 +455,7 @@ export function InvoicesPage() {
         ) : (
           detail && (
             <div className="p-6">
-              {detailTab === "Genel Bilgiler" && (
+              {detailTab === "Bilgiler" && (
                 <div className="space-y-4">
                   <AccountPicker label="Müşteri" value={detailAccount} onChange={setDetailAccount} required error={detailErrors.account_id?.[0]} />
                   <div className="grid grid-cols-2 gap-4">
@@ -508,17 +520,18 @@ export function InvoicesPage() {
                 </div>
               )}
 
-              {detailTab === "Dipnotlar" && (
+              {detailTab === "Ek Bilgiler" && (
                 <div>
-                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Dipnotlar</p>
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Yeni Madde Ekle</p>
                   <div className="flex gap-2 mb-4">
-                    <TextInput value={newFooterValue} onChange={setNewFooterValue} placeholder="Yeni dipnot metni..." />
+                    <TextInput value={newFooterValue} onChange={setNewFooterValue} placeholder="Yeni madde metni..." />
                     <Btn variant="secondary" size="sm" onClick={addFooter} disabled={footerSaving || !newFooterValue.trim()}>Ekle</Btn>
                   </div>
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Maddeler</p>
                   {footersLoading ? (
                     <p className="text-xs text-gray-400 text-center py-8">Yükleniyor...</p>
                   ) : footers.length === 0 ? (
-                    <p className="text-xs text-gray-400 text-center py-8">Henüz dipnot eklenmedi.</p>
+                    <p className="text-xs text-gray-400 text-center py-8">Henüz madde eklenmedi.</p>
                   ) : (
                     <div className="space-y-2">
                       {footers.map((f) => (
