@@ -75,6 +75,35 @@ Backend'e ayrıca 23+ modülün paylaştığı `LookupService<TEntity>`'ye opsiy
 canlı Docker'a karşı yazma→okuma round-trip'le doğrulandı; hiçbiri için "muhtemelen çalışıyordur"
 denmedi. 71/71 test hâlâ geçiyor. Ayrıntı: §8.
 
+**Kritik yön değişikliği #5 (bu güncellemede — Yük'ün Hareketler/Faturalar/Dosya-Arşivi denetimi,
+kullanıcı isteğiyle):** #4'ün aynı satır-satır yöntemi bu kez Yük'ün henüz bu titizlikte incelenmemiş
+3 sekmesine uygulandı: `LoadFormMovements.vue`, `LoadFormInvoices.vue`, ve `LoadFormDrawer.vue`'nin
+Dosya Arşivi TabPanel'i. Sonuç, 4 gerçek bulgu (Dosya Arşivi'nde hiçbir sorun bulunmadı — orijinal
+Teklif'in `load_id`'sine yazdığı zaten doğruydu):
+
+1. **"Silinen Hareketler" görünümü hiç yoktu.** Backend zaten `{data, deleted_movements}` zarfını
+   dönüyordu (`LoadTransferMovementController`/`MovementService` — soft-delete kayıtları ayrı anahtarla
+   taşıyordu) ama frontend yalnızca `data`yı okuyup `deleted_movements`i tamamen görmezden geliyordu.
+   Kullanıcı bir hareketi sildiğinde o kayıt kalıcı olarak GÖRÜNMEZ oluyordu (veri kaybolmuyordu, sadece
+   erişilemez hale geliyordu). Buton + modal eklendi (`v-if="deletedMovements.length > 0"` davranışı
+   dahil); canlı Docker'da bu oturumdan kalan gerçek bir silinmiş kayıtla doğrulandı.
+2. Hareketi oluşturan kullanıcı yalnızca adıyla gösteriliyordu (`{name} {surname} ({email})` değil,
+   yalnızca `name`). `MovementRefDto` yerine zaten var olan `MappedUserDto` kullanılarak hem Sefer hem
+   Yük hareketlerinde `User` alanı genişletildi.
+3. Faturalar çapraz görünümünde "Fatura Ticareti Tipi" (`commercial_type`) alanı hiç yoktu, ve
+   Tutar/KDV Hariç/KDV alanları önceki bir oturumda "Uyumsoft'a bağlı, bu portta hiç yok" gerekçesiyle
+   BİLİNÇLİ dışlanmıştı — **bu gerekçe yanlıştı**: `Invoice` entity'sinde bu sütunlar zaten var ve ana
+   Fatura modülü (`InvoiceService`/`InvoicesPage.tsx`) bunları zaten okuyup gösteriyor; yalnızca Yük'ün
+   çapraz görünümünde unutulmuşlar. Kaynağın kendi null→"0,00" davranışıyla (`useMoneyFormat`) birebir
+   eklendi.
+4. `box_type` etiketi hem Yük'ün çapraz görünümünde hem STANDALONE Fatura modülünde "Gider (Alış)"/
+   "Gelir (Satış)" idi — YANLIŞ. Kaynağın gerçek `invoice_box_types` dizisi (ve `pages/invoices.vue`'nin
+   gerçek Tab başlıkları) "Gelen Fatura(lar)"/"Giden Fatura(lar)" kullanıyor — gelen/giden EVRAK yönü,
+   Alış/Satış değil. Her iki modülde de düzeltildi (3 UI konumu: filtre/tab listesi + create + edit form).
+
+Backend build + `tsc -b` temiz; ilgili 8 test (Movement/Expedition/Invoice/LoadTransfer) yeşil; canlı
+Docker'da üç sekme de gerçek verilerle doğrulandı.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 58 tablo, EF Core/Npgsql +
@@ -199,10 +228,16 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
     `DeleteLoadMovementsAsync` + `LoadTransferMovementController`, tam CRUD) ZATEN TAMAMDI, hiç frontend
     bağlanmamıştı. `destination_id` zorunlu ama `destinations` tablosu (olsold'da da) hiç seed edilmiyor
     — Siber kaynaklı değil, tamamen yerel/admin-yönetimli; canlı test için bir Destination oluşturuldu.
+    **[Kritik yön değişikliği #5'te düzeltildi]** Backend `deleted_movements`i zaten dönüyordu ama
+    frontend hiç okumuyordu — "Silinen Hareketler" görünümü tamamen eksikti, artık eklendi. Ayrıca
+    oluşturan kullanıcı yalnızca adıyla değil, kaynaktaki gibi ad+soyad+email ile gösteriliyor.
   - **Faturalar**: salt-okunur çapraz görünüm — `LoadTransferInvoiceMap.LoadTransferId` doğrudan FK
-    olduğundan tek join ile yazıldı (şema değişikliği gerekmedi). KDV/tutar alanları (Uyumsoft'a bağlı,
-    hiç portlanmadı) BİLİNÇLİ OLARAK gösterilmiyor — gerçekten hesaplanan alanlar (fatura no/durum/
-    tip/alıcı/tarih) gösteriliyor, olmayan bir hesap sahte sıfır/boş ile MASKELENMİYOR.
+    olduğundan tek join ile yazıldı (şema değişikliği gerekmedi). **[Kritik yön değişikliği #5'te
+    düzeltildi]** KDV/tutar alanları önceden "Uyumsoft'a bağlı, hiç portlanmadı" gerekçesiyle bilinçli
+    dışlanmıştı — bu YANLIŞTI, sütunlar `Invoice` entity'sinde zaten var ve ana Fatura modülü onları
+    zaten gösteriyordu; artık burada da gösteriliyor (kaynağın null→"0,00" davranışıyla birebir).
+    "Fatura Ticareti Tipi" alanı da eksikti, eklendi. `box_type` etiketi "Alış/Satış" YANLIŞLIĞINDAN
+    kaynağın gerçek "Gelen Fatura/Giden Fatura" etiketine düzeltildi (standalone Fatura modülünde de).
   - **Dosya Arşivi**: Yük'ün kendi dosya tablosu yok (olsold'da da yok) — dönüşümün geldiği ORİJİNAL
     Teklif'in `load_file` kayıtlarını paylaşır (`load_number_work_type` ↔ `loads.load_number` eşlemesiyle
     bulunan `load_id`); zaten var olan `POST /api/v1/load/file/upload` ucu yeniden kullanıldı.
