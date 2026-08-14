@@ -229,9 +229,11 @@ public sealed class ContactFormController : ApiControllerBase
     [RequiresPermission(PermissionAction.Read, "support_request_management")]
     [HttpGet]
     public async Task<IActionResult> Index(
-        [FromQuery] int page = 1, CancellationToken cancellationToken = default)
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        CancellationToken cancellationToken = default)
     {
-        var result = await _forms.ListAsync(page, CurrentPath, cancellationToken);
+        var result = await _forms.ListAsync(search, page, CurrentPath, cancellationToken);
 
         return base.Ok(new Dictionary<string, object?>
         {

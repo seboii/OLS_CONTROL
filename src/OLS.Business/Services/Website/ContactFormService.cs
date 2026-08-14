@@ -23,7 +23,14 @@ namespace OLS.Business.Services.Website;
 /// </summary>
 public interface IContactFormService
 {
-    Task<object> ListAsync(int page, string path, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Kaynak (<c>FormsTable.vue</c>) bir arama kutusu gösterir ama
+    /// <c>ContactFormController::index</c> hiçbir istek parametresi okumuyor —
+    /// kaynakta arama görsel olarak var, işlevsel olarak YOK. Burada bilinçli
+    /// olarak gerçek arama eklendi (ad/soyad/e-posta/telefon/mesaj).
+    /// </summary>
+    Task<object> ListAsync(
+        string? search, int page, string path, CancellationToken cancellationToken = default);
 
     /// <summary>Görüntülendiğinde okundu olarak işaretler (kaynaktaki yan etki).</summary>
     Task<ContactFormDto?> ShowAsync(long id, CancellationToken cancellationToken = default);
@@ -71,12 +78,23 @@ public sealed class ContactFormService : IContactFormService
     }
 
     public async Task<object> ListAsync(
-        int page, string path, CancellationToken cancellationToken = default)
+        string? search, int page, string path, CancellationToken cancellationToken = default)
     {
+        var query = _db.WebsiteContactForms.AsNoTracking().AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var pattern = $"%{QueryableExtensions.EscapeLike(search)}%";
+            query = query.Where(f =>
+                EF.Functions.ILike(f.FirstName, pattern) ||
+                EF.Functions.ILike(f.LastName, pattern) ||
+                EF.Functions.ILike(f.Email, pattern) ||
+                EF.Functions.ILike(f.Phone!, pattern) ||
+                EF.Functions.ILike(f.Message, pattern));
+        }
+
         // Kaynak latest() → created_at DESC.
-        var forms = _db.WebsiteContactForms.AsNoTracking()
-            .OrderByDescending(f => f.CreatedAt)
-            .Select(Project());
+        var forms = query.OrderByDescending(f => f.CreatedAt).Select(Project());
 
         return await forms.ToPagedOrListAsync(PageSize, page, path, cancellationToken);
     }

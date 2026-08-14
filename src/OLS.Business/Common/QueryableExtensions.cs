@@ -41,8 +41,10 @@ public static class QueryableExtensions
     /// <summary>
     /// LIKE joker karakterlerini kaçırır; kullanıcı girdisindeki % ve _ literal aranır.
     /// olsold bunu yapmıyordu — arama kutusuna "%" yazmak tüm kayıtları getiriyordu.
+    /// internal: birden çok alanı OR ile birleştiren elle yazılmış aramalarda
+    /// (tek alan için <see cref="WhereILike{T}"/> yeterli) da kullanılabilsin diye.
     /// </summary>
-    private static string EscapeLike(string input) =>
+    internal static string EscapeLike(string input) =>
         input.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
 
     /// <summary>

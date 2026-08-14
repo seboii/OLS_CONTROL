@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Headphones } from "lucide-react";
 import { api, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useDebouncedValue } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, type Column } from "@/components/ui/DataTable";
@@ -38,7 +39,8 @@ export function SupportPage() {
   const [rows, setRows] = useState<ContactForm[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [search] = useState("");
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selected, setSelected] = useState<ContactForm | null>(null);
@@ -47,7 +49,7 @@ export function SupportPage() {
   function load() {
     setLoading(true);
     api
-      .get<Envelope<Paginated<ContactForm>>>("/api/website/contact/form", { page })
+      .get<Envelope<Paginated<ContactForm>>>("/api/website/contact/form", { search: debouncedSearch || undefined, page })
       .then((res) => {
         setRows(res.data.data);
         setTotal(res.data.total);
@@ -59,7 +61,7 @@ export function SupportPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page]);
+  }, [debouncedSearch, page]);
 
   async function openDetail(row: ContactForm) {
     try {
@@ -91,22 +93,16 @@ export function SupportPage() {
   }
 
   const columns: Column<ContactForm>[] = [
-    { key: "id", header: "Talep No", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">SUP-{r.id}</span> },
     {
       key: "from",
-      header: "Gönderen",
-      render: (r) => (
-        <div>
-          <p className="font-semibold text-gray-900">{r.first_name} {r.last_name}</p>
-          <p className="text-[11px] text-gray-400">{r.email}</p>
-        </div>
-      ),
+      header: "Kullanıcı",
+      render: (r) => <span className="font-medium text-gray-900">{r.first_name} {r.last_name}</span>,
     },
-    { key: "message", header: "Mesaj", render: (r) => <span className="text-gray-700 line-clamp-1 max-w-xs block">{r.message}</span> },
-    { key: "phone", header: "Telefon", render: (r) => <span className="font-mono text-xs text-gray-500">{r.phone ?? "—"}</span> },
     { key: "created_at", header: "Tarih", render: (r) => <span className="font-mono text-[11px] text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleString("tr-TR") : "—"}</span> },
-    { key: "is_read", header: "Okundu", render: (r) => <Badge label={r.is_read ? "Okundu" : "Okunmadı"} /> },
-    { key: "is_answered", header: "Durum", render: (r) => <Badge label={r.is_answered ? "Çözüldü" : "Açık"} /> },
+    { key: "phone", header: "Telefon", render: (r) => <span className="font-mono text-xs text-gray-500">{r.phone ?? "—"}</span> },
+    { key: "email", header: "E-Posta", render: (r) => <span className="text-xs text-gray-500">{r.email}</span> },
+    { key: "is_read", header: "Okunma Durumu", render: (r) => <Badge label={r.is_read ? "Okundu" : "Okunmadı"} /> },
+    { key: "is_answered", header: "Yanıtlanma Durumu", render: (r) => <Badge label={r.is_answered ? "Yanıtlandı" : "Yanıtlanmadı"} /> },
   ];
 
   if (!canRead) {
@@ -115,7 +111,7 @@ export function SupportPage() {
 
   return (
     <>
-      <ModulePage title="Destek Talepleri" search={search} onSearchChange={() => {}} searchPlaceholder="">
+      <ModulePage title="Destek Talepleri" search={search} onSearchChange={(v) => { setSearch(v); setPage(1); }} searchPlaceholder="Ad, e-posta...">
         <div className="bg-white">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={Headphones} title="Talep bulunamadı" desc="Henüz destek talebi gönderilmemiş." />
@@ -131,24 +127,34 @@ export function SupportPage() {
       <Drawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        title={selected ? `SUP-${selected.id}` : ""}
+        title="Destek Talebi"
         subtitle={selected ? `${selected.first_name} ${selected.last_name}` : undefined}
       >
         {selected && (
           <div className="p-6 space-y-5">
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-[11px] text-gray-400 uppercase font-semibold tracking-wide">Kullanıcı</p>
+                <p className="text-sm font-medium text-gray-800 mt-0.5">{selected.first_name} {selected.last_name}</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
                 <p className="text-[11px] text-gray-400 uppercase font-semibold tracking-wide">E-posta</p>
                 <p className="text-sm font-medium text-gray-800 mt-0.5">{selected.email}</p>
               </div>
               <div className="bg-gray-50 rounded-lg p-3">
-                <p className="text-[11px] text-gray-400 uppercase font-semibold tracking-wide">Telefon</p>
+                <p className="text-[11px] text-gray-400 uppercase font-semibold tracking-wide">Telefon Numarası</p>
                 <p className="text-sm font-medium text-gray-800 mt-0.5">{selected.phone ?? "—"}</p>
               </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <p className="text-[11px] text-gray-400 uppercase font-semibold tracking-wide">Tarih</p>
+                <p className="text-sm font-medium text-gray-800 mt-0.5">{selected.created_at ? new Date(selected.created_at).toLocaleString("tr-TR") : "—"}</p>
+              </div>
             </div>
-            <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
-              <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{selected.message}</p>
-            </div>
+            <FormFieldLike label="Mesaj">
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{selected.message}</p>
+              </div>
+            </FormFieldLike>
             <FormFieldLike label="Yanıtlanma Durumu">
               <SelectInput
                 value={selected.is_answered ? "1" : "0"}
