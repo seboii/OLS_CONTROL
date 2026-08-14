@@ -162,21 +162,33 @@ public sealed class LoadTransferInvoiceItemDto
 /// <summary>
 /// olsold: <c>LoadFormInvoices.vue</c> — bu Yük'ün fatura kalemlerinin
 /// eşlendiği gerçek Fatura kayıtları (salt-okunur çapraz görünüm).
-/// KDV/tutar alanları (payable_amount/tax_amount/tax_rate) BİLİNÇLİ OLARAK
-/// yok — Uyumsoft'a bağlı hesaplama mantığı bu portta hiç yok (bkz.
-/// TESLIM-RAPORU.md §1 Uyumsoft satırı); var olmayan bir hesabı sahte
-/// sıfır/boş göstermek yerine hiç göstermiyoruz.
+///
+/// DÜRÜST NOT: KDV/tutar alanları önceden "Uyumsoft'a bağlı, bu portta hiç
+/// yok" gerekçesiyle bilinçli olarak dışarıda bırakılmıştı — bu YANLIŞTI.
+/// <c>Invoice</c> entity'sinde bu sütunlar (PayableAmount/TaxAmount/
+/// TaxExclusiveAmount/TaxRate/DocumentCurrencyCode/CommercialType) zaten var
+/// ve ana Fatura modülü (<c>InvoiceService</c>/<c>InvoicesPage.tsx</c>) bunları
+/// ZATEN okuyup gösteriyor — yalnızca bu çapraz görünümde unutulmuşlar.
+/// Uyumsoft entegrasyonu olmadığı için değerleri genelde null/0 olacak, ama
+/// kaynak da (<c>useMoneyFormat</c>) null'u sahte "0,00" ile gösteriyor —
+/// bu davranış birebir korunuyor, alan gizlenmiyor.
 /// </summary>
 public sealed class LoadTransferInvoiceDto
 {
     [JsonPropertyName("id")] public long Id { get; init; }
     [JsonPropertyName("invoice_id")] public string? InvoiceId { get; init; }
     [JsonPropertyName("box_type")] public short BoxType { get; init; }
+    [JsonPropertyName("commercial_type")] public int CommercialType { get; init; }
     [JsonPropertyName("target_title")] public string? TargetTitle { get; init; }
     [JsonPropertyName("target_identity_no")] public string? TargetIdentityNo { get; init; }
     [JsonPropertyName("invoice_execution_date")] public DateTime? InvoiceExecutionDate { get; init; }
     [JsonPropertyName("invoice_status")] public NamedRefDto? InvoiceStatus { get; init; }
     [JsonPropertyName("invoice_type")] public NamedRefDto? InvoiceType { get; init; }
+    [JsonPropertyName("payable_amount")] public decimal? PayableAmount { get; init; }
+    [JsonPropertyName("tax_exclusive_amount")] public decimal? TaxExclusiveAmount { get; init; }
+    [JsonPropertyName("tax_amount")] public decimal? TaxAmount { get; init; }
+    [JsonPropertyName("tax_rate")] public decimal? TaxRate { get; init; }
+    [JsonPropertyName("document_currency_code")] public string? DocumentCurrencyCode { get; init; }
 }
 
 public sealed class LoadTransferService : ILoadTransferService
@@ -347,8 +359,14 @@ public sealed class LoadTransferService : ILoadTransferService
                     Id = i.Id,
                     InvoiceId = i.InvoiceId,
                     BoxType = i.BoxType,
+                    CommercialType = i.CommercialType,
                     TargetTitle = i.TargetTitle,
                     TargetIdentityNo = i.TargetIdentityNo,
+                    PayableAmount = i.PayableAmount,
+                    TaxExclusiveAmount = i.TaxExclusiveAmount,
+                    TaxAmount = i.TaxAmount,
+                    TaxRate = i.TaxRate,
+                    DocumentCurrencyCode = i.DocumentCurrencyCode,
                     InvoiceExecutionDate = i.InvoiceExecutionDate,
                     InvoiceStatus = i.InvoiceStatus == null ? null
                         : new NamedRefDto { Id = i.InvoiceStatus.Id, Name = i.InvoiceStatus.Name },

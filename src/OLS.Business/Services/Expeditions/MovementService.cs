@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Accounts;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 
@@ -104,7 +105,7 @@ public sealed class ExpeditionMovementDto
 
     [JsonPropertyName("expedition")] public MappedExpeditionDto? Expedition { get; init; }
     [JsonPropertyName("destination")] public MovementRefDto? Destination { get; init; }
-    [JsonPropertyName("user")] public MovementRefDto? User { get; init; }
+    [JsonPropertyName("user")] public MappedUserDto? User { get; init; }
     [JsonPropertyName("expedition_status")] public MovementRefDto? ExpeditionStatus { get; init; }
 }
 
@@ -126,7 +127,7 @@ public sealed class LoadMovementDto
     [JsonPropertyName("load_relation")] public MovementRefDto? LoadRelation { get; init; }
     [JsonPropertyName("load_transfer")] public MovementRefDto? LoadTransfer { get; init; }
     [JsonPropertyName("destination")] public MovementRefDto? Destination { get; init; }
-    [JsonPropertyName("user")] public MovementRefDto? User { get; init; }
+    [JsonPropertyName("user")] public MappedUserDto? User { get; init; }
     [JsonPropertyName("expedition_status")] public MovementRefDto? ExpeditionStatus { get; init; }
     [JsonPropertyName("expedition_movement")] public ExpeditionMovementDto? ExpeditionMovement { get; init; }
 }
@@ -457,7 +458,7 @@ public sealed class MovementService : IMovementService
                 .Select(d => new MovementRefDto { Id = d.Id, Name = d.Name })
                 .FirstOrDefault(),
             User = _db.Users.Where(u => u.Id == m.UserId)
-                .Select(u => new MovementRefDto { Id = u.Id, Name = u.Name })
+                .Select(u => new MappedUserDto { Id = u.Id, Name = u.Name, Surname = u.Surname, Email = u.Email })
                 .FirstOrDefault(),
             ExpeditionStatus = _db.ExpeditionStatuses.Where(s => s.Id == m.ExpeditionStatusId)
                 .Select(s => new MovementRefDto { Id = s.Id, Name = s.Name })
@@ -489,7 +490,7 @@ public sealed class MovementService : IMovementService
                 .Select(d => new MovementRefDto { Id = d.Id, Name = d.Name })
                 .FirstOrDefault(),
             User = _db.Users.Where(u => u.Id == m.UserId)
-                .Select(u => new MovementRefDto { Id = u.Id, Name = u.Name })
+                .Select(u => new MappedUserDto { Id = u.Id, Name = u.Name, Surname = u.Surname, Email = u.Email })
                 .FirstOrDefault(),
             ExpeditionStatus = _db.ExpeditionStatuses.Where(s => s.Id == m.ExpeditionStatusId)
                 .Select(s => new MovementRefDto { Id = s.Id, Name = s.Name })

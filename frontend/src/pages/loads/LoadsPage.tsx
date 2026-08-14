@@ -97,11 +97,29 @@ interface InvoiceSummaryDetail {
   id: number;
   invoice_id: string | null;
   box_type: number;
+  commercial_type: number;
   target_title: string | null;
   target_identity_no: string | null;
   invoice_execution_date: string | null;
   invoice_status: NamedRef | null;
   invoice_type: NamedRef | null;
+  payable_amount: number | null;
+  tax_exclusive_amount: number | null;
+  tax_amount: number | null;
+  tax_rate: number | null;
+  document_currency_code: string | null;
+}
+
+// olsold: system_data.js invoice_commercial_type / invoice_box_types.
+const INVOICE_COMMERCIAL_TYPE_LABELS: Record<number, string> = { 0: "Temel Fatura", 1: "Ticari Fatura", 4: "E-Arşiv" };
+const invoiceMoney = (value: number | null) =>
+  (value ?? 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+interface MovementUserDetail {
+  id: number;
+  name: string | null;
+  surname: string | null;
+  email: string | null;
 }
 
 interface MovementDetail {
@@ -109,11 +127,15 @@ interface MovementDetail {
   description: string | null;
   address: string | null;
   created_at: string | null;
+  deleted_at: string | null;
   destination: NamedRef | null;
-  user: NamedRef | null;
+  user: MovementUserDetail | null;
   expedition_status: NamedRef | null;
   expedition_movement: { expedition?: { expedition_number: string | null } } | null;
 }
+
+const movementUserLabel = (u: MovementUserDetail | null) =>
+  u ? `${u.name ?? ""} ${u.surname ?? ""} (${u.email ?? ""})`.trim() : "—";
 
 type PackageRow = {
   id: number | null; product_type_id: string; case_type_id: string; quantity: string;
@@ -189,6 +211,8 @@ export function LoadsPage() {
   const [removedPackageIds, setRemovedPackageIds] = useState<number[]>([]);
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItemRow[]>([]);
   const [movements, setMovements] = useState<MovementDetail[]>([]);
+  const [deletedMovements, setDeletedMovements] = useState<MovementDetail[]>([]);
+  const [deletedMovementsModalOpen, setDeletedMovementsModalOpen] = useState(false);
   const [movementModalOpen, setMovementModalOpen] = useState(false);
   const [movementForm, setMovementForm] = useState(EMPTY_MOVEMENT_FORM);
   const [savingMovement, setSavingMovement] = useState(false);
@@ -238,9 +262,9 @@ export function LoadsPage() {
 
   function fetchMovements(loadTransferId: number) {
     api
-      .get<{ data: MovementDetail[] }>("/api/v1/load_transfer_movement", { load_transfer_id: loadTransferId })
-      .then((res) => setMovements(res.data))
-      .catch(() => setMovements([]));
+      .get<{ data: MovementDetail[]; deleted_movements: MovementDetail[] }>("/api/v1/load_transfer_movement", { load_transfer_id: loadTransferId })
+      .then((res) => { setMovements(res.data); setDeletedMovements(res.deleted_movements ?? []); })
+      .catch(() => { setMovements([]); setDeletedMovements([]); });
   }
 
   async function openDetail(id: number) {
@@ -754,9 +778,16 @@ export function LoadsPage() {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Hareketler</p>
-                    <button type="button" onClick={openMovementModal} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
-                      <Plus size={12} />Yeni Hareket Ekle
-                    </button>
+                    <div className="flex items-center gap-3">
+                      {deletedMovements.length > 0 && (
+                        <button type="button" onClick={() => setDeletedMovementsModalOpen(true)} className="text-[11px] text-gray-500 hover:underline">
+                          Silinen Hareketler
+                        </button>
+                      )}
+                      <button type="button" onClick={openMovementModal} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                        <Plus size={12} />Yeni Hareket Ekle
+                      </button>
+                    </div>
                   </div>
                   {movements.length === 0 ? (
                     <p className="text-xs text-gray-400 text-center py-8">Henüz hareket kaydı bulunmamaktadır.</p>
@@ -772,7 +803,7 @@ export function LoadsPage() {
                             {m.address && <p className="text-xs text-gray-500 mt-1">{m.address}</p>}
                             {m.description && <p className="text-xs text-gray-500 mt-1">{m.description}</p>}
                             <p className="text-[11px] text-gray-400 mt-2">
-                              {m.created_at ? new Date(m.created_at).toLocaleString("tr-TR") : "—"} · {m.user?.name ?? "—"}
+                              {m.created_at ? new Date(m.created_at).toLocaleString("tr-TR") : "—"} · {movementUserLabel(m.user)}
                             </p>
                             {m.expedition_movement?.expedition?.expedition_number && (
                               <p className="text-[11px] text-blue-500 mt-1">
@@ -804,8 +835,12 @@ export function LoadsPage() {
                             <p className="text-sm font-medium">{inv.invoice_id ?? "—"}</p>
                           </div>
                           <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-[11px] text-gray-500">Fatura Ticareti Tipi</p>
+                            <p className="text-sm font-medium">{INVOICE_COMMERCIAL_TYPE_LABELS[inv.commercial_type] ?? "—"}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3">
                             <p className="text-[11px] text-gray-500">Gelen/Giden</p>
-                            <p className="text-sm font-medium">{inv.box_type === 1 ? "Gelir (Satış)" : "Gider (Alış)"}</p>
+                            <p className="text-sm font-medium">{inv.box_type === 1 ? "Giden Fatura" : "Gelen Fatura"}</p>
                           </div>
                           <div className="bg-gray-50 rounded-lg p-3">
                             <p className="text-[11px] text-gray-500">Fatura Durumu</p>
@@ -819,6 +854,18 @@ export function LoadsPage() {
                             <p className="text-[11px] text-gray-500">Alıcı</p>
                             <p className="text-sm font-medium">{inv.target_title ?? "—"}</p>
                             <p className="text-xs text-gray-500">{inv.target_identity_no ?? "—"}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-[11px] text-gray-500">Tutar</p>
+                            <p className="text-sm font-medium">{invoiceMoney(inv.payable_amount)} {inv.document_currency_code ?? ""}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3">
+                            <p className="text-[11px] text-gray-500">KDV Hariç</p>
+                            <p className="text-sm font-medium">{invoiceMoney(inv.tax_exclusive_amount)} {inv.document_currency_code ?? ""}</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-3 col-span-2">
+                            <p className="text-[11px] text-gray-500">KDV</p>
+                            <p className="text-sm font-medium">{invoiceMoney(inv.tax_amount)} ({inv.tax_rate ?? 0}%) {inv.document_currency_code ?? ""}</p>
                           </div>
                           <div className="bg-gray-50 rounded-lg p-3 col-span-2">
                             <p className="text-[11px] text-gray-500">Fatura Tarihi</p>
@@ -910,6 +957,36 @@ export function LoadsPage() {
             <Btn variant="secondary" onClick={() => setMovementModalOpen(false)}>İptal</Btn>
             <Btn onClick={saveMovement} disabled={savingMovement}>{savingMovement ? "Kaydediliyor..." : "Kaydet"}</Btn>
           </div>
+        </div>
+      </Modal>
+
+      <Modal open={deletedMovementsModalOpen} onClose={() => setDeletedMovementsModalOpen(false)} title="Silinen Hareketler">
+        <div className="w-[420px] max-w-full space-y-2 max-h-[60vh] overflow-y-auto">
+          {deletedMovements.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-8">Silinen hareket bulunmamaktadır.</p>
+          ) : (
+            deletedMovements.map((m) => (
+              <div key={m.id} className="border border-gray-200 rounded-lg p-4 mb-2">
+                {m.expedition_status?.name && (
+                  <div className="text-xs font-semibold text-blue-600 border-l-2 border-blue-500 pl-2 mb-2">{m.expedition_status.name}</div>
+                )}
+                <p className="text-sm font-medium mb-2">{m.destination?.name ?? "Belirtilmemiş"}</p>
+                <p className="text-[11px] text-gray-500 mb-1">Oluşturan: {movementUserLabel(m.user)}</p>
+                <p className="text-[11px] text-gray-500 mb-1">
+                  Oluşturulma Tarihi: {m.created_at ? new Date(m.created_at).toLocaleString("tr-TR") : "—"}
+                </p>
+                <p className="text-[11px] text-red-400 mb-1">
+                  Silinme Tarihi: {m.deleted_at ? new Date(m.deleted_at).toLocaleString("tr-TR") : "—"}
+                </p>
+                {m.expedition_movement?.expedition?.expedition_number && (
+                  <p className="text-[11px] text-blue-500 mt-1">
+                    {m.expedition_movement.expedition.expedition_number} numaralı sefer hareketinin değişikliği sonrasında otomatik oluşmuştur.
+                  </p>
+                )}
+                {m.description && <p className="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100">{m.description}</p>}
+              </div>
+            ))
+          )}
         </div>
       </Modal>
     </>

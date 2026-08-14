@@ -62,10 +62,12 @@ interface InvoiceFooterRow {
 }
 
 const PER_PAGE = 8;
+// olsold: pages/invoices.vue Tab etiketleri ("Gelen Faturalar"/"Giden Faturalar") —
+// Alış/Satış DEĞİL, gelen/giden evrak yönü.
 const BOX_TABS = [
   { value: "", label: "Tümü" },
-  { value: "0", label: "Gider Faturalar" },
-  { value: "1", label: "Gelir Faturalar" },
+  { value: "0", label: "Gelen Faturalar" },
+  { value: "1", label: "Giden Faturalar" },
 ];
 const DETAIL_TABS = ["Genel Bilgiler", "Kalemler", "Dipnotlar"];
 
@@ -379,7 +381,7 @@ export function InvoicesPage() {
       >
         <div className="p-6 grid grid-cols-2 gap-4">
           <FormField label="Yön" required>
-            <SelectInput value={form.box_type} onChange={(v) => setForm((f) => ({ ...f, box_type: v }))} options={[{ value: "0", label: "Gider (Alış)" }, { value: "1", label: "Gelir (Satış)" }]} />
+            <SelectInput value={form.box_type} onChange={(v) => setForm((f) => ({ ...f, box_type: v }))} options={[{ value: "0", label: "Gelen Fatura" }, { value: "1", label: "Giden Fatura" }]} />
           </FormField>
           <FormField label="Fatura Tipi" required error={errors.invoice_type_id?.[0]}>
             <SelectInput value={form.invoice_type_id} onChange={(v) => setForm((f) => ({ ...f, invoice_type_id: v }))} options={[{ value: "", label: "Seçiniz" }, ...invoiceTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
@@ -430,7 +432,7 @@ export function InvoicesPage() {
                   <AccountPicker label="Müşteri" value={detailAccount} onChange={setDetailAccount} required error={detailErrors.account_id?.[0]} />
                   <div className="grid grid-cols-2 gap-4">
                     <FormField label="Yön" required>
-                      <SelectInput value={detailForm.box_type} onChange={(v) => setDetailForm((f) => ({ ...f, box_type: v }))} options={[{ value: "0", label: "Gider (Alış)" }, { value: "1", label: "Gelir (Satış)" }]} />
+                      <SelectInput value={detailForm.box_type} onChange={(v) => setDetailForm((f) => ({ ...f, box_type: v }))} options={[{ value: "0", label: "Gelen Fatura" }, { value: "1", label: "Giden Fatura" }]} />
                     </FormField>
                     <FormField label="Fatura Tipi" required error={detailErrors.invoice_type_id?.[0]}>
                       <SelectInput value={detailForm.invoice_type_id} onChange={(v) => setDetailForm((f) => ({ ...f, invoice_type_id: v }))} options={[{ value: "", label: "Seçiniz" }, ...invoiceTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
