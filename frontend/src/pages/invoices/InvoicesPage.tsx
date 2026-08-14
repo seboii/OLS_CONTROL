@@ -248,22 +248,38 @@ export function InvoicesPage() {
   }
 
   // --- Kalem seçici (mevcut load_transfer_invoice_item kayıtları arasından) ---
+  //
+  // olsold: InvoiceFormInvoiceItems.vue financial_item_list_filter — status
+  // HER ZAMAN "pending" (zaten başka bir faturaya bağlanmış kalemler burada
+  // ASLA görünmemeli, aksi hâlde aynı tutar iki kez faturalanabilir) ve
+  // buysell faturanın box_type'ına göre sabit (Gelen/Alış=1, Giden/Satış=2).
+  // Backend bu filtreleri zaten destekliyordu (LoadTransferInvoiceItemController),
+  // yalnızca burada hiç gönderilmiyordu.
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const debouncedPickerSearch = useDebouncedValue(pickerSearch);
+  const [pickerAccount, setPickerAccount] = useState<AccountOption | null>(null);
   const [pickerResults, setPickerResults] = useState<MappedInvoiceItem[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
+  const pickerBuysell = detailForm.box_type === "0" ? "1" : "2";
 
   useEffect(() => {
     if (!pickerOpen) return;
     setPickerLoading(true);
     api
-      .get<DataMessage<Paginated<MappedInvoiceItem>>>("/api/v1/load_transfer_invoice_item", { search: debouncedPickerSearch || undefined, per_page: 8, page: 1 })
+      .get<DataMessage<Paginated<MappedInvoiceItem>>>("/api/v1/load_transfer_invoice_item", {
+        search: debouncedPickerSearch || undefined,
+        status: "pending",
+        buysell: pickerBuysell,
+        account_id: pickerAccount?.id,
+        per_page: 8,
+        page: 1,
+      })
       .then((res) => setPickerResults(res.data.data))
       .catch(() => setPickerResults([]))
       .finally(() => setPickerLoading(false));
-  }, [pickerOpen, debouncedPickerSearch]);
+  }, [pickerOpen, debouncedPickerSearch, pickerBuysell, pickerAccount]);
 
   function addMap(item: MappedInvoiceItem) {
     if (!item.load_transfer) {
@@ -458,7 +474,7 @@ export function InvoicesPage() {
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Kalemler</p>
                     {canUpdate && (
-                      <button type="button" onClick={() => { setPickerSearch(""); setPickerOpen(true); }} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                      <button type="button" onClick={() => { setPickerSearch(""); setPickerAccount(null); setPickerOpen(true); }} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
                         <Tag size={12} />Kalem Ekle
                       </button>
                     )}
@@ -527,6 +543,13 @@ export function InvoicesPage() {
       <Modal open={pickerOpen} onClose={() => setPickerOpen(false)} title="Faturaya Kalem Ekle">
         <div className="w-[440px] max-w-full">
           <SearchInput value={pickerSearch} onChange={setPickerSearch} placeholder="Kalem, yük no, cari..." />
+          <div className="mt-2">
+            <AccountPicker
+              label={pickerBuysell === "1" ? "Tedarikçiler" : "Müşteriler"}
+              value={pickerAccount}
+              onChange={setPickerAccount}
+            />
+          </div>
           <div className="mt-3 max-h-80 overflow-y-auto space-y-1">
             {pickerLoading ? (
               <p className="text-xs text-gray-400 text-center py-6">Yükleniyor...</p>
@@ -543,6 +566,9 @@ export function InvoicesPage() {
                   <span>
                     <span className="text-blue-700 font-medium">{r.item?.name ?? r.description ?? `#${r.id}`}</span>
                     <span className="text-gray-500 ml-2 text-xs">{r.load_transfer?.name ?? "yük bağlı değil"}</span>
+                    {maps.some((m) => m.load_transfer_invoice_item?.id === r.id) && (
+                      <Badge label="Eklendi" />
+                    )}
                   </span>
                   <span className="font-mono text-xs text-gray-500">{r.total_price ?? r.net_price ?? 0}</span>
                 </button>

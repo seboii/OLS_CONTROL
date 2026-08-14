@@ -156,6 +156,59 @@ public sealed class InvoiceTests
         afterClear.GetArrayLength().Should().Be(0);
     }
 
+    /// <summary>
+    /// Regresyon: "Faturaya Kalem Ekle" seçicisi (frontend) önce status/buysell
+    /// filtresi hiç göndermiyordu — bu yüzden zaten BAŞKA bir faturaya bağlı
+    /// (status != pending) veya yanlış yönde (buysell uyuşmayan) kalemler de
+    /// listede görünüyordu; bir kalemi iki kez faturalamak mümkündü. Backend
+    /// (LoadTransferInvoiceItemController/Service) bu filtreleri zaten
+    /// destekliyordu — burada uçtan uca doğruluğu kilitleniyor.
+    /// </summary>
+    [Fact]
+    public async Task ListInvoiceItems_FiltersByStatusAndBuysell_ExcludesNonMatchingItems()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        long pendingSellId, pendingBuyId, issuedSellId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+
+            LoadTransferInvoiceItem NewItem(string buysell, string status) => new()
+            {
+                InsertName = $"TEST-{Guid.NewGuid():N}",
+                Buysell = buysell,
+                Status = status,
+                NetPrice = 100m,
+                TotalPrice = 118m,
+                CreatedAt = DateTime.Now,
+            };
+
+            var pendingSell = NewItem("2", "pending");
+            var pendingBuy = NewItem("1", "pending");
+            var issuedSell = NewItem("2", "invoice_issued");
+            db.LoadTransferInvoiceItems.AddRange(pendingSell, pendingBuy, issuedSell);
+            await db.SaveChangesAsync();
+
+            pendingSellId = pendingSell.Id;
+            pendingBuyId = pendingBuy.Id;
+            issuedSellId = issuedSell.Id;
+        }
+
+        var response = await admin.GetAsync("/api/v1/load_transfer_invoice_item?status=pending&buysell=2&per_page=100");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var ids = (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("data")
+            .EnumerateArray()
+            .Select(e => e.GetProperty("id").GetInt64())
+            .ToList();
+
+        ids.Should().Contain(pendingSellId, "Satış yönünde ve bekleyen kalem listede olmalı");
+        ids.Should().NotContain(pendingBuyId, "yanlış yöndeki (Alış) kalem listede OLMAMALI");
+        ids.Should().NotContain(issuedSellId, "zaten faturalanmış kalem listede OLMAMALI — aksi hâlde iki kez faturalanabilir");
+    }
+
     [Fact]
     public async Task Footer_CreateThenDelete_RoundTripsCorrectly()
     {
