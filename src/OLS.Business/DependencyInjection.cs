@@ -27,8 +27,8 @@ public static class DependencyInjection
     /// (hazır tasarımda mevcut olduğu görülüp sonradan kapsama eklendi — bkz.
     /// DashboardService.cs, yalnızca GERÇEK verilerden hesaplanan agregasyonlar,
     /// olsold'daki tam raporlama modülünün portu DEĞİL).
-    /// Kapsam dışı bırakılanlar (Accounting, Excel, Goals, Messages, olsold'un tam
-    /// Reports modülü, TransitDeclarations, AI/OCR, Currency admin+TCMB,
+    /// Kapsam dışı bırakılanlar (Accounting, Excel, olsold'un tam Reports/Hedef-ciro
+    /// modülü, Messages, TransitDeclarations, AI/OCR, Currency admin+TCMB,
     /// PDKS/WorkingTracking) olsnew'de mevcut ama buraya bilinçli olarak taşınmadı —
     /// bkz. docs/SECILI-MODUL-PARITE-MATRISI.md §0.
     ///
@@ -40,6 +40,14 @@ public static class DependencyInjection
     /// yapısal olarak İMKANSIZ olduğu ortaya çıktı; bu alanları dolduracak ETL
     /// (olsold: TransferDataController) hiç portlanmamıştı. SiberImportService bu
     /// boşluğu kapatır — bkz. TESLIM-RAPORU.md "Kritik yön değişikliği #3".
+    ///
+    /// KRİTİK YÖN DEĞİŞİKLİĞİ (bu güncellemede): Bu yorum daha önce "Goals"u da
+    /// kapsam dışı sayıyordu — YANLIŞ genelleme. §0 genel kararlar tablosunda "Goals"
+    /// hiç geçmiyor; asıl karar §7'de (Kullanıcılar) satır 134'te: UserGoal
+    /// (UserTarget.vue → api/v1/user_goal) genel Reports/Hedef-ciro modülünden AYRI,
+    /// UserFormDrawer'ın (Kullanıcılar formu) görsel/işlevsel bir parçası olduğu için
+    /// "istisnai kapsam-içi bağımlılık" olarak İÇERİDE bırakılmıştı. Bu yorum o satırı
+    /// yansıtmıyordu; kullanıcıya soruldu, eklenmesi onaylandı — bkz. UserGoalService.cs.
     /// </summary>
     public static IServiceCollection AddBusiness(
         this IServiceCollection services,
@@ -80,6 +88,7 @@ public static class DependencyInjection
 
         services.AddScoped<IUserService, UserService>();
         services.AddScoped<IProfileService, ProfileService>();
+        services.AddScoped<IUserGoalService, UserGoalService>();
 
         services.AddScoped<IContactFormService, ContactFormService>();
 

@@ -878,6 +878,25 @@ namespace OLS.DataAccess.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "user_goals",
+                columns: table => new
+                {
+                    id = table.Column<long>(type: "bigint", nullable: false)
+                        .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
+                    user_id = table.Column<int>(type: "integer", nullable: true),
+                    start_date = table.Column<DateOnly>(type: "date", nullable: true),
+                    end_date = table.Column<DateOnly>(type: "date", nullable: true),
+                    goal_price = table.Column<decimal>(type: "numeric(10,2)", nullable: false, defaultValue: 0m),
+                    siber_id = table.Column<string>(type: "character varying(191)", maxLength: 191, nullable: true),
+                    created_at = table.Column<DateTime>(type: "timestamp(0) without time zone", nullable: true),
+                    updated_at = table.Column<DateTime>(type: "timestamp(0) without time zone", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("user_goals_pkey", x => x.id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "user_permission_pages",
                 columns: table => new
                 {
@@ -1666,6 +1685,9 @@ namespace OLS.DataAccess.Migrations
 
             migrationBuilder.DropTable(
                 name: "user_account_mappings");
+
+            migrationBuilder.DropTable(
+                name: "user_goals");
 
             migrationBuilder.DropTable(
                 name: "user_permissions");

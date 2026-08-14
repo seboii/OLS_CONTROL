@@ -128,6 +128,8 @@ public partial class OlsDbContext : DbContext
 
     public virtual DbSet<UserAccountMapping> UserAccountMappings { get; set; }
 
+    public virtual DbSet<UserGoal> UserGoals { get; set; }
+
     public virtual DbSet<UserPermission> UserPermissions { get; set; }
 
     public virtual DbSet<UserPermissionPage> UserPermissionPages { get; set; }
@@ -1867,6 +1869,31 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.SiberId)
                 .HasMaxLength(191)
                 .HasColumnName("siber_id");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+        });
+
+        modelBuilder.Entity<UserGoal>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("user_goals_pkey");
+
+            entity.ToTable("user_goals");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("created_at");
+            entity.Property(e => e.EndDate).HasColumnName("end_date");
+            entity.Property(e => e.GoalPrice)
+                .HasDefaultValue(0m)
+                .HasColumnType("decimal(10,2)")
+                .HasColumnName("goal_price");
+            entity.Property(e => e.SiberId)
+                .HasMaxLength(191)
+                .HasColumnName("siber_id");
+            entity.Property(e => e.StartDate).HasColumnName("start_date");
             entity.Property(e => e.UpdatedAt)
                 .HasColumnType("timestamp(0) without time zone")
                 .HasColumnName("updated_at");

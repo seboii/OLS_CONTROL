@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { Plus, Shield, Upload, Trash2 } from "lucide-react";
+import { Plus, Shield, Upload, Trash2, Target, Calendar, Pencil } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
-import { Drawer } from "@/components/ui/Overlay";
+import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
 
 interface NamedRef {
@@ -27,6 +27,14 @@ interface UserItem {
 interface UserDetail extends UserItem {
   pkds_id: string | null;
   phone_country_id: NamedRef | null;
+}
+
+interface UserGoalItem {
+  id: number;
+  user_id: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  goal_price: number;
 }
 
 interface PermissionRow {
@@ -79,6 +87,12 @@ export function UsersPage() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [removeAvatar, setRemoveAvatar] = useState(false);
 
+  const [goals, setGoals] = useState<UserGoalItem[]>([]);
+  const [goalsLoading, setGoalsLoading] = useState(false);
+  const [goalModalOpen, setGoalModalOpen] = useState(false);
+  const [goalSaving, setGoalSaving] = useState(false);
+  const [goalForm, setGoalForm] = useState<{ id: number | null; month: string; goal_price: string }>({ id: null, month: "", goal_price: "" });
+
   const { options: countries } = useLookupOptions("/api/v1/country");
 
   useEffect(() => {
@@ -113,11 +127,24 @@ export function UsersPage() {
     setForm({ name: "", surname: "", email: "", phone: "", password: "", phone_country_id: "", pkds_id: "" });
     setErrors({});
     setPermRows([]);
+    setGoals([]);
     setExistingAvatar(null);
     setAvatarFile(null);
     setRemoveAvatar(false);
     setTab("Profil");
     setDrawerOpen(true);
+  }
+
+  async function loadGoals(userId: number) {
+    setGoalsLoading(true);
+    try {
+      const res = await api.get<DataMessage<UserGoalItem[]>>("/api/v1/user_goal", { user_id: userId });
+      setGoals(res.data);
+    } catch {
+      setGoals([]);
+    } finally {
+      setGoalsLoading(false);
+    }
   }
 
   async function loadPermissions(userId: number) {
@@ -151,7 +178,7 @@ export function UsersPage() {
     }
     setAvatarFile(null);
     setRemoveAvatar(false);
-    await loadPermissions(u.id);
+    await Promise.all([loadPermissions(u.id), loadGoals(u.id)]);
   }
 
   async function handleSubmit() {
@@ -225,6 +252,61 @@ export function UsersPage() {
     }
   }
 
+  // olsold: UserTarget.vue setNewDate — ayın 1'i / ayın son günü.
+  function monthToRange(month: string): { start: string; end: string } | null {
+    if (!month) return null;
+    const [y, m] = month.split("-").map(Number);
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return { start: fmt(new Date(y, m - 1, 1)), end: fmt(new Date(y, m, 0)) };
+  }
+
+  function openNewGoal() {
+    setGoalForm({ id: null, month: "", goal_price: "" });
+    setGoalModalOpen(true);
+  }
+
+  function openEditGoal(g: UserGoalItem) {
+    setGoalForm({ id: g.id, month: g.start_date ? g.start_date.slice(0, 7) : "", goal_price: g.goal_price != null ? String(g.goal_price) : "" });
+    setGoalModalOpen(true);
+  }
+
+  async function handleGoalSubmit() {
+    if (!editingId) return;
+    const range = monthToRange(goalForm.month);
+    setGoalSaving(true);
+    try {
+      const body = {
+        user_id: editingId,
+        start_date: range?.start ?? null,
+        end_date: range?.end ?? null,
+        goal_price: goalForm.goal_price ? Number(goalForm.goal_price) : 0,
+      };
+      if (goalForm.id) {
+        await api.put("/api/v1/user_goal", { id: goalForm.id, ...body });
+      } else {
+        await api.post("/api/v1/user_goal", body);
+      }
+      addToast(goalForm.id ? "Hedef güncellendi" : "Hedef eklendi");
+      setGoalModalOpen(false);
+      loadGoals(editingId);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Hedef kaydedilemedi", "error");
+    } finally {
+      setGoalSaving(false);
+    }
+  }
+
+  async function handleDeleteGoal(id: number) {
+    if (!editingId || !window.confirm("Bu hedef silinsin mi?")) return;
+    try {
+      await api.delete("/api/v1/user_goal", { deletion_id: [id] });
+      addToast("Hedef silindi");
+      loadGoals(editingId);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Silinemedi", "error");
+    }
+  }
+
   const columns: Column<UserItem>[] = [
     {
       key: "avatar",
@@ -283,7 +365,7 @@ export function UsersPage() {
         subtitle={editingId ? form.email : undefined}
         width="w-[640px]"
         footer={
-          tab !== "Yetkiler" && (editingId ? canUpdate : canCreate) ? (
+          tab === "Profil" && (editingId ? canUpdate : canCreate) ? (
             <div className="flex gap-2">
               <Btn onClick={handleSubmit} disabled={saving}>{saving ? "Kaydediliyor..." : "Kaydet"}</Btn>
               <Btn variant="secondary" onClick={() => setDrawerOpen(false)}>İptal</Btn>
@@ -291,7 +373,7 @@ export function UsersPage() {
           ) : undefined
         }
       >
-        <Tabs tabs={editingId ? ["Profil", "Yetkiler"] : ["Profil"]} active={tab} onChange={setTab} className="px-6" />
+        <Tabs tabs={editingId ? ["Profil", "Yetkiler", "Hedefler"] : ["Profil"]} active={tab} onChange={setTab} className="px-6" />
         {tab === "Profil" && (
           <div className="p-6 grid grid-cols-2 gap-4">
             <div className="col-span-2">
@@ -410,7 +492,61 @@ export function UsersPage() {
             )}
           </div>
         )}
+        {tab === "Hedefler" && (
+          <div className="p-6">
+            <div className="flex lg:justify-end mb-4">
+              <Btn onClick={openNewGoal} size="sm"><Plus size={14} />Yeni Hedef Ekle</Btn>
+            </div>
+            {goalsLoading ? (
+              <p className="text-sm text-gray-400 text-center py-10">Yükleniyor...</p>
+            ) : goals.length === 0 ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="py-3 px-6 bg-gray-100 text-gray-600 rounded-xl text-sm">Henüz hedef eklenmemiş.</div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {goals.map((g) => (
+                  <div key={g.id} className="flex items-center justify-between gap-4 rounded-xl px-6 py-4 bg-white border border-gray-200 shadow-xs">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-3 text-sm">
+                        <Target size={16} className="text-gray-400" />
+                        <span className="text-gray-500">Hedef :</span>
+                        <span className="font-medium">₺{g.goal_price.toLocaleString("tr-TR")}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-sm">
+                        <Calendar size={16} className="text-gray-400" />
+                        <span className="text-gray-500">Tarih :</span>
+                        <span className="font-medium">
+                          {g.start_date ? new Date(g.start_date).toLocaleDateString("tr-TR") : "—"} - {g.end_date ? new Date(g.end_date).toLocaleDateString("tr-TR") : "—"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Btn variant="secondary" size="sm" onClick={() => openEditGoal(g)}><Pencil size={13} />Düzenle</Btn>
+                      <Btn variant="secondary" size="sm" onClick={() => handleDeleteGoal(g.id)}><Trash2 size={13} />Sil</Btn>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </Drawer>
+
+      <Modal open={goalModalOpen} onClose={() => setGoalModalOpen(false)} title={goalForm.id ? "Hedefi Düzenle" : "Yeni Hedef Ekle"}>
+        <div className="p-6 space-y-4 w-[420px] max-w-full">
+          <FormField label="Tarih">
+            <TextInput type="month" value={goalForm.month} onChange={(v) => setGoalForm((f) => ({ ...f, month: v }))} />
+          </FormField>
+          <FormField label="Hedef">
+            <TextInput type="number" value={goalForm.goal_price} onChange={(v) => setGoalForm((f) => ({ ...f, goal_price: v }))} />
+          </FormField>
+        </div>
+        <div className="flex justify-end gap-2 px-6 pb-6">
+          <Btn variant="secondary" onClick={() => setGoalModalOpen(false)} disabled={goalSaving}>İptal</Btn>
+          <Btn onClick={handleGoalSubmit} disabled={goalSaving}>{goalSaving ? "Kaydediliyor..." : "Kaydet"}</Btn>
+        </div>
+      </Modal>
     </>
   );
 }

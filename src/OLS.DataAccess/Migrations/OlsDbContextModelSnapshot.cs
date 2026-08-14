@@ -3102,6 +3102,52 @@ namespace OLS.DataAccess.Migrations
                     b.ToTable("user_account_mappings", (string)null);
                 });
 
+            modelBuilder.Entity("OLS.DataAccess.Entities.UserGoal", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("CreatedAt")
+                        .HasColumnType("timestamp(0) without time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("end_date");
+
+                    b.Property<decimal>("GoalPrice")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(10,2)")
+                        .HasDefaultValue(0m)
+                        .HasColumnName("goal_price");
+
+                    b.Property<string>("SiberId")
+                        .HasMaxLength(191)
+                        .HasColumnType("character varying(191)")
+                        .HasColumnName("siber_id");
+
+                    b.Property<DateOnly?>("StartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("start_date");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp(0) without time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("user_goals_pkey");
+
+                    b.ToTable("user_goals", (string)null);
+                });
+
             modelBuilder.Entity("OLS.DataAccess.Entities.UserPermission", b =>
                 {
                     b.Property<long>("Id")
