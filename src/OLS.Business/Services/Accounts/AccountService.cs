@@ -151,6 +151,7 @@ public sealed class AccountService : IAccountService
             Phone = a.Phone,
             Email = a.Email,
             Avatar = a.Avatar,
+            SiberId = a.SiberId,
             CountryId = _db.Countries.Where(c => c.Id == a.CountryId).Select(MapCountry).FirstOrDefault(),
             PhoneCountryId = _db.Countries.Where(c => c.Id == a.PhoneCountryId).Select(MapCountry).FirstOrDefault(),
             TaxOffice = _db.TaxOffices

@@ -8,6 +8,7 @@ import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
 import { Drawer } from "@/components/ui/Overlay";
 import { Btn, FormField, TextInput, SelectInput } from "@/components/ui/primitives";
+import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 
 interface NamedRef {
   id: number;
@@ -26,7 +27,7 @@ interface CarItem {
   romork_type: NamedRef | null;
   vehicle_owner: NamedRef | null;
   vehicle_status: NamedRef | null;
-  customer: NamedRef | null;
+  customer: AccountOption | null;
 }
 
 const PER_PAGE = 10;
@@ -61,6 +62,7 @@ export function VehiclesPage() {
     height: "",
     capacity: "",
   });
+  const [customer, setCustomer] = useState<AccountOption | null>(null);
 
   const { options: carTypes } = useLookupOptions("/api/v1/car_type");
   const { options: romorkTypes } = useLookupOptions("/api/v1/romork_type");
@@ -86,6 +88,7 @@ export function VehiclesPage() {
 
   function resetForm() {
     setForm({ plate_number: "", car_type: "", romork_type: "", vehicle_owner: "", vehicle_status: "", km: "", width: "", length: "", height: "", capacity: "" });
+    setCustomer(null);
     setErrors({});
   }
 
@@ -113,6 +116,7 @@ export function VehiclesPage() {
         height: c.height != null ? String(c.height) : "",
         capacity: c.capacity != null ? String(c.capacity) : "",
       });
+      setCustomer(c.customer);
       setErrors({});
     } catch {
       addToast("Araç bilgileri yüklenemedi", "error");
@@ -131,6 +135,9 @@ export function VehiclesPage() {
       romork_type: num(form.romork_type),
       vehicle_owner: num(form.vehicle_owner),
       vehicle_status: num(form.vehicle_status),
+      // olsold: cars.customer_id yerel id değil, cari'nin Siber id'sini tutar
+      // (BagliFirmaId olarak Siber'e yazılıyor) — bkz. CarService.SingleAsync.
+      customer_id: customer?.siber_id ?? null,
       km: num(form.km),
       width: num(form.width),
       length: num(form.length),
@@ -222,9 +229,15 @@ export function VehiclesPage() {
         }
       >
         <div className="p-6 grid grid-cols-2 gap-4">
-          <FormField label="Plaka" required error={errors.plate_number?.[0]}>
-            <TextInput value={form.plate_number} onChange={(v) => setForm((f) => ({ ...f, plate_number: v }))} placeholder="34 TRK 0000" error={!!errors.plate_number} />
-          </FormField>
+          <div className="col-span-2">
+            <FormField label="Plaka" required error={errors.plate_number?.[0]}>
+              <TextInput value={form.plate_number} onChange={(v) => setForm((f) => ({ ...f, plate_number: v }))} placeholder="34 TRK 0000" error={!!errors.plate_number} />
+            </FormField>
+            {editingId && <p className="mt-1.5 text-xs text-gray-500">Kullanımda olan aracın plakası değiştirilemez.</p>}
+          </div>
+          <div className="col-span-2">
+            <AccountPicker label="Kiralanan Firma" value={customer} onChange={setCustomer} />
+          </div>
           <FormField label="Araç Tipi">
             <SelectInput value={form.car_type} onChange={(v) => setForm((f) => ({ ...f, car_type: v }))} options={[{ value: "", label: "Seçiniz" }, ...carTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
           </FormField>

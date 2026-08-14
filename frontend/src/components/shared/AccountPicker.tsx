@@ -8,6 +8,7 @@ import { Btn, FormField, SearchInput, TextInput } from "@/components/ui/primitiv
 export interface AccountOption {
   id: number;
   name: string | null;
+  siber_id?: string | null;
 }
 
 /**

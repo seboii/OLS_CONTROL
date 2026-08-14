@@ -25,6 +25,8 @@ public sealed class AccountListItemDto
     [JsonPropertyName("phone")] public string? Phone { get; init; }
     [JsonPropertyName("email")] public string? Email { get; init; }
     [JsonPropertyName("avatar")] public string? Avatar { get; init; }
+    /// <summary>Bazı modüller (ör. Araç.customer_id) cariyi yerel id yerine Siber id'siyle referanslıyor.</summary>
+    [JsonPropertyName("siber_id")] public string? SiberId { get; init; }
 
     [JsonPropertyName("country_id")] public CountryDto? CountryId { get; init; }
     [JsonPropertyName("phone_country_id")] public CountryDto? PhoneCountryId { get; init; }
