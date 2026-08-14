@@ -104,6 +104,22 @@ Teklif'in `load_id`'sine yazdığı zaten doğruydu):
 Backend build + `tsc -b` temiz; ilgili 8 test (Movement/Expedition/Invoice/LoadTransfer) yeşil; canlı
 Docker'da üç sekme de gerçek verilerle doğrulandı.
 
+**Kritik yön değişikliği #6 (bu güncellemede — Teklif'in Görevliler/Dosyalar denetimi):** Aynı yöntem
+Teklif'in `OfferFormDrawer.vue` TabPanel value="3" (Görevliler) ve value="5" (kaynakta "Dosya Arşivi")
+bölümlerine uygulandı. Bu kez SADECE 1 kozmetik bulgu: port'ta sekme adı "Dosyalar"dı, kaynakta
+"Dosya Arşivi" — düzeltildi. Görevliler'in kendisi (Operasyon Yetkilisi tekil + Satış Temsilcisi çoğul,
+`load_charge_person` ilişki tablosu, update'te eski kayıtları silip yeniden yazma) ZATEN birebir
+doğruydu; canlı Docker'da API yanıtı (`GET /api/v1/load/1` → `load_charge_person` iki kayıt, ikisi de
+dolu `user_id`) VE gerçek DOM `<input>` value'ları ("Ahmet Yılmaz") ile doğrulandı.
+
+Bu doğrulama sırasında kendi metodolojimdeki bir tuzağa düşüp geri çıktım: `get_page_text` ile ilk
+bakışta her iki alan da "boş/seçilmemiş" görünüyordu (yalnızca picker'ı açan "Seç" butonunun metnini
+görüyordum) — ama `get_page_text` `<input>` elemanlarının `value`'sunu OKUMUYOR, yalnızca DOM metin
+düğümlerini okuyor. `document.querySelectorAll('input[disabled]')[i].value` ile doğru kontrol edilince
+verinin baştan beri doğru geldiği görüldü. Bu, önceki oturumda `<select>` için belgelenen aynı tuzağın
+`<input>` sürümü — ders: seçici/picker bileşenlerinin dolu/boş durumunu HER ZAMAN gerçek DOM
+`value`/`selectedOptions` sorgusuyla doğrula, düz metin dökümüyle değil.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 58 tablo, EF Core/Npgsql +
