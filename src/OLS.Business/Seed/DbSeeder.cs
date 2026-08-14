@@ -33,6 +33,101 @@ public static class DbSeeder
         await SeedStatusTypesAsync(db, cancellationToken);
         await SeedCoreLookupsAsync(db, cancellationToken);
         await SeedAdminUserAsync(db, hasher, configuration, environment, logger, cancellationToken);
+
+        if (environment.IsDevelopment())
+            await SeedDemoConvenienceDataAsync(db, cancellationToken);
+    }
+
+    // ------------------------------------------------------------------
+    // Geliştirme kolaylığı — YALNIZCA Development ortamında çalışır.
+    //
+    // Siber'den içe aktarılan referans verisi (financial_items, accounts)
+    // başarıyla geldikten sonra bile bazı alanlar hâlâ boş kalır, çünkü
+    // Siber'in kendi şeması bu alanları hiç taşımıyor:
+    //   - financial_items.type (Alış=1/Satış=2): mock Siber'in skn_kalem
+    //     tablosunda böyle bir sütun YOK; olsold'un kendi FinancialItemSeeder'ı
+    //     da doldurmuyor — hem olsold hem "olimpikgama" (aynı ürünün başka
+    //     bir müşteri dağıtımı, resources/js/data + database/seeders BİREBİR
+    //     aynı) karşılaştırılarak doğrulandı. Sınıflandırılmamış hâliyle
+    //     Teklif/Yük'ün "Kalem" seçicisi hiçbir zaman dolu görünmez — backend
+    //     type=null'ı bilinçli olarak filtreden HARİÇ tutuyor (kaynakla
+    //     birebir, bkz. LookupService.AllAsync).
+    //   - account_type_id=5 (Acente) tipinde hiçbir cari gelmeyebilir, çünkü
+    //     mock Siber örnek verisinde bir acente yok.
+    // Bu, canlı Docker'da "Yeni Teklif" akışı denenirken keşfedildi: Kalem ve
+    // Acente seçicileri "Sonuç bulunamadı" gösteriyordu. Mevcut/özelleştirilmiş
+    // veriyi ASLA ezmez — yalnızca hiç örnek yoksa bir tane ekler.
+    // ------------------------------------------------------------------
+    private static async Task SeedDemoConvenienceDataAsync(OlsDbContext db, CancellationToken ct)
+    {
+        await ClassifyFinancialItemsAsync(db, ct);
+        await EnsureAcenteAccountAsync(db, ct);
+    }
+
+    /// <summary>
+    /// En az bir Alış(1) ve bir Satış(2) örneği olsun diye önce sınıflandırılmamış
+    /// kalemlerden kullanır; hiç kalem yoksa (Siber import'u henüz hiç çalışmamış
+    /// taze bir kurulum) birkaç temel kalemi ZATEN sınıflandırılmış olarak ekler.
+    /// </summary>
+    private static async Task ClassifyFinancialItemsAsync(OlsDbContext db, CancellationToken ct)
+    {
+        var hasBuy = await db.FinancialItems.AnyAsync(f => f.Type == 1, ct);
+        var hasSell = await db.FinancialItems.AnyAsync(f => f.Type == 2, ct);
+        if (hasBuy && hasSell)
+            return;
+
+        var unclassified = await db.FinancialItems
+            .Where(f => f.Type == null)
+            .OrderBy(f => f.Id)
+            .ToListAsync(ct);
+
+        foreach (var item in unclassified)
+        {
+            if (!hasBuy) { item.Type = 1; hasBuy = true; }
+            else if (!hasSell) { item.Type = 2; hasSell = true; }
+            else break;
+        }
+
+        if (!hasBuy)
+            db.FinancialItems.Add(new FinancialItem { Name = "Gümrükleme (Demo)", Type = 1, CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now });
+        if (!hasSell)
+            db.FinancialItems.Add(new FinancialItem { Name = "Navlun (Demo)", Type = 2, CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now });
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Acente (account_type_id=5) tipinde hiç cari yoksa bir demo cari ekler.</summary>
+    private static async Task EnsureAcenteAccountAsync(OlsDbContext db, CancellationToken ct)
+    {
+        var acenteTypeId = await db.AccountTypes
+            .Where(t => t.Name == "Acente")
+            .Select(t => (int?)t.Id)
+            .FirstOrDefaultAsync(ct);
+        if (acenteTypeId is null)
+            return;
+
+        var hasAcente = await db.AccountTypeMappings.AnyAsync(m => m.AccountTypeId == acenteTypeId, ct);
+        if (hasAcente)
+            return;
+
+        var account = new Account
+        {
+            Name = "Deniz Acente (Demo)",
+            Email = "info@denizacente.test",
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now,
+        };
+        db.Accounts.Add(account);
+        await db.SaveChangesAsync(ct);
+
+        db.AccountTypeMappings.Add(new AccountTypeMapping
+        {
+            AccountId = (int)account.Id,
+            AccountTypeId = acenteTypeId,
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now,
+        });
+        await db.SaveChangesAsync(ct);
     }
 
     // ------------------------------------------------------------------
