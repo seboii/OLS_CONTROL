@@ -132,7 +132,7 @@ function useStatusTypeMap() {
 }
 
 const PER_PAGE = 8;
-const TABS = ["Genel Bilgiler", "Taraflar", "Güzergah", "Görevliler", "Mali Kalemler", "Dosyalar"];
+const TABS = ["Genel Bilgiler", "Taraflar", "Güzergah", "Görevliler", "Mali Kalemler", "Dosya Arşivi"];
 const WAY_OF_WORKING_OPTIONS = [
   { value: "0", label: "Spot" },
   { value: "1", label: "Yıllık" },
@@ -822,7 +822,7 @@ export function QuotesPage() {
               </div>
             )}
 
-            {tab === "Dosyalar" && (
+            {tab === "Dosya Arşivi" && (
               <div className="space-y-4">
                 <div>
                   <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Mevcut Dosyalar</p>
