@@ -364,6 +364,21 @@ düzeltildi:
   başına backend eklemek mevcut formu kırar). Bunların hiçbiri veri kaybına yol açan bir güvenlik açığı
   değil — sadece kaynağın reddettiği bazı geçersiz girdilerin HEDEF'te sessizce kabul edilmesi.
 
+**Kritik yön değişikliği #13 (bu güncellemede — Kritik yön değişikliği #12'nin devamı, Müşteri):**
+olsold `FrontAccountController\RequestSave`/`RequestUpdate`: `name`, `country_id`, `discount` üçü de
+her iki uçta da zorunlu (aynı kurallar). HEDEF'te `Save` sadece `name`'i, `Update` ise sadece `id`'yi
+kontrol ediyordu — `country_id`/`discount` hiç doğrulanmıyordu ve **Update'te `name` bile zorunlu
+değildi** (boş isimle güncelleme geçiyordu). `AccountFormRequest.Discount`'u `int?`'e çevirmek gerekti
+(önceden non-nullable `int` idi — "hiç gönderilmedi" ile "0 gönderildi" ayırt edilemiyordu; olsold'da
+`discount=0` `required` kuralını geçer, yalnızca alan tamamen eksikse reddedilir). `AccountController`'a
+Car/User'daki desenle aynı `Validate()` eklendi, her iki uca da bağlandı. Frontend (`CustomersPage.tsx`):
+Ülke ve İndirim Tutarı alanlarında `required`/hata gösterimi yoktu, eklendi (Hesap Adı zaten vardı).
+Bu değişiklik, hesap oluşturan 6 test dosyasındaki (`CarTests`, `AccountFormTests`,
+`AccountVisibilityTests`, `InvoiceTests`, `LoadTests`, `LoadTransferTests`) TÜM minimal-hesap-formu
+çağrılarını (9 çağrı noktası) kırdı — hepsi yeni `TestAccountHelper.cs` ile güncellendi. Canlı Docker'da
+(imaj yeniden derlenip) hem `country_id` reddi hem `discount=0`'ın geçerli sayılması uçtan uca
+doğrulandı. 3 yeni test (`AccountFormTests.cs`), biri mutasyon testiyle doğrulandı.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
@@ -380,7 +395,7 @@ düzeltildi:
 - **İki kritik hata canlı ortamda bulunup düzeltildi ve regresyon testiyle kilitlendi** — ayrıntı
   [docs/TEST-RAPORU.md](TEST-RAPORU.md) §1: `/api/v1/role` zarf uyuşmazlığı (sidebar tamamen boş
   görünüyordu), `super_admin` yetki sayfasının seed edilmemesi (yeni cariler kimseye görünmüyordu).
-- **105 otomatik test, hepsi geçiyor** (76 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
+- **108 otomatik test, hepsi geçiyor** (79 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
   pipeline'ı üzerinden, hiçbir katman mock'lanmadan. Test geliştirme sürecinde 3 ayrı gerçek ortam/
   test-edilebilirlik sorunu daha bulunup düzeltildi (bkz. TEST-RAPORU.md §3) — en önemlisi, testlerin
   başlangıçta sessizce GERÇEK dev veritabanına yazdığının fark edilip kalıcı olarak düzeltilmesi.
@@ -412,7 +427,7 @@ düzeltildi:
 
 ```
 dotnet build                                    → 0 hata, 2 pre-existing nullability uyarısı
-dotnet test                                     → 105/105 geçti (29 birim + 76 entegrasyon), ~1.3 dk
+dotnet test                                     → 108/108 geçti (29 birim + 79 entegrasyon), ~1.3 dk
 docker compose up -d --build                    → 4 servis (postgres/siber-mock/api/frontend) sağlıklı
 curl -X POST .../api/v1/login (admin)           → 200, gerçek JWT
 GET /api/v1/account (Docker API, canlı)         → 200, gerçek cari listesi
@@ -423,7 +438,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-105/105 otomatik test geçiyor (29 OLS.Business.Tests + 76 OLS.API.IntegrationTests). Kapsanan: auth
+108/108 otomatik test geçiyor (29 OLS.Business.Tests + 79 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
@@ -577,10 +592,11 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   silindi. Otomatik test: `InvoiceTests.cs` (4 test). HÂLÂ EKSİK — bilinçli kapsam dışı: PDF önizleme,
   Uyumsoft draft/send/cancel/approve UI'si (backend'de zaten hiç portlanmadı — bkz. `InvoiceController.cs`
   üstündeki yorum).
-- **Müşteri** (`CustomersPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #8): çoklu Hesap Türü seçimi
+- **Müşteri** (`CustomersPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #8, #13): çoklu Hesap Türü seçimi
   (tekilden çoklu chip-toggle'a düzeltildi — EN CİDDİ bulgu, gerçek veri kaybı), Görevli + Faturalar
   sekmeleri eklendi, avatar yükleme eklendi, `tax_office` serbest metinden gerçek lookup'a çevrildi.
-  Otomatik test: `AccountFormTests.cs` (3 test).
+  Kritik yön değişikliği #13'te ayrıca: `country_id`/`discount` zorunlu (ikisi de), `name` güncellemede
+  de zorunlu — backend'e VE forma eklendi. Otomatik test: `AccountFormTests.cs` (6 test).
 - **Araç** (`VehiclesPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #8, #12): "Kiralanan Firma" alanı
   eklendi, `AccountOption`'a `siber_id` eklenerek cari-Siber id eşlemesi doğru çözülüyor. Kritik yön
   değişikliği #12'de ayrıca: `plate_number` benzersizliği + 9 eksik zorunlu alan (`car_type/romork_type/

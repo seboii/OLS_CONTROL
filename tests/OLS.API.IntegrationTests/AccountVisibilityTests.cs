@@ -27,7 +27,7 @@ public sealed class AccountVisibilityTests
         using var admin = await _factory.CreateAdminClientAsync();
         var accountName = $"Test Lojistik {Guid.NewGuid():N}";
 
-        using var form = new MultipartFormDataContent { { new StringContent(accountName), "name" } };
+        using var form = await TestAccountHelper.MinimalAccountFormAsync(admin, accountName);
         var createResponse = await admin.PostAsync("/api/v1/account", form);
         createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -55,7 +55,7 @@ public sealed class AccountVisibilityTests
         // veya bu testin kendisi tarafından oluşturulmuş olabilir; miktar önemli değil,
         // önemli olan aşağıdaki kullanıcının 0 görmesi).
         var accountName = $"Baska Musteri {Guid.NewGuid():N}";
-        using var form = new MultipartFormDataContent { { new StringContent(accountName), "name" } };
+        using var form = await TestAccountHelper.MinimalAccountFormAsync(admin, accountName);
         (await admin.PostAsync("/api/v1/account", form)).EnsureSuccessStatusCode();
 
         var email = $"account-noMapping-{Guid.NewGuid():N}@example.test";

@@ -22,7 +22,7 @@ public sealed class InvoiceTests
     private static async Task<long> CreateAccountAsync(HttpClient admin)
     {
         var name = $"Fatura Test Cari {Guid.NewGuid():N}";
-        using var form = new MultipartFormDataContent { { new StringContent(name), "name" } };
+        using var form = await TestAccountHelper.MinimalAccountFormAsync(admin, name);
         var response = await admin.PostAsync("/api/v1/account", form);
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<JsonElement>())

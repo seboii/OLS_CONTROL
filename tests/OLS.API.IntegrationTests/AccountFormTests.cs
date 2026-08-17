@@ -24,7 +24,7 @@ public sealed class AccountFormTests
 
     private static async Task<long> CreateAccountAsync(HttpClient admin, string name, params int[] accountTypeIds)
     {
-        using var form = new MultipartFormDataContent { { new StringContent(name), "name" } };
+        using var form = await TestAccountHelper.MinimalAccountFormAsync(admin, name);
         foreach (var typeId in accountTypeIds)
             form.Add(new StringContent(typeId.ToString()), "account_type_mapping[]");
 
@@ -66,11 +66,8 @@ public sealed class AccountFormTests
         using var admin = await _factory.CreateAdminClientAsync();
         var accountId = await CreateAccountAsync(admin, $"Koru Testi {Guid.NewGuid():N}", 1, 3, 4);
 
-        using var updateForm = new MultipartFormDataContent
-        {
-            { new StringContent(accountId.ToString()), "id" },
-            { new StringContent("Koru Testi Güncellendi"), "name" },
-        };
+        using var updateForm = await TestAccountHelper.MinimalAccountFormAsync(
+            admin, "Koru Testi Güncellendi", accountId);
         updateForm.Add(new StringContent("1"), "account_type_mapping[]");
         updateForm.Add(new StringContent("3"), "account_type_mapping[]");
         updateForm.Add(new StringContent("4"), "account_type_mapping[]");
@@ -89,11 +86,8 @@ public sealed class AccountFormTests
         using var admin = await _factory.CreateAdminClientAsync();
         var accountId = await CreateAccountAsync(admin, $"Değiştir Testi {Guid.NewGuid():N}", 1, 3);
 
-        using var updateForm = new MultipartFormDataContent
-        {
-            { new StringContent(accountId.ToString()), "id" },
-            { new StringContent("Değiştir Testi Güncellendi"), "name" },
-        };
+        using var updateForm = await TestAccountHelper.MinimalAccountFormAsync(
+            admin, "Değiştir Testi Güncellendi", accountId);
         updateForm.Add(new StringContent("5"), "account_type_mapping[]");
 
         var updateResponse = await admin.PostAsync("/api/v1/account/update", updateForm);
@@ -101,5 +95,60 @@ public sealed class AccountFormTests
 
         var typeIds = await GetAccountTypeIdsAsync(admin, accountId);
         typeIds.Should().BeEquivalentTo([5]);
+    }
+
+    /// <summary>
+    /// olsold <c>FrontAccountController\RequestSave</c>: <c>name</c>/<c>country_id</c>/
+    /// <c>discount</c> üçü de zorunlu. Hedefte yalnızca <c>name</c> kontrol ediliyordu.
+    /// </summary>
+    [Fact]
+    public async Task CreateAccount_WithoutCountryIdOrDiscount_Returns400WithBothFieldErrors()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        using var form = new MultipartFormDataContent
+        {
+            { new StringContent($"Eksik Alan Cari {Guid.NewGuid():N}"), "name" },
+        };
+        var response = await admin.PostAsync("/api/v1/account", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        errors.GetProperty("country_id")[0].GetString().Should().Be("Ülke seçimi yapılmalıdır");
+        errors.GetProperty("discount")[0].GetString().Should().Be("İndirim oranı boş olamaz");
+    }
+
+    /// <summary>
+    /// olsold <c>RequestUpdate</c>: <c>name</c> güncellemede de zorunlu ama hedefte
+    /// yalnızca <c>id</c> kontrol ediliyordu — isim boş bırakılıp güncellenebiliyordu.
+    /// </summary>
+    [Fact]
+    public async Task UpdateAccount_WithoutName_Returns400()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var accountId = await CreateAccountAsync(admin, $"İsim Testi {Guid.NewGuid():N}");
+
+        using var updateForm = await TestAccountHelper.MinimalAccountFormAsync(admin, string.Empty, accountId);
+
+        var response = await admin.PostAsync("/api/v1/account/update", updateForm);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        errors.GetProperty("name")[0].GetString().Should().Be("Adı boş olamaz");
+    }
+
+    [Fact]
+    public async Task CreateAccount_WithDiscountExplicitlyZero_Succeeds()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        // olsold: discount=0 "required" kuralını GEÇER (Laravel'de 0 boş sayılmaz) —
+        // yalnızca alan hiç GÖNDERİLMEZSE reddedilmeli.
+        var accountId = await CreateAccountAsync(admin, $"Sıfır İndirim Cari {Guid.NewGuid():N}");
+
+        var detail = await admin.GetAsync($"/api/v1/account/{accountId}");
+        detail.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await detail.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("discount").GetInt32().Should().Be(0);
     }
 }

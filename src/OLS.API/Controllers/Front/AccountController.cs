@@ -78,11 +78,8 @@ public sealed class AccountController : ApiControllerBase
     public async Task<IActionResult> Save(
         [FromForm] AccountFormRequest form, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(form.Name))
-            return BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
-            {
-                ["name"] = [Translator.Get("Bu alan boş bırakılamaz")],
-            }));
+        if (Validate(form) is { } errors)
+            return BadRequest(ApiResponse.ValidationErrors(errors));
 
         var avatar = await _files.SaveAvatarAsync(form.Avatar, cancellationToken);
 
@@ -103,12 +100,30 @@ public sealed class AccountController : ApiControllerBase
                 ["id"] = [Translator.Get("Bu alan boş bırakılamaz")],
             }));
 
+        if (Validate(form) is { } errors)
+            return BadRequest(ApiResponse.ValidationErrors(errors));
+
         var avatar = await _files.SaveAvatarAsync(form.Avatar, cancellationToken);
 
         var result = await _accounts.UpdateAsync(
             form.ToWriteModel(avatar), cancellationToken);
 
         return BuildSaveResponse(result, "Güncelleme Başarılı");
+    }
+
+    /// <summary>olsold: <c>RequestSave</c>/<c>RequestUpdate</c> — ikisinde de birebir aynı 3 kural.</summary>
+    private Dictionary<string, string[]>? Validate(AccountFormRequest form)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        if (string.IsNullOrWhiteSpace(form.Name))
+            errors["name"] = [Translator.Get("Adı boş olamaz")];
+        if (form.CountryId is null)
+            errors["country_id"] = [Translator.Get("Ülke seçimi yapılmalıdır")];
+        if (form.Discount is null)
+            errors["discount"] = [Translator.Get("İndirim oranı boş olamaz")];
+
+        return errors.Count > 0 ? errors : null;
     }
 
     [HttpDelete]

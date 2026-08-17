@@ -448,7 +448,7 @@ export function CustomersPage() {
                     </div>
                     {errors.account_type_mapping?.[0] && <p className="mt-1 text-xs text-red-500">{errors.account_type_mapping[0]}</p>}
                   </div>
-                  <FormField label="Ülke">
+                  <FormField label="Ülke" required error={errors.country_id?.[0]}>
                     <SelectInput
                       value={form.country_id}
                       onChange={(v) => setForm((f) => ({ ...f, country_id: v, city_id: "", district_id: "" }))}
@@ -486,8 +486,8 @@ export function CustomersPage() {
                       options={[{ value: "", label: "Seçiniz" }, ...taxOffices.map((t) => ({ value: String(t.id), label: t.name }))]}
                     />
                   </FormField>
-                  <FormField label="İndirim Tutarı">
-                    <TextInput value={form.discount} onChange={(v) => setForm((f) => ({ ...f, discount: v }))} type="number" />
+                  <FormField label="İndirim Tutarı" required error={errors.discount?.[0]}>
+                    <TextInput value={form.discount} onChange={(v) => setForm((f) => ({ ...f, discount: v }))} type="number" error={!!errors.discount} />
                   </FormField>
                   <div className="col-span-2">
                     <SelectInput

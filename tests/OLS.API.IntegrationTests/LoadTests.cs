@@ -30,7 +30,7 @@ public sealed class LoadTests
 
         // Gerçek bir cari lazım (customer/sender/receiver için).
         var accountName = $"Teklif Test Cari {Guid.NewGuid():N}";
-        using var accountForm = new MultipartFormDataContent { { new StringContent(accountName), "name" } };
+        using var accountForm = await TestAccountHelper.MinimalAccountFormAsync(admin, accountName);
         var accountResponse = await admin.PostAsync("/api/v1/account", accountForm);
         accountResponse.EnsureSuccessStatusCode();
         var accountBody = await accountResponse.Content.ReadFromJsonAsync<JsonElement>();
@@ -134,7 +134,7 @@ public sealed class LoadTests
         using var admin = await _factory.CreateAdminClientAsync();
 
         var accountName = $"Dosya Test Cari {Guid.NewGuid():N}";
-        using var accountForm = new MultipartFormDataContent { { new StringContent(accountName), "name" } };
+        using var accountForm = await TestAccountHelper.MinimalAccountFormAsync(admin, accountName);
         var accountResponse = await admin.PostAsync("/api/v1/account", accountForm);
         accountResponse.EnsureSuccessStatusCode();
         var accountId = (await accountResponse.Content.ReadFromJsonAsync<JsonElement>())
@@ -210,10 +210,8 @@ public sealed class LoadTests
 
     private static async Task<long> CreateTestAccountAsync(HttpClient admin, string namePrefix)
     {
-        using var accountForm = new MultipartFormDataContent
-        {
-            { new StringContent($"{namePrefix} {Guid.NewGuid():N}"), "name" },
-        };
+        using var accountForm = await TestAccountHelper.MinimalAccountFormAsync(
+            admin, $"{namePrefix} {Guid.NewGuid():N}");
         var accountResponse = await admin.PostAsync("/api/v1/account", accountForm);
         accountResponse.EnsureSuccessStatusCode();
         return (await accountResponse.Content.ReadFromJsonAsync<JsonElement>())

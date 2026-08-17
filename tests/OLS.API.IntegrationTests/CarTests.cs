@@ -33,7 +33,7 @@ public sealed class CarTests
         using var admin = await _factory.CreateAdminClientAsync();
 
         var accountName = $"Araç Test Cari {Guid.NewGuid():N}";
-        using var accountForm = new MultipartFormDataContent { { new StringContent(accountName), "name" } };
+        using var accountForm = await TestAccountHelper.MinimalAccountFormAsync(admin, accountName);
         var accountResponse = await admin.PostAsync("/api/v1/account", accountForm);
         accountResponse.EnsureSuccessStatusCode();
         var account = (await accountResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");

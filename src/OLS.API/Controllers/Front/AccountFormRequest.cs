@@ -25,7 +25,11 @@ public sealed class AccountFormRequest
     [FromForm(Name = "phone_country_id")] public Guid? PhoneCountryId { get; set; }
     [FromForm(Name = "email")] public string? Email { get; set; }
     [FromForm(Name = "contact_person")] public string? ContactPerson { get; set; }
-    [FromForm(Name = "discount")] public int Discount { get; set; }
+    /// <summary>
+    /// olsold: <c>discount: required</c> — nullable tutuluyor ki "hiç gönderilmedi"
+    /// (reddedilmeli) ile "0 gönderildi" (geçerli) ayırt edilebilsin.
+    /// </summary>
+    [FromForm(Name = "discount")] public int? Discount { get; set; }
     [FromForm(Name = "individual_personal")] public string? IndividualPersonal { get; set; }
     [FromForm(Name = "contact_language")] public string? ContactLanguage { get; set; }
 
@@ -54,7 +58,7 @@ public sealed class AccountFormRequest
         PhoneCountryId = PhoneCountryId,
         Email = Email,
         ContactPerson = ContactPerson,
-        Discount = Discount,
+        Discount = Discount ?? 0,
         IndividualPersonal = IndividualPersonal,
         ContactLanguage = ContactLanguage,
         AvatarFileName = avatarFileName,
