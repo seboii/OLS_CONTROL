@@ -379,6 +379,29 @@ Bu değişiklik, hesap oluşturan 6 test dosyasındaki (`CarTests`, `AccountForm
 (imaj yeniden derlenip) hem `country_id` reddi hem `discount=0`'ın geçerli sayılması uçtan uca
 doğrulandı. 3 yeni test (`AccountFormTests.cs`), biri mutasyon testiyle doğrulandı.
 
+**Kritik yön değişikliği #14 (bu güncellemede — Kritik yön değişikliği #12'nin devamı, Teklif):**
+En büyük ve en riskli doğrulama boşluğu: olsold `LoadSave`/`LoadUpdate`, `load_content.*` (paket satırı)
+için 9 alanı (`product_type_id/case_type_id/quantity/width/height/length/gross_weight/lademeter/
+stackable`) satır satır zorunlu kılıyordu — HEDEF'te yalnızca dizinin BOŞ OLMADIĞI kontrol ediliyordu,
+satır içi alanların hiçbiri doğrulanmıyordu. Ayrıca `status_type_id == 5` ("Olumlu") olduğunda devreye
+giren KOŞULLU blok (güzergah/taraf/römork/çalışma-şekli/talimat + tüm `load_financial_item.*` satır
+alanları) HİÇ portlanmamıştı. `LoadController.Validate()` genişletildi: `load_content` satırları artık
+indeksli anahtarlarla (`load_content.{i}.field`, kaynağın Laravel wildcard-kural JSON şekliyle birebir)
+doğrulanıyor; `status_type_id == 5` iken 8 ek alan + `load_financial_item` dizisi + onun 8 satır alanı da
+aynı şekilde zorunlu. **Kaynağın tuhaf ama doğrulanmış bir davranışı birebir taşındı:** herhangi bir mali
+kalemde `net_price == 0` ise, açıklama kuralı Laravel'in joker karakter (`*`) semantiği yüzünden YALNIZCA
+o satıra değil, dizideki TÜM satırlara uygulanıyor — bu proje kodda `TurkishDecimal.Parse(...) == 0`
+kontrolüyle ve canlı testle doğrulandı. `LoadFormRequest.WayOfWorking` `int?`'e çevrildi (Discount/plaka
+ile aynı gerekçe — "0 (Spot)" geçerli bir seçim, "hiç gönderilmedi"den ayırt edilemiyordu). Frontend
+(`QuotesPage.tsx`): 5 tekil koşullu alana (`Yük/Taşıma Tipi`, `Talimat`, `Römork Tipi`, `Çıkış/Varış
+Ülkesi`, `Gönderici`/`Alıcı`) VE 17 satır-içi alana (9 `load_content` + 8 `load_financial_item`, indeksli
+hata anahtarlarıyla `errors[\`load_content.${i}.alan\`]` deseninde) `required`/hata gösterimi eklendi —
+`way_of_working` zaten önceki bir oturumda eklenmişti, aynı (koşulsuz-göster) yaklaşım izlendi. Bu
+değişiklik `LoadTests.cs`'teki paylaşılan `RequiredFieldsForm` yardımcısını VE bir round-trip testini
+kırdı (satır içi alanlar eksikti) — düzeltildi. Canlı Docker'da (imaj yeniden derlenip) hem durum≠5'te
+koşullu alanların İSTENMEDİĞİ hem durum=5'te İSTENDİĞİ uçtan uca doğrulandı. 3 yeni test (`LoadTests.cs`),
+ikisi mutasyon testiyle doğrulandı — 111/111 test geçiyor.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
@@ -395,7 +418,7 @@ doğrulandı. 3 yeni test (`AccountFormTests.cs`), biri mutasyon testiyle doğru
 - **İki kritik hata canlı ortamda bulunup düzeltildi ve regresyon testiyle kilitlendi** — ayrıntı
   [docs/TEST-RAPORU.md](TEST-RAPORU.md) §1: `/api/v1/role` zarf uyuşmazlığı (sidebar tamamen boş
   görünüyordu), `super_admin` yetki sayfasının seed edilmemesi (yeni cariler kimseye görünmüyordu).
-- **108 otomatik test, hepsi geçiyor** (79 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
+- **111 otomatik test, hepsi geçiyor** (82 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
   pipeline'ı üzerinden, hiçbir katman mock'lanmadan. Test geliştirme sürecinde 3 ayrı gerçek ortam/
   test-edilebilirlik sorunu daha bulunup düzeltildi (bkz. TEST-RAPORU.md §3) — en önemlisi, testlerin
   başlangıçta sessizce GERÇEK dev veritabanına yazdığının fark edilip kalıcı olarak düzeltilmesi.
@@ -427,7 +450,7 @@ doğrulandı. 3 yeni test (`AccountFormTests.cs`), biri mutasyon testiyle doğru
 
 ```
 dotnet build                                    → 0 hata, 2 pre-existing nullability uyarısı
-dotnet test                                     → 108/108 geçti (29 birim + 79 entegrasyon), ~1.3 dk
+dotnet test                                     → 111/111 geçti (29 birim + 82 entegrasyon), ~1.3 dk
 docker compose up -d --build                    → 4 servis (postgres/siber-mock/api/frontend) sağlıklı
 curl -X POST .../api/v1/login (admin)           → 200, gerçek JWT
 GET /api/v1/account (Docker API, canlı)         → 200, gerçek cari listesi
@@ -438,7 +461,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-108/108 otomatik test geçiyor (29 OLS.Business.Tests + 79 OLS.API.IntegrationTests). Kapsanan: auth
+111/111 otomatik test geçiyor (29 OLS.Business.Tests + 82 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
@@ -485,7 +508,10 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   `UserPicker` ile gerçek cari/kullanıcı arama (gönderici/alıcı/acente/navlun-ödeyen/operasyon-yetkilisi/
   satış-temsilcisi), "Çalışma Şekli" + "Ön/Son Taşıma Tarafımızdan Yapılır" alanları (ikisi de bu
   güncellemede eklendi — kaynakta var, backend zaten destekliyordu, frontend'de hiç yoktu), dosya
-  ekleme/kaldırma. Otomatik test: `LoadTests.cs` (tam alan round-trip + Türkçe ondalık ayrıştırma).
+  ekleme/kaldırma. Kritik yön değişikliği #14'te ayrıca: `load_content`/`load_financial_item` satır
+  bazlı zorunlu alanları + `status_type_id==5` koşullu bloğu (güzergah/taraf/römork/mali kalem) backend'e
+  VE forma eklendi; #18'de `load_number` sonrası düzenleme/silme kilidi eklendi. Otomatik test:
+  `LoadTests.cs` (tam alan round-trip + Türkçe ondalık ayrıştırma + satır/koşullu doğrulama, 9 test).
   Bu güncellemede AYRICA düzeltildi (bkz. §1 Kritik yön değişikliği #4): Mali Kalemler'deki Alış/Satış
   değerlerinin TERS olması, "Kalem" alanının yanlış tabloyu (`item_type` yerine `financial_item`)
   kullanması, Acente/Navlun Ödeyen Firma/Mali Kalem Cari seçicilerinin `account_type_id`'ye göre hiç

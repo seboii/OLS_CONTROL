@@ -239,7 +239,10 @@ public sealed class LoadController : ApiControllerBase
         return OkMessage("Kayıt Başarıyla Silindi");
     }
 
-    /// <summary>olsold: LoadSave FormRequest kuralları.</summary>
+    /// <summary>olsold: teklif durumu 5 ("Olumlu") ise ek zorunlu alan bloğu devreye girer.</summary>
+    private const int PositiveStatusTypeId = 5;
+
+    /// <summary>olsold: <c>LoadSave</c>/<c>LoadUpdate</c> FormRequest kuralları — ikisi de birebir aynı.</summary>
     private Dictionary<string, string[]>? Validate(LoadFormRequest form)
     {
         var errors = new Dictionary<string, string[]>();
@@ -254,7 +257,69 @@ public sealed class LoadController : ApiControllerBase
         if (form.MarketingNotificationDate is null) errors["marketing_notification_date"] = [required];
         if (form.CustomerId is null) errors["customer_id"] = [required];
         if (form.DepartmentId is null) errors["department_id"] = [required];
-        if (form.LoadContent.Count == 0) errors["load_content"] = [required];
+
+        if (form.LoadContent.Count == 0)
+        {
+            errors["load_content"] = [required];
+        }
+        else
+        {
+            for (var i = 0; i < form.LoadContent.Count; i++)
+            {
+                var c = form.LoadContent[i];
+                if (c.ProductTypeId is null) errors[$"load_content.{i}.product_type_id"] = [required];
+                if (c.CaseTypeId is null) errors[$"load_content.{i}.case_type_id"] = [required];
+                if (string.IsNullOrWhiteSpace(c.Quantity)) errors[$"load_content.{i}.quantity"] = [required];
+                if (string.IsNullOrWhiteSpace(c.Width)) errors[$"load_content.{i}.width"] = [required];
+                if (string.IsNullOrWhiteSpace(c.Height)) errors[$"load_content.{i}.height"] = [required];
+                if (string.IsNullOrWhiteSpace(c.Length)) errors[$"load_content.{i}.length"] = [required];
+                if (string.IsNullOrWhiteSpace(c.GrossWeight)) errors[$"load_content.{i}.gross_weight"] = [required];
+                if (string.IsNullOrWhiteSpace(c.Lademeter)) errors[$"load_content.{i}.lademeter"] = [required];
+                if (c.Stackable is null) errors[$"load_content.{i}.stackable"] = [required];
+            }
+        }
+
+        // olsold: status_type_id == 5 ("Olumlu") iken güzergah/taraf/mali kalem bloğu zorunlu olur.
+        if (form.StatusTypeId == PositiveStatusTypeId)
+        {
+            if (form.DepartureCountryId is null) errors["departure_country_id"] = [required];
+            if (form.TargetCountryId is null) errors["target_country_id"] = [required];
+            if (form.SenderId is null) errors["sender_id"] = [required];
+            if (form.ReceiverId is null) errors["receiver_id"] = [required];
+            if (form.RomorkTypeId is null) errors["romork_type_id"] = [required];
+            if (form.LoadTransferTypeId is null) errors["load_transfer_type_id"] = [required];
+            if (form.WayOfWorking is null) errors["way_of_working"] = [required];
+            if (form.InstructionId is null) errors["instruction_id"] = [required];
+
+            if (form.LoadFinancialItem.Count == 0)
+            {
+                errors["load_financial_item"] = [required];
+            }
+            else
+            {
+                // olsold: HERHANGİ bir kalemde net_price == 0 ise açıklama kuralı TÜM
+                // kalemlere joker karakterle uygulanır (Laravel'in load_financial_item.*.
+                // description davranışı — yalnızca 0 fiyatlı satıra değil, hepsine).
+                var anyZeroNetPrice = form.LoadFinancialItem
+                    .Any(f => TurkishDecimal.Parse(f.NetPrice) == 0);
+                var zeroPriceMessage = Translator.Get("Kalem tutarı 0 olduğu için açıklama zorunludur.");
+
+                for (var i = 0; i < form.LoadFinancialItem.Count; i++)
+                {
+                    var f = form.LoadFinancialItem[i];
+                    if (f.Buysell is null) errors[$"load_financial_item.{i}.buysell"] = [required];
+                    if (f.Item is null) errors[$"load_financial_item.{i}.item"] = [required];
+                    if (string.IsNullOrWhiteSpace(f.Quantity)) errors[$"load_financial_item.{i}.quantity"] = [required];
+                    if (f.TransportTypeId is null) errors[$"load_financial_item.{i}.transport_type_id"] = [required];
+                    if (f.Order is null) errors[$"load_financial_item.{i}.order"] = [required];
+                    if (string.IsNullOrWhiteSpace(f.NetPrice)) errors[$"load_financial_item.{i}.net_price"] = [required];
+                    if (string.IsNullOrWhiteSpace(f.TotalPrice)) errors[$"load_financial_item.{i}.total_price"] = [required];
+                    if (f.Currency is null) errors[$"load_financial_item.{i}.currency"] = [required];
+                    if (anyZeroNetPrice && string.IsNullOrWhiteSpace(f.Description))
+                        errors[$"load_financial_item.{i}.description"] = [zeroPriceMessage];
+                }
+            }
+        }
 
         return errors.Count > 0 ? errors : null;
     }

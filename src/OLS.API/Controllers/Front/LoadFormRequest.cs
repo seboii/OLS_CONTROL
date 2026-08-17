@@ -36,7 +36,11 @@ public sealed class LoadFormRequest
     [FromForm(Name = "department_id")] public int? DepartmentId { get; set; }
     [FromForm(Name = "front_transportation_by_us")] public int FrontTransportationByUs { get; set; }
     [FromForm(Name = "final_transportation_by_us")] public int FinalTransportationByUs { get; set; }
-    [FromForm(Name = "way_of_working")] public int WayOfWorking { get; set; }
+    /// <summary>
+    /// olsold: yalnızca <c>status_type_id == 5</c> ("Olumlu") iken zorunlu — nullable
+    /// tutuluyor ki "hiç gönderilmedi" ile "0 (Spot) gönderildi" ayırt edilebilsin.
+    /// </summary>
+    [FromForm(Name = "way_of_working")] public int? WayOfWorking { get; set; }
 
     [FromForm(Name = "load_content")] public List<LoadContentForm> LoadContent { get; set; } = [];
     [FromForm(Name = "load_financial_item")] public List<LoadFinancialItemForm> LoadFinancialItem { get; set; } = [];
@@ -77,7 +81,7 @@ public sealed class LoadFormRequest
         DepartmentId = DepartmentId,
         FrontTransportationByUs = FrontTransportationByUs,
         FinalTransportationByUs = FinalTransportationByUs,
-        WayOfWorking = WayOfWorking,
+        WayOfWorking = WayOfWorking ?? 0,
 
         Contents = LoadContent.Select(c => new LoadContentInput(
             c.ProductTypeId, c.CaseTypeId, TurkishDecimal.ParseInt(c.Quantity),

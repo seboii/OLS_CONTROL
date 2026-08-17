@@ -50,8 +50,14 @@ public sealed class LoadTests
             { new StringContent("2026-09-30"), "offer_validity_date" },
             { new StringContent("2026-09-01"), "marketing_notification_date" },
             { new StringContent("Otomatik test açıklaması"), "description" },
+            { new StringContent("1"), "load_content[0][product_type_id]" },
+            { new StringContent("1"), "load_content[0][case_type_id]" },
             { new StringContent("15"), "load_content[0][quantity]" },
+            { new StringContent("120"), "load_content[0][width]" },
+            { new StringContent("100"), "load_content[0][height]" },
+            { new StringContent("80"), "load_content[0][length]" },
             { new StringContent("250,5"), "load_content[0][gross_weight]" },
+            { new StringContent("2,4"), "load_content[0][lademeter]" },
             { new StringContent("1"), "load_content[0][stackable]" },
             { new StringContent("1"), "load_financial_item[0][item]" },
             { new StringContent("1"), "load_financial_item[0][quantity]" },
@@ -104,6 +110,142 @@ public sealed class LoadTests
         body.GetProperty("errors").GetProperty("load_content").GetArrayLength().Should().BeGreaterThan(0);
     }
 
+    /// <summary>
+    /// olsold <c>LoadSave</c>: <c>load_content.*.product_type_id/case_type_id/quantity/
+    /// width/height/length/gross_weight/lademeter/stackable</c> satır bazlı zorunlu —
+    /// hedefte bu satır içi alanların HİÇBİRİ doğrulanmıyordu (yalnızca dizinin boş
+    /// olmadığı kontrol ediliyordu).
+    /// </summary>
+    [Fact]
+    public async Task CreateLoad_WithIncompleteContentRow_ReturnsIndexedFieldErrors()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var accountId = await CreateTestAccountAsync(admin, "İçerik Satırı Testi");
+
+        using var form = RequiredFieldsForm(accountId);
+        // load_content[0] zaten dolu — ikinci, EKSİK bir satır ekliyoruz.
+        form.Add(new StringContent("2"), "load_content[1][quantity]");
+
+        var response = await admin.PostAsync("/api/v1/load", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        foreach (var field in new[]
+        {
+            "product_type_id", "case_type_id", "width", "height", "length", "gross_weight", "lademeter", "stackable",
+        })
+            errors.TryGetProperty($"load_content.1.{field}", out _).Should().BeTrue($"satır 1'de '{field}' eksik");
+
+        // Satır 0 tamdı — onda hata OLMAMALI.
+        errors.TryGetProperty("load_content.0.product_type_id", out _).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// olsold <c>LoadSave</c>: <c>status_type_id == 5</c> ("Olumlu") ise güzergah/taraf/
+    /// römork/çalışma-şekli/talimat VE mali kalem bloğu zorunlu olur — hedefte bu koşullu
+    /// blok hiç uygulanmıyordu.
+    /// </summary>
+    [Fact]
+    public async Task CreateLoad_WithPositiveStatusAndMissingConditionalFields_ReturnsAllConditionalErrors()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var accountId = await CreateTestAccountAsync(admin, "Olumlu Durum Testi");
+
+        using var form = RequiredFieldsFormWithStatus(accountId, "5");
+        var response = await admin.PostAsync("/api/v1/load", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        foreach (var field in new[]
+        {
+            "departure_country_id", "target_country_id", "sender_id", "receiver_id",
+            "romork_type_id", "load_transfer_type_id", "way_of_working", "instruction_id", "load_financial_item",
+        })
+            errors.TryGetProperty(field, out _).Should().BeTrue($"'{field}' status_type_id=5 iken zorunlu");
+    }
+
+    /// <summary>
+    /// olsold <c>LoadSave</c>: herhangi bir mali kalemde <c>net_price == 0</c> ise
+    /// <c>load_financial_item.*.description</c> kuralı joker karakterle TÜM kalemlere
+    /// uygulanır (yalnızca 0 fiyatlı satıra değil) — Laravel'in wildcard rule
+    /// davranışının birebir taşınmış hâli.
+    /// </summary>
+    [Fact]
+    public async Task CreateLoad_WithOneZeroPricedFinancialItem_RequiresDescriptionOnEveryRow()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var accountId = await CreateTestAccountAsync(admin, "Sıfır Fiyat Testi");
+        var countryId = await FirstCountryIdAsync(admin);
+
+        using var form = RequiredFieldsFormWithStatus(accountId, "5");
+        form.Add(new StringContent(countryId), "departure_country_id");
+        form.Add(new StringContent(countryId), "target_country_id");
+        form.Add(new StringContent(accountId.ToString()), "sender_id");
+        form.Add(new StringContent(accountId.ToString()), "receiver_id");
+        form.Add(new StringContent("1"), "romork_type_id");
+        form.Add(new StringContent("1"), "load_transfer_type_id");
+        form.Add(new StringContent("1"), "way_of_working");
+        form.Add(new StringContent("1"), "instruction_id");
+
+        // Kalem 0: fiyatı sıfır, açıklaması YOK. Kalem 1: fiyatı normal, açıklaması da YOK
+        // — olsold'un joker kuralı yüzünden İKİSİ de reddedilmeli.
+        form.Add(new StringContent("1"), "load_financial_item[0][item]");
+        form.Add(new StringContent("1"), "load_financial_item[0][quantity]");
+        form.Add(new StringContent("1"), "load_financial_item[0][buysell]");
+        form.Add(new StringContent("1"), "load_financial_item[0][transport_type_id]");
+        form.Add(new StringContent("1"), "load_financial_item[0][order]");
+        form.Add(new StringContent("0"), "load_financial_item[0][net_price]");
+        form.Add(new StringContent("0"), "load_financial_item[0][total_price]");
+        form.Add(new StringContent("1"), "load_financial_item[0][currency]");
+
+        form.Add(new StringContent("1"), "load_financial_item[1][item]");
+        form.Add(new StringContent("1"), "load_financial_item[1][quantity]");
+        form.Add(new StringContent("1"), "load_financial_item[1][buysell]");
+        form.Add(new StringContent("1"), "load_financial_item[1][transport_type_id]");
+        form.Add(new StringContent("1"), "load_financial_item[1][order]");
+        form.Add(new StringContent("100"), "load_financial_item[1][net_price]");
+        form.Add(new StringContent("100"), "load_financial_item[1][total_price]");
+        form.Add(new StringContent("1"), "load_financial_item[1][currency]");
+
+        var response = await admin.PostAsync("/api/v1/load", form);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        errors.TryGetProperty("load_financial_item.0.description", out _).Should().BeTrue();
+        errors.TryGetProperty("load_financial_item.1.description", out _).Should().BeTrue(
+            "kaynakta net_price==0 kuralı joker karakterle TÜM satırlara uygulanır");
+    }
+
+    private static MultipartFormDataContent RequiredFieldsFormWithStatus(long accountId, string statusTypeId) => new()
+    {
+        { new StringContent("1"), "work_type_id" },
+        { new StringContent("1"), "loading_type_id" },
+        { new StringContent("1"), "payment_type_id" },
+        { new StringContent(statusTypeId), "status_type_id" },
+        { new StringContent("1"), "department_id" },
+        { new StringContent(accountId.ToString()), "customer_id" },
+        { new StringContent("2026-09-01"), "offer_date" },
+        { new StringContent("2026-09-30"), "offer_validity_date" },
+        { new StringContent("2026-09-01"), "marketing_notification_date" },
+        { new StringContent("1"), "load_content[0][product_type_id]" },
+        { new StringContent("1"), "load_content[0][case_type_id]" },
+        { new StringContent("1"), "load_content[0][quantity]" },
+        { new StringContent("100"), "load_content[0][width]" },
+        { new StringContent("100"), "load_content[0][height]" },
+        { new StringContent("100"), "load_content[0][length]" },
+        { new StringContent("100"), "load_content[0][gross_weight]" },
+        { new StringContent("1"), "load_content[0][lademeter]" },
+        { new StringContent("1"), "load_content[0][stackable]" },
+    };
+
+    private static async Task<string> FirstCountryIdAsync(HttpClient admin)
+    {
+        var response = await admin.GetAsync("/api/v1/country");
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("data").EnumerateArray().First().GetProperty("id").GetGuid().ToString();
+    }
+
     private static MultipartFormDataContent RequiredFieldsForm(long accountId) => new()
     {
         { new StringContent("1"), "work_type_id" },
@@ -115,7 +257,15 @@ public sealed class LoadTests
         { new StringContent("2026-09-01"), "offer_date" },
         { new StringContent("2026-09-30"), "offer_validity_date" },
         { new StringContent("2026-09-01"), "marketing_notification_date" },
+        { new StringContent("1"), "load_content[0][product_type_id]" },
+        { new StringContent("1"), "load_content[0][case_type_id]" },
         { new StringContent("1"), "load_content[0][quantity]" },
+        { new StringContent("100"), "load_content[0][width]" },
+        { new StringContent("100"), "load_content[0][height]" },
+        { new StringContent("100"), "load_content[0][length]" },
+        { new StringContent("100"), "load_content[0][gross_weight]" },
+        { new StringContent("1"), "load_content[0][lademeter]" },
+        { new StringContent("1"), "load_content[0][stackable]" },
     };
 
     /// <summary>

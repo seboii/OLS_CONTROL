@@ -652,7 +652,7 @@ export function QuotesPage() {
                   <FormField label="Çalışma Şekli" required error={errors.way_of_working?.[0]}>
                     <SelectInput value={form.way_of_working} onChange={(v) => setForm((f) => ({ ...f, way_of_working: v }))} options={WAY_OF_WORKING_OPTIONS} />
                   </FormField>
-                  <FormField label="Yük/Taşıma Tipi">
+                  <FormField label="Yük/Taşıma Tipi" required error={errors.load_transfer_type_id?.[0]}>
                     <SelectInput value={form.load_transfer_type_id} onChange={(v) => setForm((f) => ({ ...f, load_transfer_type_id: v }))} options={opts(loadTransferTypes)} />
                   </FormField>
                   <FormField label="Ön Taşıma Tarafımızdan Yapılır">
@@ -661,10 +661,10 @@ export function QuotesPage() {
                   <FormField label="Son Taşıma Tarafımızdan Yapılır">
                     <SelectInput value={form.final_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, final_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
                   </FormField>
-                  <FormField label="Talimat">
+                  <FormField label="Talimat" required error={errors.instruction_id?.[0]}>
                     <SelectInput value={form.instruction_id} onChange={(v) => setForm((f) => ({ ...f, instruction_id: v }))} options={opts(instructions)} />
                   </FormField>
-                  <FormField label="Römork Tipi">
+                  <FormField label="Römork Tipi" required error={errors.romork_type_id?.[0]}>
                     <SelectInput value={form.romork_type_id} onChange={(v) => setForm((f) => ({ ...f, romork_type_id: v }))} options={opts(romorkTypes)} />
                   </FormField>
                   <FormField label="Teklif Tarihi" required error={errors.offer_date?.[0]}>
@@ -696,17 +696,17 @@ export function QuotesPage() {
                         </button>
                       )}
                       <div className="grid grid-cols-3 gap-3">
-                        <FormField label="Ürün Tipi">
+                        <FormField label="Ürün Tipi" required error={errors[`load_content.${i}.product_type_id`]?.[0]}>
                           <SelectInput value={item.product_type_id} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, product_type_id: v } : x)))} options={opts(productTypes)} />
                         </FormField>
-                        <FormField label="Kap Tipi">
+                        <FormField label="Kap Tipi" required error={errors[`load_content.${i}.case_type_id`]?.[0]}>
                           <SelectInput value={item.case_type_id} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, case_type_id: v } : x)))} options={opts(caseTypes)} />
                         </FormField>
-                        <FormField label="Adet">
-                          <TextInput value={item.quantity} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
+                        <FormField label="Adet" required error={errors[`load_content.${i}.quantity`]?.[0]}>
+                          <TextInput value={item.quantity} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" error={!!errors[`load_content.${i}.quantity`]} />
                         </FormField>
-                        <FormField label="Brüt Ağırlık (kg)">
-                          <TextInput value={item.gross_weight} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, gross_weight: v } : x)))} />
+                        <FormField label="Brüt Ağırlık (kg)" required error={errors[`load_content.${i}.gross_weight`]?.[0]}>
+                          <TextInput value={item.gross_weight} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, gross_weight: v } : x)))} error={!!errors[`load_content.${i}.gross_weight`]} />
                         </FormField>
                         <FormField label="Net Ağırlık (kg)">
                           <TextInput value={item.net_weight} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, net_weight: v } : x)))} />
@@ -714,19 +714,19 @@ export function QuotesPage() {
                         <FormField label="Hacim (m³)">
                           <TextInput value={item.volume} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, volume: v } : x)))} />
                         </FormField>
-                        <FormField label="Lademetre">
-                          <TextInput value={item.lademeter} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, lademeter: v } : x)))} />
+                        <FormField label="Lademetre" required error={errors[`load_content.${i}.lademeter`]?.[0]}>
+                          <TextInput value={item.lademeter} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, lademeter: v } : x)))} error={!!errors[`load_content.${i}.lademeter`]} />
                         </FormField>
-                        <FormField label="En (cm)">
-                          <TextInput value={item.width} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, width: v } : x)))} />
+                        <FormField label="En (cm)" required error={errors[`load_content.${i}.width`]?.[0]}>
+                          <TextInput value={item.width} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, width: v } : x)))} error={!!errors[`load_content.${i}.width`]} />
                         </FormField>
-                        <FormField label="Boy (cm)">
-                          <TextInput value={item.length} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, length: v } : x)))} />
+                        <FormField label="Boy (cm)" required error={errors[`load_content.${i}.length`]?.[0]}>
+                          <TextInput value={item.length} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, length: v } : x)))} error={!!errors[`load_content.${i}.length`]} />
                         </FormField>
-                        <FormField label="Yükseklik (cm)">
-                          <TextInput value={item.height} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, height: v } : x)))} />
+                        <FormField label="Yükseklik (cm)" required error={errors[`load_content.${i}.height`]?.[0]}>
+                          <TextInput value={item.height} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, height: v } : x)))} error={!!errors[`load_content.${i}.height`]} />
                         </FormField>
-                        <FormField label="İstiflenebilir">
+                        <FormField label="İstiflenebilir" required error={errors[`load_content.${i}.stackable`]?.[0]}>
                           <SelectInput value={item.stackable} onChange={(v) => setContent((list) => list.map((x, xi) => (xi === i ? { ...x, stackable: v } : x)))} options={[{ value: "1", label: "Evet" }, { value: "0", label: "Hayır" }]} />
                         </FormField>
                       </div>
@@ -742,8 +742,8 @@ export function QuotesPage() {
 
             {tab === "Taraflar" && (
               <div className="space-y-4">
-                <AccountPicker label="Gönderici" value={sender} onChange={setSender} error={errors.sender_id?.[0]} />
-                <AccountPicker label="Alıcı" value={receiver} onChange={setReceiver} error={errors.receiver_id?.[0]} />
+                <AccountPicker label="Gönderici" value={sender} onChange={setSender} required error={errors.sender_id?.[0]} />
+                <AccountPicker label="Alıcı" value={receiver} onChange={setReceiver} required error={errors.receiver_id?.[0]} />
                 <AccountPicker label="Acente" value={agent} onChange={setAgent} error={errors.agent_id?.[0]} accountType={5} />
                 <AccountPicker label="Navlun Ödeyen Firma (Cari)" value={companyPayFreight} onChange={setCompanyPayFreight} error={errors.company_pay_freight_id?.[0]} accountType={1} />
               </div>
@@ -751,13 +751,13 @@ export function QuotesPage() {
 
             {tab === "Güzergah" && (
               <div className="grid grid-cols-2 gap-4">
-                <FormField label="Çıkış Ülkesi">
+                <FormField label="Çıkış Ülkesi" required error={errors.departure_country_id?.[0]}>
                   <SelectInput value={route.departure_country_id} onChange={(v) => setRoute((r) => ({ ...r, departure_country_id: v }))} options={opts(countries)} />
                 </FormField>
                 <FormField label="Transit Ülke">
                   <SelectInput value={route.transit_country_id} onChange={(v) => setRoute((r) => ({ ...r, transit_country_id: v }))} options={opts(countries)} />
                 </FormField>
-                <FormField label="Varış Ülkesi">
+                <FormField label="Varış Ülkesi" required error={errors.target_country_id?.[0]}>
                   <SelectInput value={route.target_country_id} onChange={(v) => setRoute((r) => ({ ...r, target_country_id: v }))} options={opts(countries)} />
                 </FormField>
               </div>
@@ -818,17 +818,17 @@ export function QuotesPage() {
                         <Trash2 size={13} />
                       </button>
                       <div className="grid grid-cols-3 gap-3 mb-3">
-                        <FormField label="Kalem">
+                        <FormField label="Kalem" required error={errors[`load_financial_item.${i}.item`]?.[0]}>
                           <SelectInput
                             value={item.item}
                             onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, item: v } : x)))}
                             options={opts(item.buysell === "1" ? financialItemsBuy : financialItemsSell)}
                           />
                         </FormField>
-                        <FormField label="Taşıma Tipi">
+                        <FormField label="Taşıma Tipi" required error={errors[`load_financial_item.${i}.transport_type_id`]?.[0]}>
                           <SelectInput value={item.transport_type_id} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, transport_type_id: v } : x)))} options={opts(transportTypes)} />
                         </FormField>
-                        <FormField label="Alış/Satış">
+                        <FormField label="Alış/Satış" required error={errors[`load_financial_item.${i}.buysell`]?.[0]}>
                           <SelectInput
                             value={item.buysell}
                             onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, buysell: v, item: "", account: null } : x)))}
@@ -845,22 +845,22 @@ export function QuotesPage() {
                         />
                       </div>
                       <div className="grid grid-cols-4 gap-3">
-                        <FormField label="Adet">
-                          <TextInput value={item.quantity} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
+                        <FormField label="Adet" required error={errors[`load_financial_item.${i}.quantity`]?.[0]}>
+                          <TextInput value={item.quantity} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" error={!!errors[`load_financial_item.${i}.quantity`]} />
                         </FormField>
-                        <FormField label="Birim Fiyat">
-                          <TextInput value={item.net_price} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, net_price: v } : x)))} />
+                        <FormField label="Birim Fiyat" required error={errors[`load_financial_item.${i}.net_price`]?.[0]}>
+                          <TextInput value={item.net_price} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, net_price: v } : x)))} error={!!errors[`load_financial_item.${i}.net_price`]} />
                         </FormField>
-                        <FormField label="Toplam Fiyat">
-                          <TextInput value={item.total_price} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, total_price: v } : x)))} />
+                        <FormField label="Toplam Fiyat" required error={errors[`load_financial_item.${i}.total_price`]?.[0]}>
+                          <TextInput value={item.total_price} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, total_price: v } : x)))} error={!!errors[`load_financial_item.${i}.total_price`]} />
                         </FormField>
-                        <FormField label="Para Birimi">
+                        <FormField label="Para Birimi" required error={errors[`load_financial_item.${i}.currency`]?.[0]}>
                           <SelectInput value={item.currency} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, currency: v } : x)))} options={opts(currencies)} />
                         </FormField>
                       </div>
                       <div className="mt-3">
-                        <FormField label="Açıklama">
-                          <TextInput value={item.description} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, description: v } : x)))} />
+                        <FormField label="Açıklama" error={errors[`load_financial_item.${i}.description`]?.[0]} hint="Kalem tutarı 0 ise açıklama zorunludur.">
+                          <TextInput value={item.description} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, description: v } : x)))} error={!!errors[`load_financial_item.${i}.description`]} />
                         </FormField>
                       </div>
                     </div>
