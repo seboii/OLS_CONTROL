@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
-import { Badge, Btn, FormField, SearchInput, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
+import { Badge, Btn, FormField, SearchInput, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 
 interface NamedRef {
   id: string;
@@ -35,6 +35,27 @@ interface ExpeditionDetail extends ExpeditionItem {
   loading_date: string | null;
   return_date: string | null;
   car_exit_date: string | null;
+}
+
+interface MovementUserDetail {
+  id: number;
+  name: string | null;
+  surname: string | null;
+  email: string | null;
+}
+
+const movementUserLabel = (u: MovementUserDetail | null) =>
+  u ? `${u.name ?? ""} ${u.surname ?? ""} (${u.email ?? ""})`.trim() : "—";
+
+interface MovementDetail {
+  id: number;
+  description: string | null;
+  address: string | null;
+  created_at: string | null;
+  deleted_at: string | null;
+  destination: NamedRef | null;
+  user: MovementUserDetail | null;
+  expedition_status: NamedRef | null;
 }
 
 interface MappingTotals {
@@ -72,8 +93,9 @@ interface AvailableLoad {
 }
 
 const PER_PAGE = 8;
-const DETAIL_TABS = ["Genel Bilgiler", "Bağlı Yükler"];
+const DETAIL_TABS = ["Genel Bilgiler", "Bağlı Yükler", "Hareketler"];
 const ZERO_TOTALS: MappingTotals = { total_quantity: 0, total_gross_weight: 0, total_net_weight: 0, total_lademeter: 0, total_volume: 0 };
+const EMPTY_MOVEMENT_FORM = { destination_id: "", expedition_status_id: "", description: "", address: "" };
 
 export function TripsPage() {
   const { can } = useAuth();
@@ -101,6 +123,7 @@ export function TripsPage() {
   const { options: departments } = useLookupOptions("/api/v1/department");
   const { options: expeditionTypes } = useLookupOptions("/api/v1/expedition_type");
   const { options: expeditionStatuses } = useLookupOptions("/api/v1/expedition_status");
+  const { options: destinations } = useLookupOptions("/api/v1/destination");
 
   function opts(list: { id: string | number; name: string }[]) {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
@@ -185,6 +208,13 @@ export function TripsPage() {
   const [mappingTotals, setMappingTotals] = useState<MappingTotals>(ZERO_TOTALS);
   const [mappingsLoading, setMappingsLoading] = useState(false);
 
+  const [movements, setMovements] = useState<MovementDetail[]>([]);
+  const [deletedMovements, setDeletedMovements] = useState<MovementDetail[]>([]);
+  const [deletedMovementsModalOpen, setDeletedMovementsModalOpen] = useState(false);
+  const [movementModalOpen, setMovementModalOpen] = useState(false);
+  const [movementForm, setMovementForm] = useState(EMPTY_MOVEMENT_FORM);
+  const [savingMovement, setSavingMovement] = useState(false);
+
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const debouncedPickerSearch = useDebouncedValue(pickerSearch);
@@ -213,6 +243,7 @@ export function TripsPage() {
         return_date: d.return_date ?? "",
       });
       loadMappings(id);
+      fetchMovements(id);
     } catch {
       addToast("Sefer bilgileri yüklenemedi", "error");
       setDetailOpen(false);
@@ -231,6 +262,13 @@ export function TripsPage() {
       })
       .catch(() => addToast("Bağlı yükler yüklenemedi", "error"))
       .finally(() => setMappingsLoading(false));
+  }
+
+  function fetchMovements(expeditionId: number) {
+    api
+      .get<{ data: MovementDetail[]; deleted_movements: MovementDetail[] }>(`/api/v1/expedition/${expeditionId}/movements`)
+      .then((res) => { setMovements(res.data); setDeletedMovements(res.deleted_movements ?? []); })
+      .catch(() => { setMovements([]); setDeletedMovements([]); });
   }
 
   async function handleDetailSave() {
@@ -292,6 +330,47 @@ export function TripsPage() {
       loadMappings(detailId);
     } catch (err) {
       addToast(err instanceof Error ? err.message : "Çıkarılamadı", "error");
+    }
+  }
+
+  function openMovementModal() {
+    setMovementForm(EMPTY_MOVEMENT_FORM);
+    setMovementModalOpen(true);
+  }
+
+  async function saveMovement() {
+    if (!detailId) return;
+    if (!movementForm.destination_id || !movementForm.expedition_status_id) {
+      addToast("Lütfen konum ve durum seçiniz", "error");
+      return;
+    }
+    setSavingMovement(true);
+    try {
+      const fd = new FormData();
+      fd.append("expedition_id", String(detailId));
+      fd.append("destination_id", movementForm.destination_id);
+      fd.append("expedition_status_id", movementForm.expedition_status_id);
+      fd.append("description", movementForm.description);
+      fd.append("address", movementForm.address);
+      await api.postForm(`/api/v1/expedition/${detailId}/movements`, fd);
+      addToast("Sefer hareketi eklendi");
+      setMovementModalOpen(false);
+      fetchMovements(detailId);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Hareket kaydedilemedi", "error");
+    } finally {
+      setSavingMovement(false);
+    }
+  }
+
+  async function deleteMovement(movementId: number) {
+    if (!detailId) return;
+    if (!window.confirm("Bu hareket silinsin mi?")) return;
+    try {
+      await api.delete(`/api/v1/expedition/${detailId}/movements/${movementId}`);
+      fetchMovements(detailId);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Hareket silinemedi", "error");
     }
   }
 
@@ -471,10 +550,98 @@ export function TripsPage() {
                   )}
                 </div>
               )}
+
+              {detailTab === "Hareketler" && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Hareketler</p>
+                    <div className="flex items-center gap-3">
+                      {deletedMovements.length > 0 && (
+                        <button type="button" onClick={() => setDeletedMovementsModalOpen(true)} className="text-[11px] text-gray-500 hover:underline">
+                          Silinen Hareketler
+                        </button>
+                      )}
+                      <button type="button" onClick={openMovementModal} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                        <Plus size={12} />Yeni Hareket Ekle
+                      </button>
+                    </div>
+                  </div>
+                  {movements.length === 0 ? (
+                    <p className="text-xs text-gray-400 text-center py-8">Henüz hareket kaydı bulunmamaktadır.</p>
+                  ) : (
+                    movements.map((m) => (
+                      <div key={m.id} className="border border-gray-200 rounded-lg p-4 mb-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            {m.expedition_status?.name && (
+                              <div className="text-xs font-semibold text-blue-600 border-l-2 border-blue-500 pl-2 mb-2">{m.expedition_status.name}</div>
+                            )}
+                            <p className="text-sm font-medium">{m.destination?.name ?? "—"}</p>
+                            {m.address && <p className="text-xs text-gray-500 mt-1">{m.address}</p>}
+                            {m.description && <p className="text-xs text-gray-500 mt-1">{m.description}</p>}
+                            <p className="text-[11px] text-gray-400 mt-2">
+                              {m.created_at ? new Date(m.created_at).toLocaleString("tr-TR") : "—"} · {movementUserLabel(m.user)}
+                            </p>
+                          </div>
+                          <button type="button" onClick={() => deleteMovement(m.id)} className="text-gray-300 hover:text-red-500 shrink-0">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           )
         )}
       </Drawer>
+
+      <Modal open={movementModalOpen} onClose={() => setMovementModalOpen(false)} title="Yeni Hareket Ekle">
+        <div className="w-[420px] max-w-full space-y-4">
+          <FormField label="Durum" required>
+            <SelectInput value={movementForm.expedition_status_id} onChange={(v) => setMovementForm((f) => ({ ...f, expedition_status_id: v }))} options={opts(expeditionStatuses)} />
+          </FormField>
+          <FormField label="Konum" required>
+            <SelectInput value={movementForm.destination_id} onChange={(v) => setMovementForm((f) => ({ ...f, destination_id: v }))} options={opts(destinations)} />
+          </FormField>
+          <FormField label="Adres">
+            <TextareaInput value={movementForm.address} onChange={(v) => setMovementForm((f) => ({ ...f, address: v }))} rows={2} />
+          </FormField>
+          <FormField label="Açıklama">
+            <TextareaInput value={movementForm.description} onChange={(v) => setMovementForm((f) => ({ ...f, description: v }))} rows={2} />
+          </FormField>
+          <div className="flex gap-2 justify-end">
+            <Btn variant="secondary" onClick={() => setMovementModalOpen(false)}>İptal</Btn>
+            <Btn onClick={saveMovement} disabled={savingMovement}>{savingMovement ? "Kaydediliyor..." : "Kaydet"}</Btn>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal open={deletedMovementsModalOpen} onClose={() => setDeletedMovementsModalOpen(false)} title="Silinen Hareketler">
+        <div className="w-[420px] max-w-full space-y-2 max-h-[60vh] overflow-y-auto">
+          {deletedMovements.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-8">Silinen hareket bulunmamaktadır.</p>
+          ) : (
+            deletedMovements.map((m) => (
+              <div key={m.id} className="border border-gray-200 rounded-lg p-4 mb-2">
+                {m.expedition_status?.name && (
+                  <div className="text-xs font-semibold text-blue-600 border-l-2 border-blue-500 pl-2 mb-2">{m.expedition_status.name}</div>
+                )}
+                <p className="text-sm font-medium mb-2">{m.destination?.name ?? "Belirtilmemiş"}</p>
+                <p className="text-[11px] text-gray-500 mb-1">Oluşturan: {movementUserLabel(m.user)}</p>
+                <p className="text-[11px] text-gray-500 mb-1">
+                  Oluşturulma Tarihi: {m.created_at ? new Date(m.created_at).toLocaleString("tr-TR") : "—"}
+                </p>
+                <p className="text-[11px] text-red-400 mb-1">
+                  Silinme Tarihi: {m.deleted_at ? new Date(m.deleted_at).toLocaleString("tr-TR") : "—"}
+                </p>
+                {m.description && <p className="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-100">{m.description}</p>}
+              </div>
+            ))
+          )}
+        </div>
+      </Modal>
 
       <Modal open={pickerOpen} onClose={() => setPickerOpen(false)} title="Sefere Yük Bağla">
         <div className="w-[420px] max-w-full">
