@@ -47,6 +47,7 @@ interface InvoiceItemDetail {
   total_price: number | null;
   quantity: number | null;
   description: string | null;
+  status: string | null;
   item_id: NamedRef | null;
   account_id: AccountOption | null;
   currency_code: NamedRef | null;
@@ -151,12 +152,21 @@ const EMPTY_PACKAGE_ROW: PackageRow = {
 type InvoiceItemRow = {
   id: number | null; item_id: string; account: AccountOption | null; currency_code: string;
   buysell: string; quantity: string; net_price: string; total_price: string; description: string;
+  status: string;
 };
 
 const EMPTY_INVOICE_ITEM_ROW: InvoiceItemRow = {
   id: null, item_id: "", account: null, currency_code: "", buysell: "1",
-  quantity: "1", net_price: "", total_price: "", description: "",
+  quantity: "1", net_price: "", total_price: "", description: "", status: "pending",
 };
+
+// olsold: system_data.js financial_item_status_type — buysell=1 (Alış) ise "Faturası
+// Kesildi" (satış kavramı), aksi hâlde "Faturası Geldi" (alış kavramı) filtrelenir.
+const FINANCIAL_ITEM_STATUS_OPTIONS = [
+  { value: "pending", label: "Bekleniyor" },
+  { value: "invoice_received", label: "Faturası Geldi" },
+  { value: "invoice_issued", label: "Faturası Kesildi" },
+];
 
 const EMPTY_MOVEMENT_FORM = { destination_id: "", expedition_status_id: "", description: "", address: "" };
 const WAY_OF_WORKING_OPTIONS = [
@@ -335,6 +345,7 @@ export function LoadsPage() {
           net_price: f.net_price != null ? String(f.net_price) : "",
           total_price: f.total_price != null ? String(f.total_price) : "",
           description: f.description ?? "",
+          status: f.status || "pending",
         })),
       );
     } catch {
@@ -509,6 +520,7 @@ export function LoadsPage() {
           total_price: num(f.total_price),
           currency_code: int(f.currency_code),
           description: f.description,
+          status: f.status,
         })),
       });
       addToast("Yük güncellendi");
@@ -683,6 +695,18 @@ export function LoadsPage() {
                           <FormField label="Lademetre">
                             <TextInput value={p.lademeter} onChange={(v) => setPackages((list) => list.map((x, xi) => (xi === i ? { ...x, lademeter: v } : x)))} />
                           </FormField>
+                          <FormField label="En (cm)">
+                            <TextInput value={p.width} onChange={(v) => setPackages((list) => list.map((x, xi) => (xi === i ? { ...x, width: v } : x)))} />
+                          </FormField>
+                          <FormField label="Boy (cm)">
+                            <TextInput value={p.length} onChange={(v) => setPackages((list) => list.map((x, xi) => (xi === i ? { ...x, length: v } : x)))} />
+                          </FormField>
+                          <FormField label="Yükseklik (cm)">
+                            <TextInput value={p.height} onChange={(v) => setPackages((list) => list.map((x, xi) => (xi === i ? { ...x, height: v } : x)))} />
+                          </FormField>
+                          <FormField label="İstiflenebilir">
+                            <SelectInput value={p.stackable} onChange={(v) => setPackages((list) => list.map((x, xi) => (xi === i ? { ...x, stackable: v } : x)))} options={[{ value: "1", label: "Evet" }, { value: "0", label: "Hayır" }]} />
+                          </FormField>
                         </div>
                       </div>
                     ))
@@ -751,6 +775,17 @@ export function LoadsPage() {
                                 </FormField>
                                 <FormField label="Toplam Fiyat">
                                   <TextInput value={item.total_price} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, total_price: v } : x)))} />
+                                </FormField>
+                              </div>
+                              <div className="mt-3">
+                                <FormField label="Durum">
+                                  <SelectInput
+                                    value={item.status}
+                                    onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, status: v } : x)))}
+                                    options={FINANCIAL_ITEM_STATUS_OPTIONS.filter((o) =>
+                                      item.buysell === "1" ? o.value !== "invoice_issued" : o.value !== "invoice_received",
+                                    )}
+                                  />
                                 </FormField>
                               </div>
                               <div className="mt-3">

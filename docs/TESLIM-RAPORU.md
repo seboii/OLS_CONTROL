@@ -423,6 +423,22 @@ expedition`'ın gerçek Siber'e yazması nedeniyle (test ortamında bilinçli ol
 Update testleri, `ExpeditionLoadMappingTests.cs`'nin zaten kullandığı doğrudan DbContext-seed desenini
 izledi. Yeni `ExpeditionTests.cs` — 5 test, ikisi mutasyon testiyle doğrulandı — 116/116 test geçiyor.
 
+**Kritik yön değişikliği #16 (bu güncellemede — Yük, Paketler/Finans alan tamlığı):** İki ayrı
+küçük ama gerçek "backend hazır, frontend eksik" bulgusu. (1) Paketler sekmesi: `width/length/
+height/stackable` yazma tarafı (`LoadTransferUpdateService.PackageInput`) VE okuma DTO'su
+(`LoadTransferPackageDto`) zaten destekliyordu, form bu 4 alanı hiç RENDER etmiyordu — 3 satırlık
+`<FormField>` eklemesiydi. (2) Finans sekmesi: `LoadTransferInvoiceItem.Status` ("pending/
+invoice_received/invoice_issued") okuma DTO'sunda ZATEN dönüyordu ama backend'in yazma tarafı
+(`UpsertInvoiceItemsAsync`) her satırı SABİT `"pending"` yazıyordu — olsold `$item['status'] ??
+'pending'` gönderileni kabul ediyor. `InvoiceItemInput.Status` eklendi, `UpsertInvoiceItemsAsync`
+kaynakla birebir hâle getirildi. Frontend: `Select` alanı eklendi, kaynağın `financial_item_status_
+type` filtre kuralı (buysell=Alış ise "Faturası Kesildi" hariç, aksi hâlde "Faturası Geldi" hariç)
+birebir taşındı. **Test altyapısı notu:** `LoadTransferTests.cs`'nin paylaşılan `SeedLoadTransferAsync`
+yardımcısı `load_number_work_type`'ı hiç set etmiyordu — finans kalemleri bu alan üzerinden (metin
+eşleşmesiyle) ilişkilendirildiğinden, aynı anda çalışan iki test aynı "boş" gruba düşüp birbirinin
+kaydını okuyordu; bu da düzeltildi (benzersiz değer). 2 yeni test, biri mutasyon testiyle
+doğrulandı — 118/118 test geçiyor.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
@@ -439,7 +455,7 @@ izledi. Yeni `ExpeditionTests.cs` — 5 test, ikisi mutasyon testiyle doğruland
 - **İki kritik hata canlı ortamda bulunup düzeltildi ve regresyon testiyle kilitlendi** — ayrıntı
   [docs/TEST-RAPORU.md](TEST-RAPORU.md) §1: `/api/v1/role` zarf uyuşmazlığı (sidebar tamamen boş
   görünüyordu), `super_admin` yetki sayfasının seed edilmemesi (yeni cariler kimseye görünmüyordu).
-- **116 otomatik test, hepsi geçiyor** (87 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
+- **118 otomatik test, hepsi geçiyor** (89 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
   pipeline'ı üzerinden, hiçbir katman mock'lanmadan. Test geliştirme sürecinde 3 ayrı gerçek ortam/
   test-edilebilirlik sorunu daha bulunup düzeltildi (bkz. TEST-RAPORU.md §3) — en önemlisi, testlerin
   başlangıçta sessizce GERÇEK dev veritabanına yazdığının fark edilip kalıcı olarak düzeltilmesi.
@@ -471,7 +487,7 @@ izledi. Yeni `ExpeditionTests.cs` — 5 test, ikisi mutasyon testiyle doğruland
 
 ```
 dotnet build                                    → 0 hata, 2 pre-existing nullability uyarısı
-dotnet test                                     → 116/116 geçti (29 birim + 87 entegrasyon), ~1.3 dk
+dotnet test                                     → 118/118 geçti (29 birim + 89 entegrasyon), ~1.3 dk
 docker compose up -d --build                    → 4 servis (postgres/siber-mock/api/frontend) sağlıklı
 curl -X POST .../api/v1/login (admin)           → 200, gerçek JWT
 GET /api/v1/account (Docker API, canlı)         → 200, gerçek cari listesi
@@ -482,7 +498,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-116/116 otomatik test geçiyor (29 OLS.Business.Tests + 87 OLS.API.IntegrationTests). Kapsanan: auth
+118/118 otomatik test geçiyor (29 OLS.Business.Tests + 89 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
@@ -552,6 +568,8 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   dolu satırlarda görünen kamyon ikonu → `POST /api/v1/load_transfer`) eklendi. Liste sütunları düzeltildi.
   olsold'un gerçek `LoadFormDrawer.vue`'sunun 8 sekmesiyle birebir — yalnızca koşullu "İlgili E-Posta"
   eksik (yalnızca AI/mail'den oluşan tekliflerde görünür, `saveAi` zaten kapsam dışı — bkz. §4).
+  Kritik yön değişikliği #16'da ayrıca: Paketler'e En/Boy/Yükseklik/İstiflenebilir eklendi; Finans'a
+  Durum alanı (backend yazma tarafı dahil) eklendi. Otomatik test: `LoadTransferTests.cs` (5 test).
   - **Görevliler**: Teklif'ten FARKLI olarak `load_charge_person` ilişki tablosu DEĞİL — `LoadTransfer`
     üzerinde doğrudan iki `int` alan (`customer_representative_name`/`second_customer_representative_name`
     — adlandırma yanıltıcı, içerik kullanıcı kimliği). Dönüşüm sırasında ikisi de hep işlemi yapan

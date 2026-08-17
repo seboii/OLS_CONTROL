@@ -101,6 +101,9 @@ public sealed class LoadTransferUpdateRequest
         public decimal? TaxRate { get; set; }
         public int? CurrencyCode { get; set; }
         public string? Description { get; set; }
+
+        /// <summary>olsold: pending / invoice_received / invoice_issued — göndermezse "pending".</summary>
+        public string? Status { get; set; }
     }
 }
 
@@ -268,7 +271,6 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
                 item = new LoadTransferInvoiceItem
                 {
                     InsertName = transfer.LoadNumberWorkType,
-                    Status = "pending",
                     UserId = user is null ? null : (int)user.Id,
                     CreatedAt = now,
                 };
@@ -286,6 +288,8 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             item.TaxRate = input.TaxRate;
             item.CurrencyCode = input.CurrencyCode;
             item.Description = input.Description;
+            // olsold: $item['status'] ?? 'pending' — hem yeni hem mevcut satırda aynı kural.
+            item.Status = input.Status ?? "pending";
             item.UpdatedAt = now;
         }
     }

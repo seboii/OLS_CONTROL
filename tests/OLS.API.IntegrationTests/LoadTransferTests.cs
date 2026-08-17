@@ -31,6 +31,7 @@ public sealed class LoadTransferTests
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
 
+        var uniqueSuffix = Guid.NewGuid().ToString("N");
         var entity = new LoadTransfer
         {
             // load_transfer_packages / load_transfer_invoice_items bu Siber
@@ -38,9 +39,13 @@ public sealed class LoadTransferTests
             // (bkz. LoadTransferService/LoadTransferUpdateService) — null
             // bırakılırsa aynı anda çalışan başka testlerin/kayıtların
             // null-LoadTransferId satırlarıyla çakışır. Benzersiz bir değer
-            // vermek testi izole eder.
-            LoadTransferId = $"TEST-{Guid.NewGuid():N}",
-            LoadNumber = $"YUK-TEST-{Guid.NewGuid():N}",
+            // vermek testi izole eder. load_transfer_invoice_items özelinde
+            // eşleme insert_name == load_number_work_type üzerinden yapılıyor
+            // (bkz. UpsertInvoiceItemsAsync) — o da benzersiz olmalı, aksi hâlde
+            // aynı anda çalışan testlerin finans kalemleri birbirine karışır.
+            LoadTransferId = $"TEST-{uniqueSuffix}",
+            LoadNumber = $"YUK-TEST-{uniqueSuffix}",
+            LoadNumberWorkType = $"YUK-TEST-{uniqueSuffix}",
             CreatedAt = DateTime.Now,
             UpdatedAt = DateTime.Now,
         };
@@ -185,6 +190,62 @@ public sealed class LoadTransferTests
         detailAfterNoOpSave.GetProperty("romork_type_id").GetProperty("id").GetInt64().Should().Be(romorkTypeId);
         detailAfterNoOpSave.GetProperty("way_of_working").GetInt32().Should().Be(1);
         detailAfterNoOpSave.GetProperty("target_country_id").GetProperty("id").GetGuid().Should().Be(targetCountryId);
+    }
+
+    /// <summary>
+    /// Regresyon: Paketler sekmesinde <c>width/length/height/stackable</c> yazma tarafı
+    /// destekliyordu ama form bu 4 alanı hiç RENDER etmiyordu; Finans sekmesinde
+    /// <c>status</c> (olsold: pending/invoice_received/invoice_issued) hem formda hem
+    /// yazma tarafında (backend her zaman "pending" sabitliyordu) tamamen eksikti.
+    /// </summary>
+    [Fact]
+    public async Task UpdateLoadTransfer_WithFullPackageDimensionsAndInvoiceItemStatus_RoundTripsCorrectly()
+    {
+        var id = await SeedLoadTransferAsync();
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var updateResponse = await admin.PostAsJsonAsync($"/api/v1/load_transfer/{id}", new
+        {
+            packages = new[]
+            {
+                new { quantity = 3, width = 120.5m, length = 240m, height = 80m, stackable = 0 },
+            },
+            invoice_items = new[]
+            {
+                new { buysell = "2", quantity = 1, net_price = 100m, total_price = 100m, status = "invoice_received" },
+            },
+        });
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detail = (await (await admin.GetAsync($"/api/v1/load_transfer/{id}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        var package = detail.GetProperty("load_transfer_package")[0];
+        package.GetProperty("width").GetDecimal().Should().Be(120.5m);
+        package.GetProperty("length").GetDecimal().Should().Be(240m);
+        package.GetProperty("height").GetDecimal().Should().Be(80m);
+        package.GetProperty("stackable").GetInt32().Should().Be(0);
+
+        var invoiceItem = detail.GetProperty("load_transfer_invoice_item")[0];
+        invoiceItem.GetProperty("status").GetString().Should().Be("invoice_received");
+    }
+
+    /// <summary>olsold: <c>$item['status'] ?? 'pending'</c> — göndermezse varsayılan "pending".</summary>
+    [Fact]
+    public async Task UpdateLoadTransfer_WithInvoiceItemWithoutStatus_DefaultsToPending()
+    {
+        var id = await SeedLoadTransferAsync();
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var updateResponse = await admin.PostAsJsonAsync($"/api/v1/load_transfer/{id}", new
+        {
+            invoice_items = new[] { new { buysell = "1", quantity = 1 } },
+        });
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var detail = (await (await admin.GetAsync($"/api/v1/load_transfer/{id}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        detail.GetProperty("load_transfer_invoice_item")[0].GetProperty("status").GetString().Should().Be("pending");
     }
 
     [Fact]
