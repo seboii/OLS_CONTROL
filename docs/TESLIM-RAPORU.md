@@ -439,6 +439,21 @@ eşleşmesiyle) ilişkilendirildiğinden, aynı anda çalışan iki test aynı "
 kaydını okuyordu; bu da düzeltildi (benzersiz değer). 2 yeni test, biri mutasyon testiyle
 doğrulandı — 118/118 test geçiyor.
 
+**Kritik yön değişikliği #17 (bu güncellemede — Giriş sayfası, saf frontend):** olsold
+`GuestLogin.vue` ile satır satır karşılaştırıldı, 5 gerçek fark bulundu: (1) boş alan client-side
+koruması yoktu (`Lütfen tüm alanları doldurun.` — kaynakta API çağrısından ÖNCE kontrol ediliyor);
+(2) şifre göster/gizle düğmesi yoktu (kaynak PrimeVue `Password toggleMask` kullanıyor); (3) etiket
+kaymaları: başlık "Hoş geldiniz"→"Giriş Yap", alt başlık "Hesabınıza giriş yapın"→"Giriş
+bilgilerinizi eksiksiz doldurunuz.", alan etiketi "Parola"→"Şifre"; (4) **bilinçli bir güvenlik
+davranışı birebir değildi:** kaynak, doğrulama/401/ağ hatası fark etmeksizin HER giriş
+başarısızlığında TEK genel mesaj gösteriyor ("Giriş bilgileri hatalı.") — hangi alanın (e-posta mı
+şifre mi) yanlış olduğunu bilinçli olarak açığa çıkarmıyor (kullanıcı numaralandırma saldırılarına
+karşı standart bir önlem); HEDEF alan bazlı hatalar + hata tipine göre farklı mesajlar gösteriyordu,
+bu daha "yardımcı" ama kaynağın güvenlik duruşunu zayıflatıyordu — birebir uyumlu hâle getirildi;
+(5) oturum çerezi süresi 8 gün yerine 7 gündü (`Cookies.set(..., { expires: 7 })`). Tümü
+`LoginPage.tsx`/`api.ts`'te düzeltildi, canlı Docker'da (boş form, hatalı bilgiler, doğru bilgiler,
+göster/gizle düğmesi) uçtan uca doğrulandı. Backend'e dokunulmadığından mevcut 118 test etkilenmedi.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

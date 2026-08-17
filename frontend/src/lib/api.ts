@@ -7,7 +7,8 @@ export function getToken(): string | undefined {
 }
 
 export function setToken(token: string) {
-  Cookies.set(TOKEN_COOKIE, token, { expires: 8, sameSite: "lax" });
+  // olsold: Cookies.set("token", token, { expires: 7 }) — birebir.
+  Cookies.set(TOKEN_COOKIE, token, { expires: 7, sameSite: "lax" });
 }
 
 export function clearToken() {

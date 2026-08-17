@@ -3,9 +3,9 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { clsx } from "clsx";
 import {
-  Mail, Lock, RefreshCw, AlertCircle, Truck, FileText, Users, BarChart2,
+  Mail, Lock, RefreshCw, AlertCircle, Truck, FileText, Users, BarChart2, Eye, EyeOff,
 } from "lucide-react";
-import { useAuth, ApiError } from "@/lib/auth";
+import { useAuth } from "@/lib/auth";
 
 const FEATURES = [
   { icon: Truck, text: "Sefer & yük yönetimi" },
@@ -20,8 +20,8 @@ export function LoginPage() {
   const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [generalError, setGeneralError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -30,21 +30,24 @@ export function LoginPage() {
     return <Navigate to={from} replace />;
   }
 
+  // olsold: GuestLogin.vue — tüm giriş hatalarında (doğrulama, 401, ağ hatası
+  // fark etmeksizin) TEK genel mesaj gösterilir; hangi alanın yanlış olduğu
+  // (e-posta mı şifre mi) bilinçli olarak belirtilmez.
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setErrors({});
     setGeneralError("");
+
+    if (!email || !password) {
+      setGeneralError("Lütfen tüm alanları doldurun.");
+      return;
+    }
+
     setSubmitting(true);
     try {
       await login(email, password);
       navigate("/panel", { replace: true });
-    } catch (err) {
-      if (err instanceof ApiError) {
-        if (err.errors) setErrors(err.errors);
-        else setGeneralError(err.message);
-      } else {
-        setGeneralError("Beklenmeyen bir hata oluştu.");
-      }
+    } catch {
+      setGeneralError("Giriş bilgileri hatalı.");
     } finally {
       setSubmitting(false);
     }
@@ -143,8 +146,8 @@ export function LoginPage() {
           </div>
 
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Hoş geldiniz</h2>
-            <p className="text-sm text-gray-500 mt-1">Hesabınıza giriş yapın</p>
+            <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Giriş Yap</h2>
+            <p className="text-sm text-gray-500 mt-1">Giriş bilgilerinizi eksiksiz doldurunuz.</p>
           </div>
 
           {generalError && (
@@ -157,11 +160,11 @@ export function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
-                E-posta
+                E-Posta
               </label>
               <div className={clsx(
                 "relative border rounded-xl bg-white transition-all duration-150 overflow-hidden",
-                errors.email ? "border-red-300" : focused === "email" ? "border-blue-500 ring-2 ring-blue-500/20" : "border-gray-200",
+                focused === "email" ? "border-blue-500 ring-2 ring-blue-500/20" : "border-gray-200",
               )}>
                 <Mail size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
@@ -170,23 +173,30 @@ export function LoginPage() {
                   placeholder="ad@olslojistik.com"
                 />
               </div>
-              {errors.email?.[0] && <p className="text-[11px] text-red-600 mt-1">{errors.email[0]}</p>}
             </div>
 
             <div>
-              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Parola</label>
+              <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Şifre</label>
               <div className={clsx(
                 "relative border rounded-xl bg-white transition-all duration-150 overflow-hidden",
-                errors.password ? "border-red-300" : focused === "pass" ? "border-blue-500 ring-2 ring-blue-500/20" : "border-gray-200",
+                focused === "pass" ? "border-blue-500 ring-2 ring-blue-500/20" : "border-gray-200",
               )}>
                 <Lock size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                <input type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
                   onFocus={() => setFocused("pass")} onBlur={() => setFocused(null)}
-                  className="w-full pl-9 pr-4 py-3 text-sm bg-transparent focus:outline-none text-gray-800"
-                  placeholder="Parola Giriniz"
+                  className="w-full pl-9 pr-10 py-3 text-sm bg-transparent focus:outline-none text-gray-800"
+                  placeholder="Şifre Giriniz"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  tabIndex={-1}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  aria-label={showPassword ? "Şifreyi gizle" : "Şifreyi göster"}
+                >
+                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
               </div>
-              {errors.password?.[0] && <p className="text-[11px] text-red-600 mt-1">{errors.password[0]}</p>}
             </div>
 
             <motion.button
