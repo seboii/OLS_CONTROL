@@ -507,6 +507,34 @@ güncelleniyor, bağımsız bir sekmede taze yüklemede hem seçim kalıcılığ
 doğrulandı. Kaynakta da backend karşılığı olmadığından bu özellik için hiç API yok; mevcut 118 test
 etkilenmedi (yalnızca `ProfilePage.tsx`, `main.tsx`, `index.css`, yeni `config/theme-config.ts` değişti).
 
+**Kritik yön değişikliği #20 (bu güncellemede — Fatura, liste sütunları + dipnot düzenleme):**
+`InvoiceTable.vue` (8 sütun) ile `InvoicesPage.tsx`'in mevcut 6 sütunu satır satır karşılaştırıldı.
+`Invoice` entity'sinde (`InvoiceId`, `TargetTitle`, `TargetIdentityNo`, `CommercialType`) VE
+`InvoiceDto`'da (`InvoiceService.CreateAsync`/`UpdateAsync` ikisi de `TargetTitle`/`TargetIdentityNo`'yu
+seçili cariden anlık ANLIK KOPYALIYOR, `account.Name`/`account.TaxNumber`) TÜMÜ zaten vardı — yine
+"backend hazır, frontend eksik" deseni, bu kez sütun düzeyinde: "Tip" (`invoice_type`, kaynakta HİÇ
+sütun değil) kaldırıldı; "Fatura Numarası" artık dahili `id`(`FAT-{id}`) değil kaynaktaki gibi GERÇEK
+`invoice_id` (Uyumsoft entegrasyonu yapılandırılmadığından çoğu kayıtta boş — kaynaktaki
+`data.invoice_id ? ... : "-"` mantığıyla "—" gösteriliyor); "Firma Adı" artık CANLI `invoice_account.
+name` değil kaynaktaki gibi ANLIK-KOPYA `target_title` (fatura oluşturma/güncelleme anındaki cari adı,
+cari sonradan değişse bile fatura sabit kalır); "Senaryo Tipi" (Temel/Ticari/E-Arşiv, renkli nokta +
+etiket, `data/system_data.js`'teki 3 değer birebir — E-Arşiv `status:false` olduğundan formda
+seçilemez ama tabloda doğru gösterilir), "Vergi Kimlik No" ve "Fatura Gerçekleşme Tarihi" yeni sütun
+olarak eklendi; tarih sütunları kaynaktaki gibi tam tarih-saat gösterir (yalnızca gün değil). Sütun
+SIRASI da kaynakla birebir eşleştirildi. `frozen` (ilk sütunu sabitleme) atlandı — `DataTable`'ın
+hiçbir modülde desteklemediği bir PrimeVue-özel özellik, `overflow-x-auto` ile tutarlı davranış korundu.
+Ayrıca `InvoiceFormDescription.vue` satır satır incelenince "Ek Bilgiler" sekmesindeki maddelerin
+kaynakta EKLE+SİL değil EKLE+DÜZENLE+SİL desteklediği, Sil'in de (kaynaktaki gibi) yalnızca düzenleme
+modu AÇIKKEN göründüğü bulundu — backend'in `POST /api/v1/invoice/footer/update` ucu (`FooterUpdateAsync`)
+ZATEN vardı, hiç çağrılmıyordu. Satır bazlı düzenleme-aç/kapa (kalem kilit simgesi HER ZAMAN görünür;
+Güncelle/Sil yalnızca düzenleme modundayken görünür) eklendi; üç işlem de (ekle/güncelle/sil) kaynaktaki
+gibi bir onay adımından geçiyor (`window.confirm`). Canlı Docker'da (Vite dev sunucusu) gerçek bir fatura
+oluşturulup uçtan uca doğrulandı: 8 sütun gerçek veriyle doğru (Firma Adı/Vergi Kimlik No dahil), madde
+ekleme/düzenleme/silme üçü de gerçek `POST/POST update/DELETE` istekleriyle (ağ sekmesinden teyit
+edildi) doğru çalışıyor, düzenleme modu kapalıyken Güncelle/Sil düğmelerinin gizlendiği doğrulandı.
+Backend'e dokunulmadığından (uç zaten vardı) mevcut 118 test etkilenmedi (yalnızca `InvoicesPage.tsx`
+değişti).
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

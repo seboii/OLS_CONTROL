@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Receipt, Plus, Trash2, Tag } from "lucide-react";
+import { Receipt, Plus, Trash2, Tag, CheckCircle, Pencil, PencilOff } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
@@ -19,6 +19,9 @@ interface InvoiceItem {
   id: number;
   box_type: 0 | 1;
   commercial_type: number;
+  invoice_id: string | null;
+  target_title: string | null;
+  target_identity_no: string | null;
   message: string | null;
   invoice_create_date: string | null;
   invoice_execution_date: string | null;
@@ -61,6 +64,14 @@ interface InvoiceFooterRow {
   value: string;
 }
 
+// olsold: InvoiceFormDescription.vue — satır bazlı düzenleme aç/kapat.
+// editable/editable_value kaynaktaki AYNI alan adlarıyla istemci tarafında
+// tutuluyor (API'ye gitmiyor).
+interface FooterRowState extends InvoiceFooterRow {
+  editable: boolean;
+  editable_value: string;
+}
+
 const PER_PAGE = 8;
 // olsold: pages/invoices.vue 3 Tab — "Gelen Faturalar"/"Giden Faturalar" (gelen/
 // giden evrak yönü, Alış/Satış DEĞİL) ve "Onay Bekleyen Faturalar" (invoice-type=0
@@ -78,6 +89,16 @@ const BOX_TABS = [
 // (Dipnotlar/Genel Bilgiler DEĞİL; "Fatura Önizleme" Uyumsoft e-fatura PDF
 // önizlemesi, kapsam dışı).
 const DETAIL_TABS = ["Bilgiler", "Kalemler", "Ek Bilgiler"];
+
+// olsold: data/system_data.js invoice_commercial_type — "status:false" olan
+// E-Arşiv (4) formda seçilemez (bkz. Yeni Fatura/Bilgiler'deki 2 seçenekli
+// SelectInput, değişmedi) ama tabloda bir kayıt bu değere sahipse yine de
+// doğru renk/etiketle gösterilmeli.
+const COMMERCIAL_TYPE_META: Record<number, { name: string; dot: string }> = {
+  0: { name: "Temel Fatura", dot: "bg-blue-500" },
+  1: { name: "Ticari Fatura", dot: "bg-orange-500" },
+  4: { name: "E-Arşiv", dot: "bg-green-500" },
+};
 
 export function InvoicesPage() {
   const { can } = useAuth();
@@ -307,8 +328,13 @@ export function InvoicesPage() {
   }
 
   // --- Ek Bilgiler / Maddeler (footer) — bağımsız, anında kaydedilen CRUD ---
+  //
+  // olsold: InvoiceFormDescription.vue — Güncelle/Sil düğmeleri yalnızca
+  // düzenleme modu açıkken (kalem editable=true) görünür; kalem-bazlı toggle
+  // düğmesi HER ZAMAN görünür. Üç işlem de (ekle/güncelle/sil) bir onay
+  // adımından geçer (confirm.require) — bu projede window.confirm ile.
 
-  const [footers, setFooters] = useState<InvoiceFooterRow[]>([]);
+  const [footers, setFooters] = useState<FooterRowState[]>([]);
   const [footersLoading, setFootersLoading] = useState(false);
   const [newFooterValue, setNewFooterValue] = useState("");
   const [footerSaving, setFooterSaving] = useState(false);
@@ -317,13 +343,14 @@ export function InvoicesPage() {
     setFootersLoading(true);
     api
       .get<DataMessage<InvoiceFooterRow[]>>("/api/v1/invoice/footer", { invoice_id: invoiceId })
-      .then((res) => setFooters(res.data))
+      .then((res) => setFooters(res.data.map((f) => ({ ...f, editable: false, editable_value: f.value }))))
       .catch(() => addToast("Maddeler yüklenemedi", "error"))
       .finally(() => setFootersLoading(false));
   }
 
   async function addFooter() {
     if (!detailId || !newFooterValue.trim()) return;
+    if (!window.confirm("Yeni madde eklensin mi?")) return;
     setFooterSaving(true);
     const fd = new FormData();
     fd.append("invoice_id", String(detailId));
@@ -332,8 +359,37 @@ export function InvoicesPage() {
       await api.postForm("/api/v1/invoice/footer", fd);
       setNewFooterValue("");
       loadFooters(detailId);
+      addToast("Fatura ek bilgisi eklendi");
     } catch (err) {
       addToast(err instanceof Error ? err.message : "Madde eklenemedi", "error");
+    } finally {
+      setFooterSaving(false);
+    }
+  }
+
+  function toggleFooterEdit(id: number) {
+    setFooters((list) => list.map((f) => (f.id === id ? { ...f, editable: !f.editable, editable_value: f.value } : f)));
+  }
+
+  function setFooterEditableValue(id: number, value: string) {
+    setFooters((list) => list.map((f) => (f.id === id ? { ...f, editable_value: value } : f)));
+  }
+
+  async function saveFooterEdit(id: number, value: string) {
+    if (!detailId) return;
+    if (!value.trim()) return;
+    if (!window.confirm("Fatura ek bilgisini güncellemek istediğinize emin misiniz?")) return;
+    setFooterSaving(true);
+    const fd = new FormData();
+    fd.append("id", String(id));
+    fd.append("invoice_id", String(detailId));
+    fd.append("value", value.trim());
+    try {
+      await api.postForm("/api/v1/invoice/footer/update", fd);
+      setFooters((list) => list.map((f) => (f.id === id ? { ...f, value: value.trim(), editable_value: value.trim(), editable: false } : f)));
+      addToast("Fatura ek bilgisi güncellendi");
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Güncellenemedi", "error");
     } finally {
       setFooterSaving(false);
     }
@@ -345,18 +401,36 @@ export function InvoicesPage() {
     try {
       await api.delete("/api/v1/invoice/footer", { deletion_id: [id] });
       loadFooters(detailId);
+      addToast("Fatura ek bilgisi silindi");
     } catch (err) {
       addToast(err instanceof Error ? err.message : "Silinemedi", "error");
     }
   }
 
+  // olsold: InvoiceTable.vue — 8 sütun, bu sırayla (Fatura Numarası frozen).
+  // Bu portta sabitleme (frozen) DataTable'ın hiçbir modülde desteklemediği
+  // bir özellik olduğundan atlandı (overflow-x-auto ile aynı tutarlı davranış).
   const columns: Column<InvoiceItem>[] = [
-    { key: "id", header: "Fatura No", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">FAT-{r.id}</span> },
-    { key: "account", header: "Müşteri", sortable: true, render: (r) => <span className="font-semibold">{r.invoice_account?.name ?? "—"}</span> },
-    { key: "invoice_type", header: "Tip", render: (r) => <span className="text-xs text-gray-500">{r.invoice_type?.name ?? "—"}</span> },
-    { key: "invoice_create_date", header: "Fatura Tarihi", render: (r) => <span className="font-mono text-xs">{r.invoice_create_date ? new Date(r.invoice_create_date).toLocaleDateString("tr-TR") : "—"}</span> },
-    { key: "payable_amount", header: "Toplam", render: (r) => <span className="font-mono text-xs font-bold">{r.payable_amount != null ? r.payable_amount.toLocaleString("tr-TR", { minimumFractionDigits: 2 }) : "0,00"} {r.document_currency_code ?? ""}</span> },
-    { key: "invoice_status", header: "Durum", render: (r) => (r.invoice_status?.name ? <Badge label={r.invoice_status.name} /> : "—") },
+    { key: "invoice_id", header: "Fatura Numarası", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">{r.invoice_id ?? "—"}</span> },
+    {
+      key: "commercial_type",
+      header: "Senaryo Tipi",
+      render: (r) => {
+        const meta = COMMERCIAL_TYPE_META[r.commercial_type];
+        return meta ? (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-gray-200 text-[11px] w-fit">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${meta.dot}`} />
+            {meta.name}
+          </span>
+        ) : "—";
+      },
+    },
+    { key: "invoice_status", header: "Fatura Durumu", render: (r) => (r.invoice_status?.name ? <Badge label={r.invoice_status.name} /> : "—") },
+    { key: "target_title", header: "Firma Adı", sortable: true, render: (r) => <span className="font-semibold">{r.target_title || "—"}</span> },
+    { key: "target_identity_no", header: "Vergi Kimlik No", render: (r) => <span className="font-mono text-xs text-gray-500">{r.target_identity_no || "—"}</span> },
+    { key: "payable_amount", header: "Fatura Tutarı (TRY)", render: (r) => <span className="font-mono text-xs font-bold">{r.payable_amount != null ? r.payable_amount.toLocaleString("tr-TR", { minimumFractionDigits: 2 }) : "0,00"} {r.document_currency_code ?? ""}</span> },
+    { key: "invoice_create_date", header: "Fatura Oluşturulma Tarihi", render: (r) => <span className="font-mono text-xs">{r.invoice_create_date ? new Date(r.invoice_create_date).toLocaleString("tr-TR") : "—"}</span> },
+    { key: "invoice_execution_date", header: "Fatura Gerçekleşme Tarihi", render: (r) => <span className="font-mono text-xs">{r.invoice_execution_date ? new Date(r.invoice_execution_date).toLocaleString("tr-TR") : "—"}</span> },
   ];
 
   return (
@@ -535,11 +609,36 @@ export function InvoicesPage() {
                   ) : (
                     <div className="space-y-2">
                       {footers.map((f) => (
-                        <div key={f.id} className="border border-gray-200 rounded-lg px-3 py-2 flex items-center justify-between">
-                          <span className="text-xs text-gray-700">{f.value}</span>
-                          {canUpdate && (
-                            <button type="button" onClick={() => removeFooter(f.id)} className="text-gray-300 hover:text-red-500 shrink-0 ml-2">
+                        <div key={f.id} className="border border-gray-200 rounded-lg px-3 py-2 flex items-center gap-2">
+                          {f.editable ? (
+                            <TextInput value={f.editable_value} onChange={(v) => setFooterEditableValue(f.id, v)} />
+                          ) : (
+                            <span className="flex-1 text-xs text-gray-700">{f.value}</span>
+                          )}
+                          {canUpdate && f.editable && (
+                            <button
+                              type="button"
+                              title="Güncelle"
+                              onClick={() => saveFooterEdit(f.id, f.editable_value)}
+                              disabled={footerSaving || !f.editable_value.trim()}
+                              className="text-green-500 hover:text-green-600 shrink-0 disabled:opacity-40"
+                            >
+                              <CheckCircle size={14} />
+                            </button>
+                          )}
+                          {canUpdate && f.editable && (
+                            <button type="button" title="Sil" onClick={() => removeFooter(f.id)} className="text-gray-300 hover:text-red-500 shrink-0">
                               <Trash2 size={13} />
+                            </button>
+                          )}
+                          {canUpdate && (
+                            <button
+                              type="button"
+                              title={f.editable ? "Düzenleme modunu kapat" : "Düzenleme modunu aç"}
+                              onClick={() => toggleFooterEdit(f.id)}
+                              className="text-gray-300 hover:text-blue-600 shrink-0"
+                            >
+                              {f.editable ? <PencilOff size={13} /> : <Pencil size={13} />}
                             </button>
                           )}
                         </div>
