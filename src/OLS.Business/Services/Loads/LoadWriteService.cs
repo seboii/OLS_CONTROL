@@ -22,9 +22,15 @@ namespace OLS.Business.Services.Loads;
 public interface ILoadWriteService
 {
     Task<long> CreateAsync(LoadWriteModel model, CancellationToken cancellationToken = default);
+
+    /// <summary>Yük numarası oluşmuş kayıt güncellenemez (olsold kuralı).</summary>
     Task<LoadUpdateResult> UpdateAsync(LoadWriteModel model, CancellationToken cancellationToken = default);
-    Task DeleteContentsAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
-    Task DeleteFinancialItemsAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
+
+    /// <summary>Yük numarası oluşmuş kayda ait satır silinemez (olsold kuralı).</summary>
+    Task<LoadChildDeleteResult> DeleteContentsAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
+
+    /// <summary>Yük numarası oluşmuş kayda ait satır silinemez (olsold kuralı).</summary>
+    Task<LoadChildDeleteResult> DeleteFinancialItemsAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
 }
 
 /// <summary>
@@ -32,8 +38,25 @@ public interface ILoadWriteService
 /// diskteki adları. <c>OLS.Business</c>, <c>IFileStorage</c>'a (API katmanı)
 /// bağımlı olamaz — fiziksel silme çağrıyı yapan controller'a bırakılır
 /// (bkz. <see cref="LoadFileService.SyncAsync"/>'teki aynı desen).
+///
+/// <c>IsLocked</c>: <c>Id</c> bulundu ama <c>load_number</c> doluydu — kaynaktaki
+/// "Yük oluşturulmuş kayıt güncellenemez" kuralı (<c>LoadService.LoadDeleteResult</c>
+/// ile aynı desen).
 /// </summary>
-public sealed record LoadUpdateResult(long? Id, IReadOnlyList<string> RemovedFileNames);
+public sealed record LoadUpdateResult(long? Id, IReadOnlyList<string> RemovedFileNames, bool IsLocked = false)
+{
+    public static LoadUpdateResult NotFound() => new(null, []);
+    public static LoadUpdateResult Locked() => new(null, [], IsLocked: true);
+}
+
+/// <summary>
+/// olsold: <c>delete_load_contents</c>/<c>delete_load_financial_items</c> döngü
+/// İÇİNDEN return ediyordu — birkaç kayıt zaten silinmişken sonuncusu engellenirse
+/// kısmi silme oluyordu. <c>LoadService.DeleteAsync</c>'teki aynı düzeltme burada
+/// da uygulanıyor: önce TÜM hedef satırların Yük'ü kontrol edilir, biri kilitliyse
+/// hiçbiri silinmez.
+/// </summary>
+public sealed record LoadChildDeleteResult(bool Success);
 
 /// <summary>record: controller güncellemede <c>with { Id = … }</c> kullanıyor.</summary>
 public sealed record LoadWriteModel
@@ -159,7 +182,10 @@ public sealed class LoadWriteService : ILoadWriteService
 
         var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
         if (load is null)
-            return new LoadUpdateResult(null, []);
+            return LoadUpdateResult.NotFound();
+
+        if (load.LoadNumber is not null)
+            return LoadUpdateResult.Locked();
 
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
 
@@ -355,23 +381,37 @@ public sealed class LoadWriteService : ILoadWriteService
     /// Siber'deki karşılık (skn_rezervasyonyukkoli) da silinir — ancak orada
     /// önce Siber'den siliniyordu; burada önce yerel, sonra Siber.
     /// </summary>
-    public async Task DeleteContentsAsync(
+    public async Task<LoadChildDeleteResult> DeleteContentsAsync(
         IReadOnlyList<long> ids, CancellationToken cancellationToken = default)
     {
         var contents = await _db.LoadContents
             .Where(c => ids.Contains(c.Id)).ToListAsync(cancellationToken);
 
+        var loadIds = contents.Select(c => c.LoadId).Distinct().ToList();
+        var locked = await _db.Loads.AnyAsync(
+            l => loadIds.Contains(l.Id) && l.LoadNumber != null, cancellationToken);
+        if (locked)
+            return new LoadChildDeleteResult(false);
+
         _db.LoadContents.RemoveRange(contents);
         await _db.SaveChangesAsync(cancellationToken);
+        return new LoadChildDeleteResult(true);
     }
 
-    public async Task DeleteFinancialItemsAsync(
+    public async Task<LoadChildDeleteResult> DeleteFinancialItemsAsync(
         IReadOnlyList<long> ids, CancellationToken cancellationToken = default)
     {
         var items = await _db.LoadFinancialItems
             .Where(f => ids.Contains(f.Id)).ToListAsync(cancellationToken);
 
+        var loadIds = items.Select(f => f.LoadId).Distinct().ToList();
+        var locked = await _db.Loads.AnyAsync(
+            l => loadIds.Contains(l.Id) && l.LoadNumber != null, cancellationToken);
+        if (locked)
+            return new LoadChildDeleteResult(false);
+
         _db.LoadFinancialItems.RemoveRange(items);
         await _db.SaveChangesAsync(cancellationToken);
+        return new LoadChildDeleteResult(true);
     }
 }

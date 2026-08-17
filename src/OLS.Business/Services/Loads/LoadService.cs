@@ -15,8 +15,11 @@ public interface ILoadService
     /// <summary>Yük numarası oluşmuş kayıt silinemez (olsold kuralı).</summary>
     Task<LoadDeleteResult> DeleteAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
 
-    Task<bool> UpdateTimeOutAsync(long id, CancellationToken cancellationToken = default);
+    /// <summary>Yük numarası oluşmuş kayıt güncellenemez (olsold kuralı).</summary>
+    Task<LoadTimeOutUpdateStatus> UpdateTimeOutAsync(long id, CancellationToken cancellationToken = default);
 }
+
+public enum LoadTimeOutUpdateStatus { NotFound, Locked, Success }
 
 public sealed record LoadListQuery(
     long UserId,
@@ -361,15 +364,18 @@ public sealed class LoadService : ILoadService
     }
 
     /// <summary>Zaman aşımı raporundan "takip edildi" işaretlemek için updated_at tazelenir.</summary>
-    public async Task<bool> UpdateTimeOutAsync(long id, CancellationToken cancellationToken = default)
+    public async Task<LoadTimeOutUpdateStatus> UpdateTimeOutAsync(long id, CancellationToken cancellationToken = default)
     {
         var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
         if (load is null)
-            return false;
+            return LoadTimeOutUpdateStatus.NotFound;
+
+        if (load.LoadNumber is not null)
+            return LoadTimeOutUpdateStatus.Locked;
 
         load.UpdatedAt = _clock.Now;
         await _db.SaveChangesAsync(cancellationToken);
-        return true;
+        return LoadTimeOutUpdateStatus.Success;
     }
 
     private async Task<NamedRefDto?> NamedAsync(

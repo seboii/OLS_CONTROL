@@ -4,8 +4,10 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using OLS.DataAccess.Context;
 
 namespace OLS.API.IntegrationTests;
 
@@ -173,5 +175,110 @@ public sealed class LoadTests
         afterUpdate.GetArrayLength().Should().Be(0);
 
         File.Exists(storedPath).Should().BeFalse("fiziksel dosya da silinmiş olmalı, yalnızca DB satırı değil");
+    }
+
+    /// <summary>
+    /// Bu oturumda BULUNAN gerçek bir bulgu: olsold'da <c>load_number</c> doluysa
+    /// (yani teklif zaten Yük'e dönüştürülmüşse) <c>LoadController::update</c>
+    /// "Yük oluşturulmuş kayıt güncellenemez" diyerek reddediyordu — bu portta
+    /// hiç uygulanmıyordu. Sonuç: dönüştürülmüş bir teklifi düzenlemek, zaten
+    /// Siber'e senkronlanmış Yük'ü sessizce senkron-dışı bırakıyor, üstelik her
+    /// düzenleme TÜM alt kayıtları (içerik/mali kalem/hareket/görevli/e-posta)
+    /// silip yeniden yazıyordu. <c>load_number</c> normalde yalnızca Teklif→Yük
+    /// dönüşümüyle dolar (<c>LoadTransferWriteService.ConvertOfferAsync</c>) —
+    /// burada test kurulumunu basitleştirmek için doğrudan DB'ye yazılıyor
+    /// (kilit mantığı yalnızca alanın dolu/boş olduğuna bakıyor, dönüşüm
+    /// akışının kendisine değil).
+    /// </summary>
+    private static async Task<long> CreateLoadWithNumberAsync(
+        OlsApiFactory factory, HttpClient admin, long accountId, string loadNumber)
+    {
+        using var createForm = RequiredFieldsForm(accountId);
+        var createResponse = await admin.PostAsync("/api/v1/load", createForm);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var loadId = (await createResponse.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+        var load = await db.Loads.FirstAsync(l => l.Id == loadId);
+        load.LoadNumber = loadNumber;
+        await db.SaveChangesAsync();
+
+        return loadId;
+    }
+
+    private static async Task<long> CreateTestAccountAsync(HttpClient admin, string namePrefix)
+    {
+        using var accountForm = new MultipartFormDataContent
+        {
+            { new StringContent($"{namePrefix} {Guid.NewGuid():N}"), "name" },
+        };
+        var accountResponse = await admin.PostAsync("/api/v1/account", accountForm);
+        accountResponse.EnsureSuccessStatusCode();
+        return (await accountResponse.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+    }
+
+    [Fact]
+    public async Task UpdateLoad_AfterLoadNumberAssigned_IsRejectedAndLeavesDataUntouched()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var accountId = await CreateTestAccountAsync(admin, "Kilit Test Cari");
+        var loadId = await CreateLoadWithNumberAsync(_factory, admin, accountId, $"YUK-{Guid.NewGuid():N}"[..10]);
+
+        using var updateForm = RequiredFieldsForm(accountId);
+        updateForm.Add(new StringContent("Değiştirilmeye çalışılan açıklama"), "description");
+        var response = await admin.PostAsync($"/api/v1/load/{loadId}", updateForm);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("errors").GetProperty("message")[0].GetString()
+            .Should().Be("Yük oluşturulmuş kayıt güncellenemez");
+
+        var detail = (await (await admin.GetAsync($"/api/v1/load/{loadId}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        detail.GetProperty("description").GetString().Should().NotBe("Değiştirilmeye çalışılan açıklama");
+    }
+
+    [Fact]
+    public async Task UpdateTimeOut_AfterLoadNumberAssigned_IsRejected()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var accountId = await CreateTestAccountAsync(admin, "Kilit TimeOut Cari");
+        var loadId = await CreateLoadWithNumberAsync(_factory, admin, accountId, $"YUK-{Guid.NewGuid():N}"[..10]);
+
+        var response = await admin.PostAsJsonAsync("/api/v1/load/updateTimeOut", new { id = loadId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("errors").GetProperty("message")[0].GetString()
+            .Should().Be("Yük oluşturulmuş kayıt güncellenemez");
+    }
+
+    [Fact]
+    public async Task DeleteLoadContent_AfterLoadNumberAssigned_IsRejectedAndKeepsRow()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var accountId = await CreateTestAccountAsync(admin, "Kilit İçerik Cari");
+        var loadId = await CreateLoadWithNumberAsync(_factory, admin, accountId, $"YUK-{Guid.NewGuid():N}"[..10]);
+
+        var detail = (await (await admin.GetAsync($"/api/v1/load/{loadId}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        var contentId = detail.GetProperty("load_content")[0].GetProperty("id").GetInt64();
+
+        var response = await admin.SendAsync(new HttpRequestMessage(HttpMethod.Delete, "/api/v1/load/load_content")
+        {
+            Content = JsonContent.Create(new { deletion_id = new[] { contentId } }),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("errors").GetProperty("message")[0].GetString()
+            .Should().Be("Yük oluşturulmuş kayıt silinemez");
+
+        var afterAttempt = (await (await admin.GetAsync($"/api/v1/load/{loadId}"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("load_content");
+        afterAttempt.GetArrayLength().Should().Be(1, "kilitli bir Yük'ün alt satırı silinmemeli");
     }
 }

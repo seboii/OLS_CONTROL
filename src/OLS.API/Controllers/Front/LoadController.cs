@@ -135,11 +135,17 @@ public sealed class LoadController : ApiControllerBase
     public async Task<IActionResult> UpdateTimeOut(
         [FromBody] UpdateTimeOutRequest request, CancellationToken cancellationToken)
     {
-        var ok = await _loads.UpdateTimeOutAsync(request.Id, cancellationToken);
+        var status = await _loads.UpdateTimeOutAsync(request.Id, cancellationToken);
 
-        return ok
-            ? OkMessage("Güncelleme Başarılı")
-            : NotFoundError();
+        return status switch
+        {
+            LoadTimeOutUpdateStatus.Success => OkMessage("Güncelleme Başarılı"),
+            LoadTimeOutUpdateStatus.Locked => BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
+            {
+                ["message"] = ["Yük oluşturulmuş kayıt güncellenemez"],
+            })),
+            _ => NotFoundError(),
+        };
     }
 
     [HttpPost]
@@ -177,6 +183,13 @@ public sealed class LoadController : ApiControllerBase
         var model = form.ToModel(userId, uploaded) with { Id = id };
         var result = await _write.UpdateAsync(model, cancellationToken);
 
+        // olsold'un mesajı birebir korunuyor (frontend bu metni gösteriyor).
+        if (result.IsLocked)
+            return BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
+            {
+                ["message"] = ["Yük oluşturulmuş kayıt güncellenemez"],
+            }));
+
         if (result.Id is null)
             return NotFoundError();
 
@@ -198,7 +211,13 @@ public sealed class LoadController : ApiControllerBase
         if (request.DeletionId.Count == 0)
             return BadRequestError("Form hataydı! Lütfen geliştiricinizle iletişime geçin.");
 
-        await _write.DeleteContentsAsync(request.DeletionId, cancellationToken);
+        var result = await _write.DeleteContentsAsync(request.DeletionId, cancellationToken);
+        if (!result.Success)
+            return BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
+            {
+                ["message"] = ["Yük oluşturulmuş kayıt silinemez"],
+            }));
+
         return OkMessage("Kayıt Başarıyla Silindi");
     }
 
@@ -210,7 +229,13 @@ public sealed class LoadController : ApiControllerBase
         if (request.DeletionId.Count == 0)
             return BadRequestError("Form hataydı! Lütfen geliştiricinizle iletişime geçin.");
 
-        await _write.DeleteFinancialItemsAsync(request.DeletionId, cancellationToken);
+        var result = await _write.DeleteFinancialItemsAsync(request.DeletionId, cancellationToken);
+        if (!result.Success)
+            return BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
+            {
+                ["message"] = ["Yük oluşturulmuş kayıt silinemez"],
+            }));
+
         return OkMessage("Kayıt Başarıyla Silindi");
     }
 
