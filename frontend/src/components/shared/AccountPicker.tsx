@@ -9,6 +9,8 @@ export interface AccountOption {
   id: number;
   name: string | null;
   siber_id?: string | null;
+  // Yalnızca list/detay uçlarının AccountRefDto'sunda dolu gelir (bkz. LoadDtos.cs).
+  country_id?: { id: string; name: string | null } | null;
 }
 
 /**

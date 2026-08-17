@@ -6,7 +6,7 @@ import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
-import { Drawer } from "@/components/ui/Overlay";
+import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SelectInput, Tabs, TextInput, TextareaInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
@@ -26,6 +26,7 @@ interface LoadItem {
   customer_id: AccountOption | null;
   load_content_count: number;
   siber_id: string | null;
+  load_charge_person: LoadChargePersonDetail[];
 }
 
 interface LoadContentDetail {
@@ -184,6 +185,46 @@ function EmailChipInput({ label, emails, onChange }: { label: string; emails: st
         </div>
       )}
     </div>
+  );
+}
+
+/** olsold: OfferListChargePersonsDialog.vue — liste satırındaki "Görevli" düğmesi + popup. */
+function ChargePersonsCell({ people }: { people: LoadChargePersonDetail[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+        className="text-[11px] font-medium px-2.5 py-1 rounded-full border border-gray-200 text-gray-600 hover:border-blue-300 hover:text-blue-600 transition-colors whitespace-nowrap"
+      >
+        {people.length > 0 ? `${people.length} Görevli` : "Belirtilmedi"}
+      </button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Görevliler">
+        <div className="w-[360px] max-w-full p-1">
+          {people.length === 0 ? (
+            <p className="text-xs text-gray-400 text-center py-6">Görevli bulunamadı.</p>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left py-2 px-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Görevli</th>
+                  <th className="text-left py-2 px-2 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Görevi</th>
+                </tr>
+              </thead>
+              <tbody>
+                {people.map((p, i) => (
+                  <tr key={i} className="border-b border-gray-50">
+                    <td className="py-2 px-2 text-gray-700">{p.user_id ? `${p.user_id.name ?? ""} ${p.user_id.surname ?? ""}`.trim() : "—"}</td>
+                    <td className="py-2 px-2 text-gray-500">{p.user_type === 1 ? "Operasyon Yetkilisi" : "Satış Temsilcisi"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Modal>
+    </>
   );
 }
 
@@ -541,9 +582,22 @@ export function QuotesPage() {
 
   const columns: Column<LoadItem>[] = [
     { key: "id", header: "Teklif No", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">{r.reservation_number ?? `T${r.id}`}</span> },
-    { key: "customer", header: "Müşteri", sortable: true, render: (r) => <span className="font-semibold">{r.customer_id?.name ?? "—"}</span> },
+    {
+      key: "customer",
+      header: "Müşteri",
+      sortable: true,
+      // olsold: OfferTable.vue Müşteri sütunu — ad + (varsa) ülke adı alt satırda.
+      // Avatar/bayrak görselleri kaynakta da `&& false`/`v-if="false"` ile KAPALI, taşınmadı.
+      render: (r) => (
+        <div>
+          <div className="font-semibold">{r.customer_id?.name ?? "—"}</div>
+          {r.customer_id?.country_id && <div className="text-[11px] text-gray-500 mt-0.5">{r.customer_id.country_id.name}</div>}
+        </div>
+      ),
+    },
     { key: "work_type", header: "İş Tipi", render: (r) => <span className="text-xs text-gray-500">{r.work_type_id?.name ?? "—"}</span> },
     { key: "content_count", header: "İçerik", render: (r) => <span className="font-mono text-xs">{r.load_content_count} kalem</span> },
+    { key: "charge_person", header: "Görevli", render: (r) => <ChargePersonsCell people={r.load_charge_person} /> },
     { key: "offer_date", header: "Tarih", render: (r) => <span className="font-mono text-xs text-gray-500">{r.offer_date ? new Date(r.offer_date).toLocaleDateString("tr-TR") : "—"}</span> },
     { key: "status", header: "Durum", render: (r) => (r.status_type_id != null && statusMap[r.status_type_id] ? <Badge label={statusMap[r.status_type_id]} /> : "—") },
   ];

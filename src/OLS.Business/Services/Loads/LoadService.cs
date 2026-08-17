@@ -413,8 +413,18 @@ public sealed class LoadService : ILoadService
     /// senkron metot olarak çağrılırsa EF Core bunu SQL'e gömemez, dış
     /// sorgunun okuyucusu açıkken aynı DbContext'te ikinci bir komut açmaya
     /// çalışır ve "operation already in progress" hatası verir.
+    ///
+    /// olsold: OfferTable.vue Müşteri sütunu data.customer_id?.country_id?.name
+    /// okuyor. Account entity'sinde Country'ye EF navigasyonu YOK (olsold'da da
+    /// gerçek bir FK yok — bkz. Account.cs) — navigasyon eklemek migration
+    /// snapshot'ını bozup PendingModelChangesWarning ile konteyneri çökertti,
+    /// bu yüzden burada da diğer alanlar gibi (WorkTypeId/LoadingTypeId/...)
+    /// düz bir alt-sorgu kullanılıyor. Bu, ifadenin ARTIK `_db`'ye ihtiyaç
+    /// duyması nedeniyle STATIC olamıyor (instance property'e çevrildi) —
+    /// yine de gerçek bir metot ÇAĞRISI değil, EF'in SQL'e gömebildiği bir
+    /// ifade ağacı (expression tree) olarak kalıyor.
     /// </summary>
-    private static readonly Expression<Func<Account, AccountRefDto>> MapAccountRef = a => new AccountRefDto
+    private Expression<Func<Account, AccountRefDto>> MapAccountRef => a => new AccountRefDto
     {
         Id = a.Id,
         Name = a.Name,
@@ -424,5 +434,16 @@ public sealed class LoadService : ILoadService
         Address = a.Address,
         TaxNumber = a.TaxNumber,
         SiberId = a.SiberId,
+        CountryId = _db.Countries.Where(c => c.Id == a.CountryId)
+            .Select(c => new CountryDto
+            {
+                Id = c.Id,
+                Name = c.Name,
+                CountryCode = c.CountryCode,
+                Flag = c.Flag,
+                PhoneCode = c.PhoneCode,
+                Slug = c.Slug,
+            })
+            .FirstOrDefault(),
     };
 }

@@ -559,6 +559,36 @@ paketi/römorku/eşlemesi doğrudan SQL ile eklendi (yalnızca test verisi — k
 Değerler kartının, Römork'un, per-yük 5 metriğin ve akordiyonun (2 paket, aç/kapa ikisi de) doğru
 render edildiği uçtan uca teyit edildi. Mevcut 118 test etkilenmedi (yalnızca `TripsPage.tsx` değişti).
 
+**Kritik yön değişikliği #22 (bu güncellemede — Teklif liste sayfası, Görevli sütunu/popup +
+Müşteri ülkesi):** `OfferTable.vue` + `OfferListChargePersonsDialog.vue` satır satır incelendi.
+"Görevli" sütunu (backend `LoadListItemDto.LoadChargePerson` — `LoadService.cs` ZATEN dolduruyordu,
+yalnızca liste satırının TypeScript arayüzünde/kolonlarında hiç kullanılmıyordu) "N Görevli"/
+"Belirtilmedi" düğmesi + tıklanınca açılan "Görevliler" popup'ı (Görevli adı+soyadı / Görevi —
+`user_type==1` "Operasyon Yetkilisi", aksi hâlde "Satış Temsilcisi", kaynakla birebir) olarak eklendi.
+Görev başlığındaki "Müşteri avatarı" ifadesi kod OKUNURKEN düzeltildi: kaynakta avatar/bayrak
+görselleri `v-if="...&& false"`/`v-if="false"` ile BİZZAT KAYNAKTA devre dışı — yalnızca ülke ADI
+(`customer_id.country_id.name`) canlı render ediliyor. Bu yüzden avatar EKLENMEDİ (kaynağın kendi
+sildiği bir özelliği taşımak birebirliği BOZAR); bunun yerine Müşteri sütununa isim altında (varsa)
+ülke adı alt satırı eklendi. Bu sırada GERÇEK bir ikinci eksik bulundu: backend'in `AccountRefDto`
+sınıfı `country_id` alanını zaten taşıyordu ama `LoadService.MapAccountRef` (Teklif listesinin
+Müşteri/Gönderici/vb. tüm cari referanslarını ürettiği ORTAK projeksiyon) hiç doldurmuyordu — canlı
+testte `country_id: null` döndüğü görülünce fark edildi. Düzeltme denemesi önce `Account` entity'sine
+gerçek bir `Country` navigasyonu eklemeye çalıştı; bu, migration snapshot'ını EF'in
+`PendingModelChangesWarning`'ini tetikleyecek şekilde bozdu ve konteyner `docker compose up -d api`
+sonrası ÇÖKTÜ (bkz. loglar) — geri alındı. Bunun yerine `MapAccountRef` STATIC alandan INSTANCE
+property'e çevrilip (artık `_db`'ye ihtiyacı olduğundan) `WorkTypeId`/`LoadingTypeId` gibi dosyadaki
+DİĞER alanlarla AYNI desende (satır-içi `_db.Countries.Where(...).Select(...).FirstOrDefault()`
+alt-sorgusu, gerçek bir metot çağrısı değil hâlâ bir ifade ağacı) düzeltildi — şema/migration'a hiç
+dokunulmadı. `docker compose build api && up -d api` ile yeniden başlatılıp konteynerin TEMİZ açıldığı
+(`No migrations were applied`) doğrulandı. Canlı Docker'da (Postgres'e doğrudan SQL ile eklenen bir
+test teklifi + 2 görevli — Siber'e bağlı olmayan sade bir INSERT, Teklif formunun 3 zorunlu lookup'ı
+[Yük/Taşıma Tipi, Talimat, Kap Tipi] bu geliştirme ortamında boş olduğundan formdan geçmek bu görevin
+kapsamı dışında bir efor gerektirirdi) uçtan uca doğrulandı: Müşteri sütununda "Türkiye" alt satırı,
+"2 Görevli" düğmesi, popup'ta doğru ad-soyad/görev eşleşmesi, satır tıklamasının (popup düğmesindeki
+`stopPropagation` sayesinde) hâlâ düzenleme çekmecesini açtığı. `dotnet test` tam takım yeniden
+çalıştırıldı (bu görev backend'e dokunduğundan, önceki saf-frontend görevlerin aksine) — sonuç: bkz.
+altındaki test bölümü.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
