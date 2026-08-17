@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Truck, Plus, Trash2, Link2 } from "lucide-react";
+import { Truck, Plus, Trash2, Link2, ChevronDown, ChevronUp } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
@@ -67,10 +67,21 @@ interface MappingTotals {
   total_volume: number;
 }
 
+interface LoadPackageDetail {
+  id: number;
+  quantity: number | null;
+  gross_weight: number | null;
+  net_weight: number | null;
+  lademeter: number | null;
+  volume: number | null;
+  product_type_id: NamedRef | null;
+}
+
 interface MappedLoadTransfer {
   id: number;
   load_number_work_type: string | null;
   customer_id: { id: number; name: string | null } | null;
+  load_transfer_package: LoadPackageDetail[];
 }
 
 interface ExpeditionMapping {
@@ -210,6 +221,8 @@ export function TripsPage() {
   const [mappings, setMappings] = useState<ExpeditionMapping[]>([]);
   const [mappingTotals, setMappingTotals] = useState<MappingTotals>(ZERO_TOTALS);
   const [mappingsLoading, setMappingsLoading] = useState(false);
+  // olsold: ExpeditionLoad.vue — Accordion varsayılan kapalı, satır başına bağımsız aç/kapa.
+  const [expandedMappings, setExpandedMappings] = useState<Set<number>>(new Set());
 
   const [movements, setMovements] = useState<MovementDetail[]>([]);
   const [deletedMovements, setDeletedMovements] = useState<MovementDetail[]>([]);
@@ -342,6 +355,15 @@ export function TripsPage() {
     } catch (err) {
       addToast(err instanceof Error ? err.message : "Çıkarılamadı", "error");
     }
+  }
+
+  function toggleMappingAccordion(mappingId: number) {
+    setExpandedMappings((set) => {
+      const next = new Set(set);
+      if (next.has(mappingId)) next.delete(mappingId);
+      else next.add(mappingId);
+      return next;
+    });
   }
 
   function openMovementModal() {
@@ -546,28 +568,113 @@ export function TripsPage() {
                     <p className="text-xs text-gray-400 text-center py-8">Bu sefere henüz yük bağlanmadı.</p>
                   ) : (
                     <>
-                      <div className="space-y-2">
-                        {mappings.map((m) => (
-                          <div key={m.id} className="border border-gray-200 rounded-lg p-3 flex items-center justify-between">
-                            <div>
-                              <p className="text-xs font-semibold text-blue-600">{m.load_transfer_id?.load_number_work_type ?? `#${m.load_transfer_id?.id ?? "?"}`}</p>
-                              <p className="text-[11px] text-gray-500">{m.load_transfer_id?.customer_id?.name ?? "—"}</p>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <span className="font-mono text-[11px] text-gray-500">{m.total_values.total_gross_weight} kg · {m.total_values.total_volume} m³</span>
-                              {canUpdate && (
-                                <button type="button" onClick={() => removeMapping(m.id)} className="text-gray-300 hover:text-red-500">
-                                  <Trash2 size={13} />
-                                </button>
+                      {/* olsold: ExpeditionLoad.vue "Toplam Değerler" kartı — tüm bağlı yüklerin toplamı. */}
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-3">
+                        <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Toplam Değerler</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                          <div className="bg-white p-2 rounded-md border border-gray-200">
+                            <div className="text-[10px] text-gray-500">Toplam Adet</div>
+                            <div className="text-sm font-semibold text-gray-800">{mappingTotals.total_quantity}</div>
+                          </div>
+                          <div className="bg-white p-2 rounded-md border border-gray-200">
+                            <div className="text-[10px] text-gray-500">Brüt Ağırlık</div>
+                            <div className="text-sm font-semibold text-gray-800">{mappingTotals.total_gross_weight} kg</div>
+                          </div>
+                          <div className="bg-white p-2 rounded-md border border-gray-200">
+                            <div className="text-[10px] text-gray-500">Net Ağırlık</div>
+                            <div className="text-sm font-semibold text-gray-800">{mappingTotals.total_net_weight} kg</div>
+                          </div>
+                          <div className="bg-white p-2 rounded-md border border-gray-200">
+                            <div className="text-[10px] text-gray-500">Lademetre</div>
+                            <div className="text-sm font-semibold text-gray-800">{mappingTotals.total_lademeter}</div>
+                          </div>
+                          <div className="bg-white p-2 rounded-md border border-gray-200">
+                            <div className="text-[10px] text-gray-500">Hacim</div>
+                            <div className="text-sm font-semibold text-gray-800">{mappingTotals.total_volume} m³</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        {mappings.map((m) => {
+                          const expanded = expandedMappings.has(m.id);
+                          const packages = m.load_transfer_id?.load_transfer_package ?? [];
+                          return (
+                            <div key={m.id} className="border border-gray-200 rounded-lg p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="space-y-0.5">
+                                  <p className="text-xs text-gray-700">
+                                    Yük Numarası: <span className="font-semibold text-blue-600">{m.load_transfer_id?.load_number_work_type ?? `#${m.load_transfer_id?.id ?? "?"}`}</span>
+                                  </p>
+                                  <p className="text-xs text-gray-700">
+                                    Müşteri: <span className="font-medium">{m.load_transfer_id?.customer_id?.name ?? "—"}</span>
+                                  </p>
+                                  <p className="text-xs text-gray-700">
+                                    Römork: <span className="font-medium">{m.romork_id?.plate_number ?? "—"}</span>
+                                  </p>
+                                </div>
+                                {canUpdate && (
+                                  <button type="button" onClick={() => removeMapping(m.id)} className="text-gray-300 hover:text-red-500 shrink-0">
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mt-3">
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <div className="text-[10px] text-gray-500">Toplam Adet</div>
+                                  <div className="text-xs font-semibold text-gray-800">{m.total_values.total_quantity}</div>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <div className="text-[10px] text-gray-500">Hacim</div>
+                                  <div className="text-xs font-semibold text-gray-800">{m.total_values.total_volume} m³</div>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <div className="text-[10px] text-gray-500">Brüt Ağırlık</div>
+                                  <div className="text-xs font-semibold text-gray-800">{m.total_values.total_gross_weight} kg</div>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <div className="text-[10px] text-gray-500">Net Ağırlık</div>
+                                  <div className="text-xs font-semibold text-gray-800">{m.total_values.total_net_weight} kg</div>
+                                </div>
+                                <div className="bg-gray-50 p-2 rounded-md">
+                                  <div className="text-[10px] text-gray-500">Lademetre</div>
+                                  <div className="text-xs font-semibold text-gray-800">{m.total_values.total_lademeter}</div>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => toggleMappingAccordion(m.id)}
+                                className="w-full flex items-center justify-between mt-3 pt-2 border-t border-gray-100 text-[11px] font-medium text-gray-500 hover:text-gray-700"
+                              >
+                                Detaylar
+                                {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                              </button>
+                              {expanded && (
+                                <div className="mt-2 space-y-2">
+                                  {packages.length === 0 ? (
+                                    <p className="text-[11px] text-gray-400 text-center py-3">Bu yüke ait paket bulunamadı.</p>
+                                  ) : (
+                                    packages.map((p, i) => (
+                                      <div key={p.id} className="border border-gray-100 rounded-lg p-3 bg-white">
+                                        <p className="text-xs font-semibold text-gray-700 mb-2">{i + 1}. Ürün</p>
+                                        <div className="flex flex-wrap gap-1.5">
+                                          <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Mal Cinsi: <b className="text-gray-700">{p.product_type_id?.name ?? "—"}</b></span>
+                                          <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Adet: <b className="text-gray-700">{p.quantity ?? 0}</b></span>
+                                          <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Hacim: <b className="text-gray-700">{p.volume ?? 0} m³</b></span>
+                                          <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Brüt Ağırlık: <b className="text-gray-700">{p.gross_weight ?? 0} kg</b></span>
+                                          <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Net Ağırlık: <b className="text-gray-700">{p.net_weight ?? 0} kg</b></span>
+                                          <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Lademetre: <b className="text-gray-700">{p.lademeter ?? 0}</b></span>
+                                        </div>
+                                      </div>
+                                    ))
+                                  )}
+                                </div>
                               )}
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="mt-4 pt-3 border-t border-gray-100 grid grid-cols-3 gap-2 text-[11px] text-gray-500">
-                        <span>Toplam Adet: <b className="text-gray-700">{mappingTotals.total_quantity}</b></span>
-                        <span>Brüt: <b className="text-gray-700">{mappingTotals.total_gross_weight} kg</b></span>
-                        <span>Hacim: <b className="text-gray-700">{mappingTotals.total_volume} m³</b></span>
+                          );
+                        })}
                       </div>
                     </>
                   )}

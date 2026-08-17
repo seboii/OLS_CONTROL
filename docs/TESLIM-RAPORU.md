@@ -535,6 +535,30 @@ edildi) doğru çalışıyor, düzenleme modu kapalıyken Güncelle/Sil düğmel
 Backend'e dokunulmadığından (uç zaten vardı) mevcut 118 test etkilenmedi (yalnızca `InvoicesPage.tsx`
 değişti).
 
+**Kritik yön değişikliği #21 (bu güncellemede — Sefer, Bağlı Yükler eksik metrikler/akordiyon/Römork):**
+`ExpeditionLoad.vue` satır satır incelendi. Backend (`ExpeditionLoadMappingService.ByExpeditionAsync`)
+ZATEN hem satır-bazlı (`TotalValues`, 5 alan) hem sefer-geneli (`Totals`, aynı 5 alan) toplamları VE
+her yükün TAM paket/ürün kırılımını (`LoadTransferPackage`, 6 alan) VE römork bilgisini (`RomorkId`)
+hesaplayıp dönüyordu — `TripsPage.tsx`'in TypeScript arayüzleri bile bu alanları (`romork_id`,
+`total_values`) zaten modelliyordu, ama sekme yalnızca 2 metrik (brüt/hacim) düz metin olarak
+gösteriyordu, Römork'u HİÇ göstermiyordu, paket kırılımı için akordiyon HİÇ yoktu — yine bu oturumun
+"backend hazır, frontend eksik" deseni, ama bu kez veri modelinin KENDİSİ bile zaten doğruydu (yalnızca
+render eksikti). Eklendi: (1) listenin ÜSTÜNDE, kaynaktaki gibi belirgin bir "Toplam Değerler" kartı
+(5 metrik: Adet/Brüt/Net/Lademetre/Hacim — önceki alt-şerit yalnızca 3'ünü gösteriyordu, kaldırıldı);
+(2) her yük kartına Römork satırı (plaka numarası); (3) her yük kartına 2 yerine tam 5 metriklik ızgara;
+(4) "Detaylar" akordiyonu — varsayılan kapalı, satır bazlı bağımsız aç/kapa state'i (`expandedMappings`,
+bir `Set`), her paket için Mal Cinsi/Adet/Hacim/Brüt/Net/Lademetre. Kaynağın harici bağlantı simgeleri
+(Yük Numarası → `/panel/real-load`, Römork → `/panel/car/{id}`) BİLİNÇLİ OLARAK atlandı: bu port
+hiçbir modülde tek-kayıt derin bağlantısını (`?open=id` vb.) desteklemiyor — bu, kapsamı bu görevin çok
+ötesine taşıyan, ayrı bir çapraz-modül altyapı kararı olurdu. Backend'e HİÇ dokunulmadı. Canlı doğrulama
+için hem yerel hem Docker Postgres'te (`docker exec ols-scoped-postgres`) bu zincirin tamamen boş
+olduğu görüldü (Siber-bağımlı Teklif→Yük dönüşüm akışından geçmeden gerçek veri üretmek bu görevin
+kapsamı dışında bir efor gerektirirdi); bunun yerine gerçek şemaya birebir uyan bir test seferi/yükü/
+paketi/römorku/eşlemesi doğrudan SQL ile eklendi (yalnızca test verisi — kod/mantık DEĞİL) ve API'den
+(`GET /api/v1/expedition_load_mapping/1`) doğru şekilde döndüğü, ardından arayüzde 5 metriklik Toplam
+Değerler kartının, Römork'un, per-yük 5 metriğin ve akordiyonun (2 paket, aç/kapa ikisi de) doğru
+render edildiği uçtan uca teyit edildi. Mevcut 118 test etkilenmedi (yalnızca `TripsPage.tsx` değişti).
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
