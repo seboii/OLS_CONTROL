@@ -39,6 +39,7 @@ public sealed class UserFormTests
             { new StringContent("Testi"), "surname" },
             { new StringContent(email), "email" },
             { new StringContent("Test!2026Pw"), "password" },
+            { new StringContent("Test!2026Pw"), "password_confirmation" },
             { new StringContent("PDKS-0001"), "pkds_id" },
             { new StringContent(countryId.ToString()), "phone_country_id" },
             { new StringContent(phone), "phone" },
@@ -167,6 +168,7 @@ public sealed class UserFormTests
             { new StringContent("Testi"), "surname" },
             { new StringContent(email), "email" },
             { new StringContent("Test!2026Pw"), "password" },
+            { new StringContent("Test!2026Pw"), "password_confirmation" },
             { new StringContent(phone), "phone" },
             { new StringContent((await FirstCountryIdAsync(admin)).ToString()), "phone_country_id" },
         };
@@ -204,6 +206,7 @@ public sealed class UserFormTests
                 { new StringContent("Testi"), "surname" },
                 { new StringContent(email), "email" },
                 { new StringContent("Test!2026Pw"), "password" },
+                { new StringContent("Test!2026Pw"), "password_confirmation" },
                 { new StringContent(phone), "phone" },
                 { new StringContent(countryId.ToString()), "phone_country_id" },
             });
@@ -215,6 +218,96 @@ public sealed class UserFormTests
         second.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         var errors = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
         errors.GetProperty("phone")[0].GetString().Should().Be("Bu Telefon numarası zaten kullanılıyor");
+    }
+
+    /// <summary>
+    /// olsold: UserSave — <c>password: required|confirmed</c>, <c>password_confirmation:
+    /// required</c>. Kaynağın frontend Vuelidate kuralı (UserFormDrawer.vue) bu ikisini
+    /// yalnızca form_type=='edit' iken required yapıyordu (create'te DEĞİL) — bu, `rules`
+    /// nesnesinin onDrawerShow'da kalıcı olarak mutasyona uğratılmasından kaynaklanan bir
+    /// istemci-tarafı hatadır (drawer bir kez edit modunda açılınca sonraki create'lerde de
+    /// kalıcı olur). Backend'in KENDİSİ (UserSave.php) doğru davranışı taşır: create'te HER
+    /// ZAMAN zorunlu. Bu test o doğru (backend) sözleşmeyi kilitliyor.
+    /// </summary>
+    [Fact]
+    public async Task CreateUser_WithoutPasswordConfirmation_Returns422()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var countryId = await FirstCountryIdAsync(admin);
+        var email = $"user-nopwconfirm-{Guid.NewGuid():N}@example.test";
+
+        using var form = new MultipartFormDataContent
+        {
+            { new StringContent("Form"), "name" },
+            { new StringContent("Testi"), "surname" },
+            { new StringContent(email), "email" },
+            { new StringContent("Test!2026Pw"), "password" },
+            { new StringContent($"5{Random.Shared.NextInt64(100_000_000, 999_999_999)}"), "phone" },
+            { new StringContent(countryId.ToString()), "phone_country_id" },
+        };
+
+        var response = await admin.PostAsync("/api/v1/user", form);
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+
+        var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        errors.GetProperty("password_confirmation")[0].GetString().Should().Be("Şifre Tekrarı boş olamaz");
+    }
+
+    [Fact]
+    public async Task CreateUser_WithMismatchedPasswordConfirmation_Returns422WithMismatchMessageOnPasswordField()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var countryId = await FirstCountryIdAsync(admin);
+        var email = $"user-pwmismatch-{Guid.NewGuid():N}@example.test";
+
+        using var form = new MultipartFormDataContent
+        {
+            { new StringContent("Form"), "name" },
+            { new StringContent("Testi"), "surname" },
+            { new StringContent(email), "email" },
+            { new StringContent("Test!2026Pw"), "password" },
+            { new StringContent("Different!2026Pw"), "password_confirmation" },
+            { new StringContent($"5{Random.Shared.NextInt64(100_000_000, 999_999_999)}"), "phone" },
+            { new StringContent(countryId.ToString()), "phone_country_id" },
+        };
+
+        var response = await admin.PostAsync("/api/v1/user", form);
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+
+        // olsold: Laravel'in 'confirmed' kuralı hatayı password_confirmation'a değil
+        // password alanına ekler — birebir korundu.
+        var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        errors.GetProperty("password")[0].GetString().Should().Be("Şifreler Eşleşmiyor");
+    }
+
+    /// <summary>
+    /// olsold: UserUpdate — password/password_confirmation YALNIZCA password gönderildiyse
+    /// doğrulanır. Burada yeni bir şifre gönderilip eşleşmeyen bir tekrar verildiğinde
+    /// güncellemenin reddedildiği kilitleniyor (boş bırakılırsa hiç doğrulanmadığı zaten
+    /// UpdateUser_WithoutPhoneCountryId_StillSucceeds_ButPhoneStaysRequired'da kapsanıyor).
+    /// </summary>
+    [Fact]
+    public async Task UpdateUser_WithNewPasswordButMismatchedConfirmation_Returns422()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var email = $"user-update-pwmismatch-{Guid.NewGuid():N}@example.test";
+        var userId = await admin.CreateUserAsync(email);
+
+        using var updateForm = new MultipartFormDataContent
+        {
+            { new StringContent(userId.ToString()), "id" },
+            { new StringContent("Form"), "name" },
+            { new StringContent("Testi"), "surname" },
+            { new StringContent(email), "email" },
+            { new StringContent($"5{Random.Shared.NextInt64(100_000_000, 999_999_999)}"), "phone" },
+            { new StringContent("NewPassword!2026"), "password" },
+            { new StringContent("DifferentPassword!2026"), "password_confirmation" },
+        };
+        var updateResponse = await admin.PostAsync("/api/v1/user/update", updateForm);
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+
+        var errors = (await updateResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        errors.GetProperty("password")[0].GetString().Should().Be("Şifreler Eşleşmiyor");
     }
 
     private static async Task<Guid> FirstCountryIdAsync(HttpClient admin)

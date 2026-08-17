@@ -136,8 +136,22 @@ public sealed class UserController : ApiControllerBase
         else if (await _users.EmailExistsAsync(form.Email, exceptId, cancellationToken))
             errors["email"] = [Translator.Get("Bu e-posta zaten kayıtlı.")];
 
-        if (requirePassword && string.IsNullOrWhiteSpace(form.Password))
-            errors["password"] = [required];
+        // olsold: UserSave — password: required|confirmed (+password_confirmation: required).
+        // UserUpdate — YALNIZCA $request->has('password') && $request->password iken aynı
+        // kural devreye girer; boş bırakılırsa (mevcut şifre korunur) hiç doğrulanmaz.
+        var passwordProvided = !string.IsNullOrWhiteSpace(form.Password);
+
+        if (requirePassword && !passwordProvided)
+        {
+            errors["password"] = [Translator.Get("Şifre Alanı boş olamaz")];
+        }
+        else if (passwordProvided)
+        {
+            if (string.IsNullOrWhiteSpace(form.PasswordConfirmation))
+                errors["password_confirmation"] = [Translator.Get("Şifre Tekrarı boş olamaz")];
+            else if (form.Password != form.PasswordConfirmation)
+                errors["password"] = [Translator.Get("Şifreler Eşleşmiyor")];
+        }
 
         // olsold: UserSave/UserUpdate — phone: required|unique (ikisinde de).
         if (string.IsNullOrWhiteSpace(form.Phone))
@@ -161,6 +175,7 @@ public sealed class UserController : ApiControllerBase
         [FromForm(Name = "phone")] public string? Phone { get; set; }
         [FromForm(Name = "phone_country_id")] public Guid? PhoneCountryId { get; set; }
         [FromForm(Name = "password")] public string? Password { get; set; }
+        [FromForm(Name = "password_confirmation")] public string? PasswordConfirmation { get; set; }
         [FromForm(Name = "working_tracking")] public bool WorkingTracking { get; set; }
         [FromForm(Name = "pkds_id")] public string? PkdsId { get; set; }
         [FromForm(Name = "avatar")] public IFormFile? Avatar { get; set; }

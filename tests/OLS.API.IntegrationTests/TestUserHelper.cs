@@ -24,6 +24,7 @@ public static class TestUserHelper
             { new StringContent("Kullanici"), "surname" },
             { new StringContent(email), "email" },
             { new StringContent(password), "password" },
+            { new StringContent(password), "password_confirmation" },
             { new StringContent($"5{Random.Shared.NextInt64(100_000_000, 999_999_999)}"), "phone" },
             { new StringContent(countryId), "phone_country_id" },
         };

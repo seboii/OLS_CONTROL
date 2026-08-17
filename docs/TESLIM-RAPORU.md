@@ -621,6 +621,39 @@ durumunda), "Sipariş" sekmesine geçince kayıt görünüyor (ağ isteği doğr
 dokunulmadığından (uçlar zaten vardı) mevcut 118 test etkilenmedi, yeniden çalıştırılmadı (yalnızca
 `QuotesPage.tsx` değişti).
 
+**Kritik yön değişikliği #24 (bu güncellemede — Kullanıcılar, şifre tekrarı alanı):**
+`UserFormDrawer.vue` satır satır incelendi: "Şifre"nin yanında bir de "Şifre Tekrar" alanı var, bu
+portta YOKTU (ne backend'de ne frontend'de) — bu görev, Kritik yön değişikliği #12'nin (telefon
+zorunlu+benzersizlik) çalışması sırasında bu oturumda İLK KEZ fark edilip listeye eklenmişti.
+Kaynağın KENDİ frontend Vuelidate kuralı (`rules.password`/`rules.password_confirmation`) satır
+satır okunduğunda GERÇEK bir kaynak hatası bulundu: bu kurallar yalnızca `form_type=='edit'` iken
+(`onDrawerShow` içinde) `rules` nesnesine EKLENİYOR — nesne `let` ile bir kez tanımlanıp asla
+sıfırlanmadığından, drawer BİR KEZ edit modunda açılınca eklenen kural KALICI hâle geliyor ve
+sonraki create'lerde de (yanlışlıkla) geçerli kalıyor; taze bir sayfa yüklemesinde create modunda
+İLK açılışta ise şifre hiç istemci-tarafı doğrulanmıyor. Bu, kod okumasıyla netleşen bir MUTASYON
+hatası, kaynağın niyeti değil. Gerçek niyet backend'in `UserSave.php`/`UserUpdate.php`
+FormRequest'lerinden okundu: create'te `password`/`password_confirmation` HER ZAMAN
+`required|confirmed`; update'te YALNIZCA `$request->has('password') && $request->password` iken
+aynı kural devreye girer (boş bırakılırsa mevcut şifre korunur, hiç doğrulanmaz) — bu SAĞLAM,
+mantıklı sözleşme birebir taşındı (frontend'in bozuk Vuelidate mutasyonu DEĞİL) — Kritik yön
+değişikliği #12'de telefon benzersizliği için normalize edilmiş değerin karşılaştırılmasıyla AYNI
+gerekçe: kaynağın kendi hatasını değil gerçek niyetini taşı. Backend: `UserController.
+UserForm`'a `PasswordConfirmation` eklendi; `ValidateAsync` create'te her zaman, update'te yalnızca
+şifre gönderildiğinde `password_confirmation` boşsa "Şifre Tekrarı boş olamaz", eşleşmiyorsa (Laravel'in
+`confirmed` kuralı gibi hata `password_confirmation`'a değil `password` alanına eklenir)
+"Şifreler Eşleşmiyor" — ikisi de kaynağın `messages()` metinleriyle birebir. Frontend: `UsersPage.tsx`'e
+"Şifre Tekrar" alanı eklendi (create'te her zaman, update'te yalnızca yeni şifre giriliyorsa zorunlu
+işaretli — asıl zorunluluk her koşulda backend'de). `TestUserHelper.CreateUserAsync` (birçok test
+dosyasında paylaşılan yardımcı) ve `UserFormTests.cs`'teki 3 satır-içi form inşası
+`password_confirmation` göndermediğinden yeni zorunluluk onları 422'ye düşürüyordu — hepsi düzeltildi
+(blast-radius, Kritik yön değişikliği #12'dekiyle aynı desen). 3 yeni regresyon testi eklendi (boş
+tekrar, eşleşmeyen tekrar — create ve update ayrı ayrı); mutasyon testiyle doğrulandı (kontrol
+`if (false && ...)` ile kapatılınca üçü de beklenen şekilde başarısız oldu, geri alınca tekrar geçti).
+Canlı Docker'da uçtan uca doğrulandı: eşleşmeyen şifreyle "Şifreler Eşleşmiyor" hatası doğru alanda
+gösteriliyor, düzeltilip kaydedilince kullanıcı gerçekten oluşuyor (liste 4'ten 5 kayda çıktı).
+`dotnet test` tam takım çalıştırıldı: **121/121 geçti** (29 birim + 92 entegrasyon, önceki 118 +
+bu güncellemenin 3 yeni testi).
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

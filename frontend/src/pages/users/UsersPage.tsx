@@ -79,7 +79,7 @@ export function UsersPage() {
   const [tab, setTab] = useState("Profil");
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
-  const [form, setForm] = useState({ name: "", surname: "", email: "", phone: "", password: "", phone_country_id: "", pkds_id: "" });
+  const [form, setForm] = useState({ name: "", surname: "", email: "", phone: "", password: "", password_confirmation: "", phone_country_id: "", pkds_id: "" });
   const [permRows, setPermRows] = useState<PermissionRow[]>([]);
   const [permLoading, setPermLoading] = useState(false);
   const [existingAvatar, setExistingAvatar] = useState<string | null>(null);
@@ -124,7 +124,7 @@ export function UsersPage() {
 
   function openNew() {
     setEditingId(null);
-    setForm({ name: "", surname: "", email: "", phone: "", password: "", phone_country_id: "", pkds_id: "" });
+    setForm({ name: "", surname: "", email: "", phone: "", password: "", password_confirmation: "", phone_country_id: "", pkds_id: "" });
     setErrors({});
     setPermRows([]);
     setGoals([]);
@@ -170,7 +170,7 @@ export function UsersPage() {
       const d = res.data;
       setForm({
         name: d.name ?? "", surname: d.surname ?? "", email: d.email ?? "", phone: d.phone ?? "",
-        password: "", phone_country_id: d.phone_country_id?.id ?? "", pkds_id: d.pkds_id ?? "",
+        password: "", password_confirmation: "", phone_country_id: d.phone_country_id?.id ?? "", pkds_id: d.pkds_id ?? "",
       });
       setExistingAvatar(d.avatar);
     } catch {
@@ -192,7 +192,10 @@ export function UsersPage() {
     fd.append("phone", form.phone);
     if (form.phone_country_id) fd.append("phone_country_id", form.phone_country_id);
     if (form.pkds_id) fd.append("pkds_id", form.pkds_id);
-    if (form.password) fd.append("password", form.password);
+    if (form.password) {
+      fd.append("password", form.password);
+      fd.append("password_confirmation", form.password_confirmation);
+    }
     if (avatarFile) fd.append("avatar", avatarFile);
     else if (removeAvatar) fd.append("avatar_remove", "1");
     try {
@@ -422,6 +425,9 @@ export function UsersPage() {
             </FormField>
             <FormField label={editingId ? "Yeni Şifre" : "Şifre"} required={!editingId} error={errors.password?.[0]} hint={editingId ? "Boş bırakılırsa mevcut şifre korunur." : undefined}>
               <TextInput value={form.password} onChange={(v) => setForm((f) => ({ ...f, password: v }))} type="password" error={!!errors.password} />
+            </FormField>
+            <FormField label="Şifre Tekrar" required={!editingId || !!form.password} error={errors.password_confirmation?.[0]}>
+              <TextInput value={form.password_confirmation} onChange={(v) => setForm((f) => ({ ...f, password_confirmation: v }))} type="password" error={!!errors.password_confirmation} />
             </FormField>
             <FormField label="Ülke Kodu" required={!editingId} error={errors.phone_country_id?.[0]}>
               <SelectInput
