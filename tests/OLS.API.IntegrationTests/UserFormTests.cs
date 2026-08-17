@@ -26,15 +26,12 @@ public sealed class UserFormTests
     {
         using var admin = await _factory.CreateAdminClientAsync();
 
-        var countryResponse = await admin.GetAsync("/api/v1/country");
-        countryResponse.EnsureSuccessStatusCode();
-        var countries = (await countryResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        var country = countries.EnumerateArray().First();
-        var countryId = country.GetProperty("id").GetGuid();
+        var countryId = await FirstCountryIdAsync(admin);
 
         var pngBytes = Convert.FromBase64String(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==");
         var email = $"user-form-{Guid.NewGuid():N}@example.test";
+        var phone = $"5{Random.Shared.NextInt64(100_000_000, 999_999_999)}";
 
         using var createForm = new MultipartFormDataContent
         {
@@ -44,6 +41,7 @@ public sealed class UserFormTests
             { new StringContent("Test!2026Pw"), "password" },
             { new StringContent("PDKS-0001"), "pkds_id" },
             { new StringContent(countryId.ToString()), "phone_country_id" },
+            { new StringContent(phone), "phone" },
         };
         var avatarContent = new ByteArrayContent(pngBytes);
         avatarContent.Headers.ContentType = new MediaTypeHeaderValue("image/png");
@@ -66,6 +64,7 @@ public sealed class UserFormTests
             { new StringContent("Form"), "name" },
             { new StringContent("Testi"), "surname" },
             { new StringContent(email), "email" },
+            { new StringContent(phone), "phone" },
             { new StringContent("PDKS-0002"), "pkds_id" },
             { new StringContent("1"), "avatar_remove" },
         };
@@ -127,6 +126,103 @@ public sealed class UserFormTests
         afterUpdate.EnumerateArray().Should().OnlyContain(r => r.GetProperty("update").GetInt32() == 1);
         afterUpdate.EnumerateArray().Should().OnlyContain(r => r.GetProperty("create").GetInt32() == 0);
         afterUpdate.EnumerateArray().Should().OnlyContain(r => r.GetProperty("delete").GetInt32() == 0);
+    }
+
+    /// <summary>
+    /// olsold: UserSave/UserUpdate — <c>phone: required|unique</c> ikisinde de,
+    /// <c>phone_country_id: required</c> ise YALNIZCA UserSave'de (UserUpdate'te yok).
+    /// </summary>
+    [Fact]
+    public async Task CreateUser_WithoutPhoneOrPhoneCountryId_Returns422WithBothFieldErrors()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var email = $"user-nophone-{Guid.NewGuid():N}@example.test";
+
+        using var form = new MultipartFormDataContent
+        {
+            { new StringContent("Form"), "name" },
+            { new StringContent("Testi"), "surname" },
+            { new StringContent(email), "email" },
+            { new StringContent("Test!2026Pw"), "password" },
+        };
+
+        var response = await admin.PostAsync("/api/v1/user", form);
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+
+        var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        errors.GetProperty("phone")[0].GetString().Should().Be("Telefon numarası boş olamaz");
+        errors.GetProperty("phone_country_id")[0].GetString().Should().Be("Ülke Kodu boş olamaz");
+    }
+
+    [Fact]
+    public async Task UpdateUser_WithoutPhoneCountryId_StillSucceeds_ButPhoneStaysRequired()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var email = $"user-update-nocountry-{Guid.NewGuid():N}@example.test";
+        var phone = $"5{Random.Shared.NextInt64(100_000_000, 999_999_999)}";
+
+        using var createForm = new MultipartFormDataContent
+        {
+            { new StringContent("Form"), "name" },
+            { new StringContent("Testi"), "surname" },
+            { new StringContent(email), "email" },
+            { new StringContent("Test!2026Pw"), "password" },
+            { new StringContent(phone), "phone" },
+            { new StringContent((await FirstCountryIdAsync(admin)).ToString()), "phone_country_id" },
+        };
+        var createResponse = await admin.PostAsync("/api/v1/user", createForm);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var userId = (await createResponse.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        // olsold UserUpdate::rules() phone_country_id'yi hiç doğrulamıyor — göndermeden
+        // güncelleme başarılı olmalı. phone yine de zorunlu (kendi değeriyle gönderiliyor).
+        using var updateForm = new MultipartFormDataContent
+        {
+            { new StringContent(userId.ToString()), "id" },
+            { new StringContent("Form"), "name" },
+            { new StringContent("Testi"), "surname" },
+            { new StringContent(email), "email" },
+            { new StringContent(phone), "phone" },
+        };
+        var updateResponse = await admin.PostAsync("/api/v1/user/update", updateForm);
+        updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task CreateUser_WithPhoneAlreadyUsedByAnotherUser_Returns422AndDoesNotCreateSecondUser()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var countryId = await FirstCountryIdAsync(admin);
+        var phone = $"5{Random.Shared.NextInt64(100_000_000, 999_999_999)}";
+
+        async Task<HttpResponseMessage> CreateWithPhoneAsync(string email) => await admin.PostAsync(
+            "/api/v1/user",
+            new MultipartFormDataContent
+            {
+                { new StringContent("Form"), "name" },
+                { new StringContent("Testi"), "surname" },
+                { new StringContent(email), "email" },
+                { new StringContent("Test!2026Pw"), "password" },
+                { new StringContent(phone), "phone" },
+                { new StringContent(countryId.ToString()), "phone_country_id" },
+            });
+
+        var first = await CreateWithPhoneAsync($"user-phone-a-{Guid.NewGuid():N}@example.test");
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var second = await CreateWithPhoneAsync($"user-phone-b-{Guid.NewGuid():N}@example.test");
+        second.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var errors = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
+        errors.GetProperty("phone")[0].GetString().Should().Be("Bu Telefon numarası zaten kullanılıyor");
+    }
+
+    private static async Task<Guid> FirstCountryIdAsync(HttpClient admin)
+    {
+        var response = await admin.GetAsync("/api/v1/country");
+        response.EnsureSuccessStatusCode();
+        var countries = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+        return countries.EnumerateArray().First().GetProperty("id").GetGuid();
     }
 
     private static async Task<JsonElement> GetUserAsync(HttpClient admin, long id)

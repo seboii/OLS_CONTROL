@@ -31,7 +31,10 @@ public sealed class ExpeditionLoadMappingTests
         HttpClient admin, int romorkType)
     {
         var plate = $"34 TST {Guid.NewGuid():N}".Substring(0, 12);
-        var carResponse = await admin.PostAsJsonAsync("/api/v1/car", new { plate_number = plate, romork_type = romorkType });
+        var carPayload = await TestCarHelper.RequiredCarFieldsAsync(admin);
+        carPayload["plate_number"] = plate;
+        carPayload["romork_type"] = romorkType;
+        var carResponse = await admin.PostAsJsonAsync("/api/v1/car", carPayload);
         carResponse.EnsureSuccessStatusCode();
         var carId = (await carResponse.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("data").GetProperty("id").GetInt64();

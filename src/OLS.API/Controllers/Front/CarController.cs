@@ -19,10 +19,12 @@ namespace OLS.API.Controllers.Front;
 ///   GET    /api/v1/car        all     (?search= plakada ILIKE)
 ///   GET    /api/v1/car/{id}   single
 ///
-/// Yetki slug'ı: olsold <c>car_management</c> kullanıyordu ama bu slug
-/// user_permission_pages'te tanımlı DEĞİL — kaynak kodda da "bu alan ekli
-/// degil calısmaz" notu var. Tanımsız slug RoleHelper davranışına uygun
-/// olarak serbest bırakılır; slug eklenirse kontrol kendiliğinden devreye girer.
+/// Yetki slug'ı: olsold <c>car_management</c> kullanıyordu ama kaynak kodda
+/// "bu alan ekli degil calısmaz" notuyla itiraf edildiği üzere bu slug
+/// olsold'un KENDİ <c>user_permission_pages</c>'inde tanımlı değildi (fiilen
+/// herkese açıktı). Bu HEDEF'te düzeltildi: <c>car_management</c> gerçekten
+/// seed ediliyor (bkz. DbSeeder.cs, "Araç Yönetimi"), bu yüzden aşağıdaki
+/// <c>[RequiresPermission]</c> öznitelikleri gerçekten uygulanıyor.
 /// </summary>
 [Authorize]
 [Route("api/v1/car")]
@@ -83,16 +85,13 @@ public sealed class CarController : ApiControllerBase
     public async Task<IActionResult> Save(
         [FromBody] CarRequest request, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.PlateNumber))
-            return BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
-            {
-                ["plate_number"] = [Translator.Get("Bu alan boş bırakılamaz")],
-            }));
+        if (Validate(request) is { } errors)
+            return BadRequest(ApiResponse.ValidationErrors(errors));
 
-        var car = await _cars.CreateAsync(
+        var result = await _cars.CreateAsync(
             await ToModelAsync(request, cancellationToken), cancellationToken);
 
-        return Ok(car, "Kayıt Başarılı");
+        return BuildSaveResponse(result, "Kayıt Başarılı");
     }
 
     [HttpPut]
@@ -107,10 +106,56 @@ public sealed class CarController : ApiControllerBase
                 ["id"] = [Translator.Get("Bu alan boş bırakılamaz")],
             }));
 
-        var car = await _cars.UpdateAsync(
+        if (Validate(request) is { } errors)
+            return BadRequest(ApiResponse.ValidationErrors(errors));
+
+        var result = await _cars.UpdateAsync(
             await ToModelAsync(request, cancellationToken), cancellationToken);
 
-        return car is null ? NotFoundError() : Ok(car, "Güncelleme Başarılı");
+        return BuildSaveResponse(result, "Güncelleme Başarılı");
+    }
+
+    /// <summary>olsold: <c>CarSave</c>/<c>CarUpdate</c> FormRequest kuralları — ikisi de birebir aynı.</summary>
+    private Dictionary<string, string[]>? Validate(CarRequest request)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        if (string.IsNullOrWhiteSpace(request.PlateNumber))
+            errors["plate_number"] = [Translator.Get("Plaka numarası boş olamaz")];
+        if (request.CarType is null)
+            errors["car_type"] = [Translator.Get("Araç tipi boş olamaz")];
+        if (request.RomorkType is null)
+            errors["romork_type"] = [Translator.Get("Romork tipi boş olamaz")];
+        if (request.VehicleOwner is null)
+            errors["vehicle_owner"] = [Translator.Get("Araç sahibi boş olamaz")];
+        if (request.VehicleStatus is null)
+            errors["vehicle_status"] = [Translator.Get("Araç durumu boş olamaz")];
+        if (string.IsNullOrWhiteSpace(request.CustomerId))
+            errors["customer_id"] = [Translator.Get("Firma boş olamaz")];
+        if (request.Km is null)
+            errors["km"] = [Translator.Get("Km boş olamaz")];
+        if (request.Width is null)
+            errors["width"] = [Translator.Get("En boş olamaz")];
+        if (request.Length is null)
+            errors["length"] = [Translator.Get("Boy boş olamaz")];
+        if (request.Height is null)
+            errors["height"] = [Translator.Get("Yükseklik boş olamaz")];
+        if (request.Capacity is null)
+            errors["capacity"] = [Translator.Get("Kapasite hedef boş olamaz")];
+
+        return errors.Count > 0 ? errors : null;
+    }
+
+    /// <summary>olsold: <c>plate_number.unique</c> — "Bu plaka numarası zaten kayıtlı".</summary>
+    private IActionResult BuildSaveResponse(CarSaveResult result, string successKey)
+    {
+        if (result.PlateNumberTaken)
+            return UnprocessableEntity(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
+            {
+                ["plate_number"] = [Translator.Get("Bu plaka numarası zaten kayıtlı")],
+            }));
+
+        return result.Car is null ? NotFoundError() : Ok(result.Car, successKey);
     }
 
     [HttpDelete]

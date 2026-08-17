@@ -16,12 +16,28 @@ public interface ICarService
 {
     Task<object> ListAsync(CarListQuery query, CancellationToken cancellationToken = default);
     Task<CarDto?> SingleAsync(long id, CancellationToken cancellationToken = default);
-    Task<CarDto> CreateAsync(CarWriteModel model, CancellationToken cancellationToken = default);
-    Task<CarDto?> UpdateAsync(CarWriteModel model, CancellationToken cancellationToken = default);
+
+    /// <summary>olsold: <c>plate_number</c> benzersiz olmalı (<c>CarSave</c>).</summary>
+    Task<CarSaveResult> CreateAsync(CarWriteModel model, CancellationToken cancellationToken = default);
+
+    /// <summary>olsold: <c>plate_number</c> benzersiz olmalı, kendisi hariç (<c>CarUpdate</c>).</summary>
+    Task<CarSaveResult> UpdateAsync(CarWriteModel model, CancellationToken cancellationToken = default);
+
     Task DeleteAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
 }
 
 public sealed record CarListQuery(string? Search, int? PerPage, int Page, string Path);
+
+/// <summary>
+/// <c>AccountSaveResult</c> ile aynı desen: <c>PlateNumberTaken=true</c> ise
+/// <c>Car</c> null'dır ve hiçbir şey kaydedilmemiştir.
+/// </summary>
+public sealed record CarSaveResult(CarDto? Car, bool PlateNumberTaken)
+{
+    public static CarSaveResult Ok(CarDto car) => new(car, false);
+    public static CarSaveResult DuplicatePlate() => new(null, true);
+    public static CarSaveResult NotFound() => new(null, false);
+}
 
 public sealed class CarWriteModel
 {
@@ -103,9 +119,12 @@ public sealed class CarService : ICarService
             .Select(Project())
             .FirstOrDefaultAsync(cancellationToken);
 
-    public async Task<CarDto> CreateAsync(
+    public async Task<CarSaveResult> CreateAsync(
         CarWriteModel model, CancellationToken cancellationToken = default)
     {
+        if (await _db.Cars.AnyAsync(c => c.PlateNumber == model.PlateNumber, cancellationToken))
+            return CarSaveResult.DuplicatePlate();
+
         var siberId = _siber.IsConfigured
             ? (await _siber.GenerateAracIdAsync(cancellationToken)).ToString()
             : Guid.NewGuid().ToString();
@@ -136,17 +155,20 @@ public sealed class CarService : ICarService
 
         await SyncToSiberAsync(car, model.CurrentUserSiberCode, isNew: true, cancellationToken);
 
-        return (await SingleAsync(car.Id, cancellationToken))!;
+        return CarSaveResult.Ok((await SingleAsync(car.Id, cancellationToken))!);
     }
 
-    public async Task<CarDto?> UpdateAsync(
+    public async Task<CarSaveResult> UpdateAsync(
         CarWriteModel model, CancellationToken cancellationToken = default)
     {
         var id = model.Id ?? throw new ArgumentException("Id zorunlu", nameof(model));
 
         var car = await _db.Cars.FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
         if (car is null)
-            return null;
+            return CarSaveResult.NotFound();
+
+        if (await _db.Cars.AnyAsync(c => c.PlateNumber == model.PlateNumber && c.Id != id, cancellationToken))
+            return CarSaveResult.DuplicatePlate();
 
         car.PlateNumber = model.PlateNumber;
         car.CarType = model.CarType;
@@ -167,7 +189,7 @@ public sealed class CarService : ICarService
 
         await SyncToSiberAsync(car, model.CurrentUserSiberCode, isNew: false, cancellationToken);
 
-        return await SingleAsync(car.Id, cancellationToken);
+        return CarSaveResult.Ok((await SingleAsync(car.Id, cancellationToken))!);
     }
 
     /// <summary>

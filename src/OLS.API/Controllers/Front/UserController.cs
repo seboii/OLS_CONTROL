@@ -62,7 +62,8 @@ public sealed class UserController : ApiControllerBase
     public async Task<IActionResult> Save(
         [FromForm] UserForm form, CancellationToken cancellationToken)
     {
-        var errors = await ValidateAsync(form, null, requirePassword: true, cancellationToken);
+        var errors = await ValidateAsync(
+            form, null, requirePassword: true, requirePhoneCountryId: true, cancellationToken);
 
         if (errors.Count > 0)
             return UnprocessableEntity(ApiResponse.ValidationErrors(errors));
@@ -81,7 +82,8 @@ public sealed class UserController : ApiControllerBase
     public async Task<IActionResult> Update(
         [FromForm] UserUpdateForm form, CancellationToken cancellationToken)
     {
-        var errors = await ValidateAsync(form, form.Id, requirePassword: false, cancellationToken);
+        var errors = await ValidateAsync(
+            form, form.Id, requirePassword: false, requirePhoneCountryId: false, cancellationToken);
 
         if (form.Id is null or <= 0)
             errors["id"] = [Translator.Get("Zorunlu Alan")];
@@ -117,7 +119,8 @@ public sealed class UserController : ApiControllerBase
     }
 
     private async Task<Dictionary<string, string[]>> ValidateAsync(
-        UserForm form, long? exceptId, bool requirePassword, CancellationToken cancellationToken)
+        UserForm form, long? exceptId, bool requirePassword, bool requirePhoneCountryId,
+        CancellationToken cancellationToken)
     {
         var errors = new Dictionary<string, string[]>();
         var required = Translator.Get("Zorunlu Alan");
@@ -135,6 +138,16 @@ public sealed class UserController : ApiControllerBase
 
         if (requirePassword && string.IsNullOrWhiteSpace(form.Password))
             errors["password"] = [required];
+
+        // olsold: UserSave/UserUpdate — phone: required|unique (ikisinde de).
+        if (string.IsNullOrWhiteSpace(form.Phone))
+            errors["phone"] = [Translator.Get("Telefon numarası boş olamaz")];
+        else if (await _users.PhoneExistsAsync(form.Phone, exceptId, cancellationToken))
+            errors["phone"] = [Translator.Get("Bu Telefon numarası zaten kullanılıyor")];
+
+        // olsold: yalnızca UserSave'de zorunlu — UserUpdate bu alanı hiç doğrulamıyor.
+        if (requirePhoneCountryId && form.PhoneCountryId is null)
+            errors["phone_country_id"] = [Translator.Get("Ülke Kodu boş olamaz")];
 
         return errors;
     }

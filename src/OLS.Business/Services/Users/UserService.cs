@@ -32,6 +32,14 @@ public interface IUserService
         IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
 
     Task<bool> EmailExistsAsync(string email, long? exceptId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// olsold: <c>UserSave</c>/<c>UserUpdate</c>'in <c>unique:users,phone</c> kuralı.
+    /// Kaynak bu kontrolü HAM (normalize edilmemiş) girdiyle yapar; biz normalize edilmiş
+    /// (yalnızca rakam) değerle karşılaştırıyoruz — DB'de zaten normalize hâliyle saklanıyor,
+    /// bu yüzden gerçek yinelenenleri kaynaktan daha güvenilir yakalar.
+    /// </summary>
+    Task<bool> PhoneExistsAsync(string phone, long? exceptId, CancellationToken cancellationToken = default);
 }
 
 public sealed record UserListQuery(
@@ -230,6 +238,16 @@ public sealed class UserService : IUserService
         await _db.Users.AsNoTracking()
             .AnyAsync(u => u.Email == email && u.DeletedAt == null &&
                            (exceptId == null || u.Id != exceptId), cancellationToken);
+
+    public async Task<bool> PhoneExistsAsync(
+        string phone, long? exceptId, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizePhone(phone);
+
+        return normalized is not null && await _db.Users.AsNoTracking()
+            .AnyAsync(u => u.Phone == normalized && u.DeletedAt == null &&
+                           (exceptId == null || u.Id != exceptId), cancellationToken);
+    }
 
     /// <summary>
     /// olsold <c>GeneralHelper::phoneNumber()</c>: rakam dışı her şeyi atar.

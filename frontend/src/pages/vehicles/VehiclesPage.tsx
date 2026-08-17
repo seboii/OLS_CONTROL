@@ -236,34 +236,34 @@ export function VehiclesPage() {
             {editingId && <p className="mt-1.5 text-xs text-gray-500">Kullanımda olan aracın plakası değiştirilemez.</p>}
           </div>
           <div className="col-span-2">
-            <AccountPicker label="Kiralanan Firma" value={customer} onChange={setCustomer} />
+            <AccountPicker label="Kiralanan Firma" value={customer} onChange={setCustomer} required error={errors.customer_id?.[0]} />
           </div>
-          <FormField label="Araç Tipi">
+          <FormField label="Araç Tipi" required error={errors.car_type?.[0]}>
             <SelectInput value={form.car_type} onChange={(v) => setForm((f) => ({ ...f, car_type: v }))} options={[{ value: "", label: "Seçiniz" }, ...carTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
           </FormField>
-          <FormField label="Romork Tipi">
+          <FormField label="Romork Tipi" required error={errors.romork_type?.[0]}>
             <SelectInput value={form.romork_type} onChange={(v) => setForm((f) => ({ ...f, romork_type: v }))} options={[{ value: "", label: "Seçiniz" }, ...romorkTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
           </FormField>
-          <FormField label="Sahiplik Durumu">
+          <FormField label="Sahiplik Durumu" required error={errors.vehicle_owner?.[0]}>
             <SelectInput value={form.vehicle_owner} onChange={(v) => setForm((f) => ({ ...f, vehicle_owner: v }))} options={[{ value: "", label: "Seçiniz" }, ...carOwners.map((t) => ({ value: String(t.id), label: t.name }))]} />
           </FormField>
-          <FormField label="Araç Durumu">
+          <FormField label="Araç Durumu" required error={errors.vehicle_status?.[0]}>
             <SelectInput value={form.vehicle_status} onChange={(v) => setForm((f) => ({ ...f, vehicle_status: v }))} options={[{ value: "", label: "Seçiniz" }, ...carStatuses.map((t) => ({ value: String(t.id), label: t.name }))]} />
           </FormField>
-          <FormField label="Kilometre">
-            <TextInput value={form.km} onChange={(v) => setForm((f) => ({ ...f, km: v }))} type="number" />
+          <FormField label="Kilometre" required error={errors.km?.[0]}>
+            <TextInput value={form.km} onChange={(v) => setForm((f) => ({ ...f, km: v }))} type="number" error={!!errors.km} />
           </FormField>
-          <FormField label="Genişlik (m)">
-            <TextInput value={form.width} onChange={(v) => setForm((f) => ({ ...f, width: v }))} type="number" />
+          <FormField label="Genişlik (m)" required error={errors.width?.[0]}>
+            <TextInput value={form.width} onChange={(v) => setForm((f) => ({ ...f, width: v }))} type="number" error={!!errors.width} />
           </FormField>
-          <FormField label="Uzunluk (m)">
-            <TextInput value={form.length} onChange={(v) => setForm((f) => ({ ...f, length: v }))} type="number" />
+          <FormField label="Uzunluk (m)" required error={errors.length?.[0]}>
+            <TextInput value={form.length} onChange={(v) => setForm((f) => ({ ...f, length: v }))} type="number" error={!!errors.length} />
           </FormField>
-          <FormField label="Yükseklik (m)">
-            <TextInput value={form.height} onChange={(v) => setForm((f) => ({ ...f, height: v }))} type="number" />
+          <FormField label="Yükseklik (m)" required error={errors.height?.[0]}>
+            <TextInput value={form.height} onChange={(v) => setForm((f) => ({ ...f, height: v }))} type="number" error={!!errors.height} />
           </FormField>
-          <FormField label="Taşıma Kapasitesi (kg)">
-            <TextInput value={form.capacity} onChange={(v) => setForm((f) => ({ ...f, capacity: v }))} type="number" />
+          <FormField label="Taşıma Kapasitesi (kg)" required error={errors.capacity?.[0]}>
+            <TextInput value={form.capacity} onChange={(v) => setForm((f) => ({ ...f, capacity: v }))} type="number" error={!!errors.capacity} />
           </FormField>
         </div>
       </Drawer>

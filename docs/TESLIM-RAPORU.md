@@ -314,6 +314,56 @@ taşıyor; "kaynakla aynı" olmak bu durumda yeterli gerekçe değildi. Plan uyg
 yetkisiz (taze sıfır-yetkili kullanıcı, 403) uçtan uca doğrulandı. `PermissionEnforcementTests.cs`'e 2
 yeni test eklendi (mutasyon testiyle doğrulandı) — toplam 95/95 test geçiyor.
 
+**Kritik yön değişikliği #12 (bu güncellemede — backend iş kuralı/doğrulama tamlığı denetimi):**
+Kullanıcı isteğiyle ("orijinal kodtan geride olan yerler var mı") her modülün olsold FormRequest
+kurallarıyla HEDEF'in servis/controller katmanı satır satır karşılaştırıldı. En ciddi bulgular sırasıyla
+düzeltildi:
+- **Teklif — `load_number` atandıktan sonra düzenleme/silme kilidi yoktu:** olsold, bir Teklif Yük'e
+  dönüştükten sonra `load_number` alanının doldurulduğunu ve BİR DAHA değiştirilemeyeceğini varsayıyordu
+  ama HEDEF'te bu kilit hiç portlanmamıştı — dönüştürülmüş bir Teklif hâlâ serbestçe güncellenebiliyor/
+  silinebiliyordu (paket/mali kalem satırları dahil). `LoadWriteService.UpdateAsync/DeleteContentsAsync/
+  DeleteFinancialItemsAsync` ve `LoadService.UpdateTimeOutAsync`'e kilit eklendi (tüm hedef satırlar
+  SİLMEDEN ÖNCE toplu kontrol edilir — olsold'un "sil, sonra hata al, yarısı commit'lenmiş kalsın"
+  hatasını tekrarlamadan). 3 yeni test (`LoadTests.cs`), biri mutasyon testiyle doğrulandı.
+- **Araç — `plate_number` benzersizliği hiç uygulanmıyordu, 9 alan da zorunlu değildi:** olsold'un
+  `CarSave`/`CarUpdate` FormRequest'leri `plate_number` (zorunlu+benzersiz) yanında `car_type/
+  romork_type/vehicle_owner/vehicle_status/customer_id/km/width/length/height/capacity`'yi de zorunlu
+  kılıyordu; HEDEF'te SADECE `plate_number` boş-kontrolü vardı, geri kalan 9 alan tamamen isteğe bağlı
+  kabul ediliyordu ve iki araç aynı plakayla kaydedilebiliyordu. `CarService`'e `CarSaveResult` deseni
+  (Account/Load'daki desenle birebir) eklendi, `CarController.Validate()` 10 alanı da kaynağın Türkçe
+  mesajlarıyla kontrol ediyor. **Not:** olsold'un `cars` tablo migration'ında `plate_number` için DB
+  seviyesinde unique KISITI YOK — benzersizlik sadece FormRequest katmanında; HEDEF bunu birebir taşıdı
+  (DB index eklenmedi, yalnızca servis katmanı kontrolü — gereksiz migration/veri sıfırlama döngüsünden
+  kaçınıldı). Frontend (`VehiclesPage.tsx`) de aynı anda düzeltildi: 9 alanın hiçbirinde `required`
+  işareti ya da hata gösterimi yoktu — backend artık reddettiği için bu, kullanıcıya SEBEPSİZ başarısız
+  bir "Kaydet" gibi görünürdü. 4 yeni test (`CarTests.cs`), biri mutasyon testiyle doğrulandı.
+- **Kullanıcılar — `phone` hiç zorunlu/benzersiz değildi, `phone_country_id` oluşturmada zorunlu
+  değildi:** olsold `UserSave`: `phone: required|unique`, `phone_country_id: required`; `UserUpdate`:
+  `phone: required|unique` (kendisi hariç) ama `phone_country_id` hiç doğrulanmıyor — HEDEF hiçbirini
+  uygulamıyordu. `UserService.PhoneExistsAsync` eklendi (normalize edilmiş — yalnızca rakam — değerle
+  karşılaştırıyor; olsold'un HAM değerle karşılaştırıp normalize edilmiş değeri kaydetmesinden doğan
+  gerçek-yinelenen-kaçırma hatasını TEKRARLAMIYOR, bilinçli bir iyileştirme). `UserController.
+  ValidateAsync`'e `requirePhoneCountryId` parametresi eklenerek asimetri (yalnızca oluşturmada zorunlu)
+  birebir taşındı. Aynı sebeple frontend (`UsersPage.tsx`) de düzeltildi: Ülke Kodu/Telefon alanlarında
+  ne `required` ne hata gösterimi vardı. Bu değişiklik, `phone`/`phone_country_id` göndermeyen 2 paylaşılan
+  test yardımcısını (`TestUserHelper.CreateUserAsync`, 6 farklı test dosyasından çağrılıyor) ve 2 doğrudan
+  Araç-oluşturma çağrısını (`ExpeditionLoadMappingTests.cs`, `PermissionEnforcementTests.cs`) kırdı — hepsi
+  gerçek (seed edilmiş) lookup id'leriyle dolduracak şekilde güncellendi (`TestCarHelper.cs` yeni eklendi).
+  3 yeni test (`UserFormTests.cs`), biri mutasyon testiyle doğrulandı.
+- Her iki düzeltme de önce yerel `dotnet test`'te (in-process `WebApplicationFactory`) yeşil çıktı, SONRA
+  canlı Docker'da (`docker compose build api && docker compose up -d api`) yeniden test edildi — ilk canlı
+  denemede Kullanıcılar formu telefon olmadan BAŞARIYLA kaydetti, çünkü Docker imajı hâlâ ESKİ derlemeyi
+  çalıştırıyordu (`dotnet test` kendi in-process host'unu kullandığı için bunu yakalayamaz). İmaj yeniden
+  derlenip yeniden başlatıldıktan sonra (Postgres named volume'e dokunulmadan, veri kaybı yok) hem Araç hem
+  Kullanıcılar formunda tüm 10/2 zorunlu alan hatası tarayıcıda uçtan uca doğrulandı.
+- **Ayrıca bulunan, henüz düzeltilmemiş kalan bulgular** (görev listesinde takip ediliyor): Teklif'in
+  `load_content.*` satır bazlı zorunlu alanları + `status_type_id==5` koşullu mali kalem bloğu; Sefer'in
+  tarih-sırası kontrolü + `expedition_status_id==8` koşullu zorunlu alanları; Müşteri'nin `country_id`/
+  `discount` zorunluluğu + güncellemede `name` zorunluluğu; Kullanıcılar'ın `password_confirmation` eşleşme
+  kontrolü (hem backend hem frontend'de alan hiç yok — bilinçli olarak ayrı bir işe bırakıldı, çünkü tek
+  başına backend eklemek mevcut formu kırar). Bunların hiçbiri veri kaybına yol açan bir güvenlik açığı
+  değil — sadece kaynağın reddettiği bazı geçersiz girdilerin HEDEF'te sessizce kabul edilmesi.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
@@ -330,7 +380,7 @@ yeni test eklendi (mutasyon testiyle doğrulandı) — toplam 95/95 test geçiyo
 - **İki kritik hata canlı ortamda bulunup düzeltildi ve regresyon testiyle kilitlendi** — ayrıntı
   [docs/TEST-RAPORU.md](TEST-RAPORU.md) §1: `/api/v1/role` zarf uyuşmazlığı (sidebar tamamen boş
   görünüyordu), `super_admin` yetki sayfasının seed edilmemesi (yeni cariler kimseye görünmüyordu).
-- **95 otomatik test, hepsi geçiyor** (66 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
+- **105 otomatik test, hepsi geçiyor** (76 entegrasyon + 29 birim) — gerçek Postgres'e karşı, gerçek HTTP
   pipeline'ı üzerinden, hiçbir katman mock'lanmadan. Test geliştirme sürecinde 3 ayrı gerçek ortam/
   test-edilebilirlik sorunu daha bulunup düzeltildi (bkz. TEST-RAPORU.md §3) — en önemlisi, testlerin
   başlangıçta sessizce GERÇEK dev veritabanına yazdığının fark edilip kalıcı olarak düzeltilmesi.
@@ -362,7 +412,7 @@ yeni test eklendi (mutasyon testiyle doğrulandı) — toplam 95/95 test geçiyo
 
 ```
 dotnet build                                    → 0 hata, 2 pre-existing nullability uyarısı
-dotnet test                                     → 95/95 geçti (29 birim + 66 entegrasyon), ~1.3 dk
+dotnet test                                     → 105/105 geçti (29 birim + 76 entegrasyon), ~1.3 dk
 docker compose up -d --build                    → 4 servis (postgres/siber-mock/api/frontend) sağlıklı
 curl -X POST .../api/v1/login (admin)           → 200, gerçek JWT
 GET /api/v1/account (Docker API, canlı)         → 200, gerçek cari listesi
@@ -373,7 +423,7 @@ Tüm komutların tam çıktıları ve context'i: [docs/TEST-RAPORU.md](TEST-RAPO
 
 ## 6. Test durumu (özet)
 
-95/95 otomatik test geçiyor (29 OLS.Business.Tests + 66 OLS.API.IntegrationTests). Kapsanan: auth
+105/105 otomatik test geçiyor (29 OLS.Business.Tests + 76 OLS.API.IntegrationTests). Kapsanan: auth
 (giriş/çıkış/jeton iptali), yetki zorlaması (401/403 sınırları, bilinmeyen slug davranışı), iki kritik
 regresyon (rol zarfı, super_admin), para ayrıştırma, şifre hash'leme, sayfalama sözleşmesi, Dashboard
 agregelerinin gerçek veriyle birebir eşleştiği (uydurma sayı olmadığı), Teklif'in TAM alan kapsamıyla
@@ -531,14 +581,17 @@ kazandı; Sefer ve Fatura henüz kazanmadı:
   (tekilden çoklu chip-toggle'a düzeltildi — EN CİDDİ bulgu, gerçek veri kaybı), Görevli + Faturalar
   sekmeleri eklendi, avatar yükleme eklendi, `tax_office` serbest metinden gerçek lookup'a çevrildi.
   Otomatik test: `AccountFormTests.cs` (3 test).
-- **Araç** (`VehiclesPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #8): "Kiralanan Firma" alanı
-  eklendi, `AccountOption`'a `siber_id` eklenerek cari-Siber id eşlemesi doğru çözülüyor. Otomatik
-  test: `CarTests.cs` (1 test).
-- **Kullanıcılar** (`UsersPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #9): avatar/PDKS/ülke kodu
+- **Araç** (`VehiclesPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #8, #12): "Kiralanan Firma" alanı
+  eklendi, `AccountOption`'a `siber_id` eklenerek cari-Siber id eşlemesi doğru çözülüyor. Kritik yön
+  değişikliği #12'de ayrıca: `plate_number` benzersizliği + 9 eksik zorunlu alan (`car_type/romork_type/
+  vehicle_owner/vehicle_status/customer_id/km/width/length/height/capacity`) backend'e VE forma (`required`
+  + hata gösterimi) eklendi. Otomatik test: `CarTests.cs` (5 test).
+- **Kullanıcılar** (`UsersPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #9, #12): avatar/PDKS/ülke kodu
   alanları + "Tümünü Seç" toplu yetki güncellemesi eklendi; ayrıca kaynakta var olup portta hiç
   bulunmayan "Hedefler" sekmesi (aylık satış hedefi CRUD'u, `api/v1/user_goal`) — kullanıcı onayıyla —
-  eklendi (bkz. §1, kapsam çelişkisinin çözümü). Otomatik test: `UserFormTests.cs` (2 test) +
-  `UserGoalTests.cs` (6 test).
+  eklendi (bkz. §1, kapsam çelişkisinin çözümü). Kritik yön değişikliği #12'de ayrıca: `phone` zorunlu+
+  benzersiz, `phone_country_id` yalnızca oluşturmada zorunlu — backend'e VE forma eklendi. Otomatik test:
+  `UserFormTests.cs` (5 test) + `UserGoalTests.cs` (6 test).
 - **Destek Talebi** (`SupportPage.tsx`) — TAMAMLANDI (Kritik yön değişikliği #10): liste kolonları ve
   "Durum" rozeti metni kaynakla birebir eşleştirildi (önceden kaynakta hiç geçmeyen "Çözüldü"/"Açık"
   kullanıyordu), detay panelindeki eksik gönderim-tarihi alanı eklendi, kaynakta görsel-ama-işlevsiz

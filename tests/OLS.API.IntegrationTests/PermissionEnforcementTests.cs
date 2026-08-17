@@ -45,7 +45,9 @@ public sealed class PermissionEnforcementTests
         using var client = _factory.CreateAuthorizedClient(token);
 
         var plate = $"34 GR {Random.Shared.Next(1000, 9999)}";
-        var createResponse = await client.PostAsJsonAsync("/api/v1/car", new { plate_number = plate });
+        var carPayload = await TestCarHelper.RequiredCarFieldsAsync(admin);
+        carPayload["plate_number"] = plate;
+        var createResponse = await client.PostAsJsonAsync("/api/v1/car", carPayload);
         createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // per_page verilmezse CarService de (AccountService gibi) ToPagedOrListAsync

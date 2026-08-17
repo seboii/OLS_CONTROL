@@ -16,12 +16,16 @@ public static class TestUserHelper
     public static async Task<long> CreateUserAsync(
         this HttpClient adminClient, string email, string password = "Test!2026Pw")
     {
+        var countryId = await FirstCountryIdAsync(adminClient);
+
         using var form = new MultipartFormDataContent
         {
             { new StringContent("Test"), "name" },
             { new StringContent("Kullanici"), "surname" },
             { new StringContent(email), "email" },
             { new StringContent(password), "password" },
+            { new StringContent($"5{Random.Shared.NextInt64(100_000_000, 999_999_999)}"), "phone" },
+            { new StringContent(countryId), "phone_country_id" },
         };
 
         var response = await adminClient.PostAsync("/api/v1/user", form);
@@ -29,6 +33,17 @@ public static class TestUserHelper
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         return body.GetProperty("data").GetProperty("id").GetInt64();
+    }
+
+    /// <summary>olsold: UserSave'de <c>phone_country_id</c> zorunlu — herhangi bir ülke yeter.</summary>
+    private static async Task<string> FirstCountryIdAsync(HttpClient adminClient)
+    {
+        var response = await adminClient.GetAsync("/api/v1/country");
+        response.EnsureSuccessStatusCode();
+
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("data").EnumerateArray().First()
+            .GetProperty("id").GetGuid().ToString();
     }
 
     public static async Task<JsonElement> GetPermissionDataAsync(this HttpClient client, long userId)

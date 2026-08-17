@@ -423,15 +423,15 @@ export function UsersPage() {
             <FormField label={editingId ? "Yeni Şifre" : "Şifre"} required={!editingId} error={errors.password?.[0]} hint={editingId ? "Boş bırakılırsa mevcut şifre korunur." : undefined}>
               <TextInput value={form.password} onChange={(v) => setForm((f) => ({ ...f, password: v }))} type="password" error={!!errors.password} />
             </FormField>
-            <FormField label="Ülke Kodu">
+            <FormField label="Ülke Kodu" required={!editingId} error={errors.phone_country_id?.[0]}>
               <SelectInput
                 value={form.phone_country_id}
                 onChange={(v) => setForm((f) => ({ ...f, phone_country_id: v }))}
                 options={[{ value: "", label: "Seçiniz" }, ...countries.map((c) => ({ value: String(c.id), label: c.name }))]}
               />
             </FormField>
-            <FormField label="Telefon">
-              <TextInput value={form.phone} onChange={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="5XX XXX XX XX" />
+            <FormField label="Telefon" required error={errors.phone?.[0]}>
+              <TextInput value={form.phone} onChange={(v) => setForm((f) => ({ ...f, phone: v }))} placeholder="5XX XXX XX XX" error={!!errors.phone} />
             </FormField>
             <FormField label="PDKS Numarası">
               <TextInput value={form.pkds_id} onChange={(v) => setForm((f) => ({ ...f, pkds_id: v }))} />
