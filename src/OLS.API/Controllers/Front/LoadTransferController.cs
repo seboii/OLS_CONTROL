@@ -373,6 +373,9 @@ public sealed class ExpeditionController : ApiControllerBase
     public async Task<IActionResult> Save(
         [FromBody] ExpeditionRequest request, CancellationToken cancellationToken)
     {
+        if (Validate(request, isUpdate: false) is { } errors)
+            return BadRequest(ApiResponse.ValidationErrors(errors));
+
         var result = await _write.CreateAsync(
             request.ToModel(_currentUser.Id), cancellationToken);
 
@@ -391,6 +394,9 @@ public sealed class ExpeditionController : ApiControllerBase
         if (request.Id is null)
             return BadRequestError("Form hataydı! Lütfen geliştiricinizle iletişime geçin.");
 
+        if (Validate(request, isUpdate: true) is { } errors)
+            return BadRequest(ApiResponse.ValidationErrors(errors));
+
         var result = await _write.UpdateAsync(
             request.ToModel(_currentUser.Id), cancellationToken);
 
@@ -399,6 +405,54 @@ public sealed class ExpeditionController : ApiControllerBase
 
         var expedition = await _expeditions.SingleAsync(result.Id!.Value, cancellationToken);
         return Ok(expedition, "Güncelleme Başarılı");
+    }
+
+    /// <summary>olsold: <c>expeditionUpdate</c>'te <c>expedition_status_id == 8</c> ise devreye giren blok.</summary>
+    private const int RequiresFullDetailsStatusId = 8;
+
+    /// <summary>
+    /// olsold: <c>expeditionSave</c>/<c>expeditionUpdate</c> FormRequest kuralları. Temel alanlar
+    /// (romork/tip/departman) ikisinde de aynı; <c>expedition_status_id</c> ve durum=8 koşullu bloğu
+    /// (tarihler + 3 şehir) yalnızca Update'te var. Tarih sırası kontrolü (<c>after_or_equal</c>)
+    /// durumdan bağımsız — ikisi de doluysa her zaman uygulanır.
+    /// </summary>
+    private Dictionary<string, string[]>? Validate(ExpeditionRequest request, bool isUpdate)
+    {
+        var errors = new Dictionary<string, string[]>();
+
+        if (request.RomorkId is null) errors["romork_id"] = [Translator.Get("Romork Zorunludur")];
+        if ((request.ExpeditionTypeId ?? request.ExpeditionType) is null)
+            errors["expedition_type"] = [Translator.Get("Sefer Tipi Zorunludur")];
+        if (request.WorkType is null) errors["work_type"] = [Translator.Get("Çalışma Tipi Zorunludur")];
+        if (request.DepartmentId is null) errors["department_id"] = [Translator.Get("Departman Zorunludur")];
+
+        if (isUpdate)
+        {
+            if (request.ExpeditionStatusId is null)
+                errors["expedition_status_id"] = [Translator.Get("Sefer Durumu Zorunludur")];
+
+            if (request.ExpeditionStatusId == RequiresFullDetailsStatusId)
+            {
+                if (request.CarExitDate is null) errors["car_exit_date"] = [Translator.Get("Araç Çıkış Tarihi Zorunludur")];
+                if (request.ReleaseDate is null) errors["release_date"] = [Translator.Get("Başlangıç Tarihi Zorunludur")];
+                if (request.ReturnDate is null) errors["return_date"] = [Translator.Get("Bitiş Tarihi Zorunludur")];
+                if (request.LoadingDate is null) errors["loading_date"] = [Translator.Get("Yükleme Tarihi Zorunludur")];
+                if (request.StartCityId is null) errors["start_city_id"] = [Translator.Get("Başlangıç Şehri Zorunludur")];
+                if (request.LoadCityId is null) errors["load_city_id"] = [Translator.Get("Yükleme Şehri Zorunludur")];
+                if (request.EndCityId is null) errors["end_city_id"] = [Translator.Get("Bitiş Şehri Zorunludur")];
+            }
+        }
+
+        // olsold: return_date/loading_date >= release_date — ikisi de doluysa, durumdan bağımsız kontrol edilir.
+        if (request.ReleaseDate is { } release)
+        {
+            if (request.ReturnDate is { } returnDate && returnDate < release && !errors.ContainsKey("return_date"))
+                errors["return_date"] = [Translator.Get("Bitiş Tarihi Başlangıç tarihinden küçük olamaz")];
+            if (request.LoadingDate is { } loadingDate && loadingDate < release && !errors.ContainsKey("loading_date"))
+                errors["loading_date"] = [Translator.Get("Yükleme Tarihi Başlangıç tarihinden küçük olamaz")];
+        }
+
+        return errors.Count > 0 ? errors : null;
     }
 
     [HttpDelete]

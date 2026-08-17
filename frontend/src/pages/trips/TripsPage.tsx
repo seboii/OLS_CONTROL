@@ -35,6 +35,7 @@ interface ExpeditionDetail extends ExpeditionItem {
   loading_date: string | null;
   return_date: string | null;
   car_exit_date: string | null;
+  load_city_id: NamedRef | null;
 }
 
 interface MovementUserDetail {
@@ -124,6 +125,7 @@ export function TripsPage() {
   const { options: expeditionTypes } = useLookupOptions("/api/v1/expedition_type");
   const { options: expeditionStatuses } = useLookupOptions("/api/v1/expedition_status");
   const { options: destinations } = useLookupOptions("/api/v1/destination");
+  const { options: cities } = useLookupOptions("/api/v1/city");
 
   function opts(list: { id: string | number; name: string }[]) {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
@@ -201,7 +203,8 @@ export function TripsPage() {
   const [detailErrors, setDetailErrors] = useState<Record<string, string[]>>({});
   const [detailForm, setDetailForm] = useState({
     romork_id: "", work_type: "", department_id: "", expedition_type: "", status_id: "",
-    release_date: "", entry_date: "", loading_date: "", return_date: "",
+    release_date: "", entry_date: "", loading_date: "", return_date: "", car_exit_date: "",
+    start_city_id: "", load_city_id: "", end_city_id: "",
   });
 
   const [mappings, setMappings] = useState<ExpeditionMapping[]>([]);
@@ -241,6 +244,10 @@ export function TripsPage() {
         entry_date: "",
         loading_date: d.loading_date ?? "",
         return_date: d.return_date ?? "",
+        car_exit_date: d.car_exit_date ?? "",
+        start_city_id: d.start_city_id ? String(d.start_city_id.id) : "",
+        load_city_id: d.load_city_id ? String(d.load_city_id.id) : "",
+        end_city_id: d.end_city_id ? String(d.end_city_id.id) : "",
       });
       loadMappings(id);
       fetchMovements(id);
@@ -286,6 +293,10 @@ export function TripsPage() {
         release_date: detailForm.release_date || null,
         loading_date: detailForm.loading_date || null,
         return_date: detailForm.return_date || null,
+        car_exit_date: detailForm.car_exit_date || null,
+        start_city_id: detailForm.start_city_id || null,
+        load_city_id: detailForm.load_city_id || null,
+        end_city_id: detailForm.end_city_id || null,
       });
       addToast("Sefer güncellendi");
       load();
@@ -432,26 +443,26 @@ export function TripsPage() {
           <FormField label="Araç (Plaka)" required error={errors.romork_id?.[0]}>
             <TextInput value={form.romork_id} onChange={(v) => setForm((f) => ({ ...f, romork_id: v }))} placeholder="Araç ID" error={!!errors.romork_id} />
           </FormField>
-          <FormField label="İş Tipi" required>
+          <FormField label="İş Tipi" required error={errors.work_type?.[0]}>
             <SelectInput value={form.work_type} onChange={(v) => setForm((f) => ({ ...f, work_type: v }))} options={opts(workTypes)} />
           </FormField>
-          <FormField label="Departman" required>
+          <FormField label="Departman" required error={errors.department_id?.[0]}>
             <SelectInput value={form.department_id} onChange={(v) => setForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
           </FormField>
           <FormField label="Sefer Tipi" required error={errors.expedition_type?.[0]}>
             <SelectInput value={form.expedition_type} onChange={(v) => setForm((f) => ({ ...f, expedition_type: v }))} options={opts(expeditionTypes)} />
           </FormField>
-          <FormField label="Çıkış Tarihi">
-            <TextInput value={form.release_date} onChange={(v) => setForm((f) => ({ ...f, release_date: v }))} type="date" />
+          <FormField label="Çıkış Tarihi" error={errors.release_date?.[0]}>
+            <TextInput value={form.release_date} onChange={(v) => setForm((f) => ({ ...f, release_date: v }))} type="date" error={!!errors.release_date} />
           </FormField>
           <FormField label="Kayıt Tarihi">
             <TextInput value={form.entry_date} onChange={(v) => setForm((f) => ({ ...f, entry_date: v }))} type="date" />
           </FormField>
-          <FormField label="Yükleme Tarihi">
-            <TextInput value={form.loading_date} onChange={(v) => setForm((f) => ({ ...f, loading_date: v }))} type="date" />
+          <FormField label="Yükleme Tarihi" error={errors.loading_date?.[0]}>
+            <TextInput value={form.loading_date} onChange={(v) => setForm((f) => ({ ...f, loading_date: v }))} type="date" error={!!errors.loading_date} />
           </FormField>
-          <FormField label="Dönüş Tarihi">
-            <TextInput value={form.return_date} onChange={(v) => setForm((f) => ({ ...f, return_date: v }))} type="date" />
+          <FormField label="Dönüş Tarihi" error={errors.return_date?.[0]}>
+            <TextInput value={form.return_date} onChange={(v) => setForm((f) => ({ ...f, return_date: v }))} type="date" error={!!errors.return_date} />
           </FormField>
         </div>
       </Drawer>
@@ -485,23 +496,35 @@ export function TripsPage() {
                   <FormField label="Durum" required error={detailErrors.expedition_status_id?.[0]}>
                     <SelectInput value={detailForm.status_id} onChange={(v) => setDetailForm((f) => ({ ...f, status_id: v }))} options={opts(expeditionStatuses)} />
                   </FormField>
-                  <FormField label="İş Tipi" required>
+                  <FormField label="İş Tipi" required error={detailErrors.work_type?.[0]}>
                     <SelectInput value={detailForm.work_type} onChange={(v) => setDetailForm((f) => ({ ...f, work_type: v }))} options={opts(workTypes)} />
                   </FormField>
-                  <FormField label="Departman" required>
+                  <FormField label="Departman" required error={detailErrors.department_id?.[0]}>
                     <SelectInput value={detailForm.department_id} onChange={(v) => setDetailForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
                   </FormField>
-                  <FormField label="Sefer Tipi" required>
+                  <FormField label="Sefer Tipi" required error={detailErrors.expedition_type?.[0]}>
                     <SelectInput value={detailForm.expedition_type} onChange={(v) => setDetailForm((f) => ({ ...f, expedition_type: v }))} options={opts(expeditionTypes)} />
                   </FormField>
-                  <FormField label="Çıkış Tarihi">
-                    <TextInput value={detailForm.release_date} onChange={(v) => setDetailForm((f) => ({ ...f, release_date: v }))} type="date" />
+                  <FormField label="Araç Çıkış Tarihi" error={detailErrors.car_exit_date?.[0]} hint="Sefer durumu 8 iken zorunlu.">
+                    <TextInput value={detailForm.car_exit_date} onChange={(v) => setDetailForm((f) => ({ ...f, car_exit_date: v }))} type="date" error={!!detailErrors.car_exit_date} />
                   </FormField>
-                  <FormField label="Yükleme Tarihi">
-                    <TextInput value={detailForm.loading_date} onChange={(v) => setDetailForm((f) => ({ ...f, loading_date: v }))} type="date" />
+                  <FormField label="Çıkış Tarihi" error={detailErrors.release_date?.[0]} hint="Sefer durumu 8 iken zorunlu.">
+                    <TextInput value={detailForm.release_date} onChange={(v) => setDetailForm((f) => ({ ...f, release_date: v }))} type="date" error={!!detailErrors.release_date} />
                   </FormField>
-                  <FormField label="Dönüş Tarihi">
-                    <TextInput value={detailForm.return_date} onChange={(v) => setDetailForm((f) => ({ ...f, return_date: v }))} type="date" />
+                  <FormField label="Yükleme Tarihi" error={detailErrors.loading_date?.[0]} hint="Sefer durumu 8 iken zorunlu.">
+                    <TextInput value={detailForm.loading_date} onChange={(v) => setDetailForm((f) => ({ ...f, loading_date: v }))} type="date" error={!!detailErrors.loading_date} />
+                  </FormField>
+                  <FormField label="Dönüş Tarihi" error={detailErrors.return_date?.[0]} hint="Sefer durumu 8 iken zorunlu.">
+                    <TextInput value={detailForm.return_date} onChange={(v) => setDetailForm((f) => ({ ...f, return_date: v }))} type="date" error={!!detailErrors.return_date} />
+                  </FormField>
+                  <FormField label="Başlangıç Şehri" error={detailErrors.start_city_id?.[0]} hint="Sefer durumu 8 iken zorunlu.">
+                    <SelectInput value={detailForm.start_city_id} onChange={(v) => setDetailForm((f) => ({ ...f, start_city_id: v }))} options={opts(cities)} />
+                  </FormField>
+                  <FormField label="Yükleme Şehri" error={detailErrors.load_city_id?.[0]} hint="Sefer durumu 8 iken zorunlu.">
+                    <SelectInput value={detailForm.load_city_id} onChange={(v) => setDetailForm((f) => ({ ...f, load_city_id: v }))} options={opts(cities)} />
+                  </FormField>
+                  <FormField label="Bitiş Şehri" error={detailErrors.end_city_id?.[0]} hint="Sefer durumu 8 iken zorunlu.">
+                    <SelectInput value={detailForm.end_city_id} onChange={(v) => setDetailForm((f) => ({ ...f, end_city_id: v }))} options={opts(cities)} />
                   </FormField>
                 </div>
               )}
