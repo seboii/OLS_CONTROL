@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
-import { Badge, Btn, FormField, SelectInput, Tabs, TextInput, TextareaInput } from "@/components/ui/primitives";
+import { Btn, FormField, SelectInput, Tabs, TextInput, TextareaInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 
@@ -127,15 +127,24 @@ const EMPTY_FINANCIAL_ROW: FinancialItemRow = {
   buysell: "1", currency: "", net_price: "", total_price: "", quantity: "1",
 };
 
-function useStatusTypeMap() {
-  const { options } = useLookupOptions("/api/v1/status_type");
-  const map: Record<number, string> = {};
-  options.forEach((o) => (map[Number(o.id)] = o.name));
-  return map;
-}
-
 const PER_PAGE = 8;
 const TABS = ["Genel Bilgiler", "Taraflar", "Güzergah", "Görevliler", "Mali Kalemler", "Dosya Arşivi", "E-Posta Ayarları"];
+// olsold: Offer.vue TabList — "Talep"/"Olumlu"/"Olumsuz"/"Sipariş"/"Düzeltme Talebi"/"Zaman
+// Aşımı", bu sırayla. Kaynak status_type_id'yi SABİT (4/5/1/2/3) kullanıyor; burada DATA-002
+// düzeltmesi (bkz. StatusTypeCodes) nedeniyle ham id'ye güvenilmiyor, seed'in verdiği kararlı
+// isimle eşleştiriliyor (Invoice'ın "Onay Bekliyor" sekmesiyle aynı desen). "Talep" sekmesi
+// altta yatan durumun kendi adı "Teklif" olsa da (kaynakta da böyle — "Teklifler" sayfasında
+// "Teklif" sekmesi demek yerine "Talep" deniyor) statusName="Teklif" ile eşleşiyor. "Zaman
+// Aşımı" statusName=null'dır — status_type_id değil, backend'in ayrı `timeout=1` parametresiyle
+// filtrelenir (LoadService.ListAsync: durum 2/3/4/5 + load_number boş + 1 haftadır güncellenmemiş).
+const STATUS_TABS: { label: string; statusName: string | null }[] = [
+  { label: "Talep", statusName: "Teklif" },
+  { label: "Olumlu", statusName: "Olumlu" },
+  { label: "Olumsuz", statusName: "Olumsuz" },
+  { label: "Sipariş", statusName: "Sipariş" },
+  { label: "Düzeltme Talebi", statusName: "Düzeltme Talebi" },
+  { label: "Zaman Aşımı", statusName: null },
+];
 const WAY_OF_WORKING_OPTIONS = [
   { value: "0", label: "Spot" },
   { value: "1", label: "Yıllık" },
@@ -234,11 +243,11 @@ export function QuotesPage() {
   const canCreate = can("load_management", "create");
   const canUpdate = can("load_management", "update");
   const canDelete = can("load_management", "delete");
-  const statusMap = useStatusTypeMap();
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
   const [page, setPage] = useState(1);
+  const [listTab, setListTab] = useState(STATUS_TABS[0].label);
   const [rows, setRows] = useState<LoadItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -298,10 +307,22 @@ export function QuotesPage() {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
   }
 
+  const activeStatusTab = STATUS_TABS.find((t) => t.label === listTab) ?? STATUS_TABS[0];
+  const activeStatusTypeId = activeStatusTab.statusName
+    ? statusTypes.find((s) => s.name === activeStatusTab.statusName)?.id
+    : undefined;
+  const isTimeoutTab = activeStatusTab.statusName === null;
+
   function load() {
     setLoading(true);
     api
-      .get<DataMessage<Paginated<LoadItem>>>("/api/v1/load", { search: debouncedSearch || undefined, per_page: PER_PAGE, page })
+      .get<DataMessage<Paginated<LoadItem>>>("/api/v1/load", {
+        search: debouncedSearch || undefined,
+        status_type_id: isTimeoutTab ? undefined : activeStatusTypeId,
+        timeout: isTimeoutTab ? 1 : undefined,
+        per_page: PER_PAGE,
+        page,
+      })
       .then((res) => {
         setRows(res.data.data);
         setTotal(res.data.total);
@@ -311,9 +332,12 @@ export function QuotesPage() {
   }
 
   useEffect(() => {
+    // Zaman Aşımı dışındaki sekmeler ilgili status_type kaydı yüklenene kadar
+    // beklemeli — aksi hâlde ilk render'da filtresiz (tüm durumlar) bir istek gider.
+    if (!isTimeoutTab && statusTypes.length === 0) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page]);
+  }, [debouncedSearch, page, listTab, statusTypes.length]);
 
   function resetForm() {
     setForm({
@@ -599,7 +623,6 @@ export function QuotesPage() {
     { key: "content_count", header: "İçerik", render: (r) => <span className="font-mono text-xs">{r.load_content_count} kalem</span> },
     { key: "charge_person", header: "Görevli", render: (r) => <ChargePersonsCell people={r.load_charge_person} /> },
     { key: "offer_date", header: "Tarih", render: (r) => <span className="font-mono text-xs text-gray-500">{r.offer_date ? new Date(r.offer_date).toLocaleDateString("tr-TR") : "—"}</span> },
-    { key: "status", header: "Durum", render: (r) => (r.status_type_id != null && statusMap[r.status_type_id] ? <Badge label={statusMap[r.status_type_id]} /> : "—") },
   ];
 
   return (
@@ -611,6 +634,12 @@ export function QuotesPage() {
         searchPlaceholder="Teklif no, müşteri..."
         action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Teklif</Btn> : undefined}
       >
+        <Tabs
+          tabs={STATUS_TABS.map((t) => t.label)}
+          active={listTab}
+          onChange={(t) => { setListTab(t); setPage(1); }}
+          className="px-6 bg-white"
+        />
         <div className="bg-white">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={FileText} title="Teklif bulunamadı" desc="Arama kriterlerine uygun teklif bulunamadı." />

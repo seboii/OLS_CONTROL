@@ -586,8 +586,40 @@ test teklifi + 2 görevli — Siber'e bağlı olmayan sade bir INSERT, Teklif fo
 kapsamı dışında bir efor gerektirirdi) uçtan uca doğrulandı: Müşteri sütununda "Türkiye" alt satırı,
 "2 Görevli" düğmesi, popup'ta doğru ad-soyad/görev eşleşmesi, satır tıklamasının (popup düğmesindeki
 `stopPropagation` sayesinde) hâlâ düzenleme çekmecesini açtığı. `dotnet test` tam takım yeniden
-çalıştırıldı (bu görev backend'e dokunduğundan, önceki saf-frontend görevlerin aksine) — sonuç: bkz.
-altındaki test bölümü.
+çalıştırıldı (bu görev backend'e dokunduğundan, önceki saf-frontend görevlerin aksine) — **118/118
+geçti** (29 birim + 89 entegrasyon), mevcut hiçbir test bu değişiklikten etkilenmedi.
+
+**Kritik yön değişikliği #23 (bu güncellemede — Teklif, 6 durum-sekmeli liste yapısına geçiş):**
+`Offer.vue` incelendi: liste sayfası TEK bir tablo değil, `Tabs`/`TabList` içinde 6 sekme
+("Talep"/"Olumlu"/"Olumsuz"/"Sipariş"/"Düzeltme Talebi"/"Zaman Aşımı"), her biri kendi
+`<OfferTable :statusType="N">` örneğini render ediyor. Bu port bugüne kadar TEK bir filtresiz
+liste + satırda bir "Durum" rozeti gösteriyordu — backend (`LoadController`/`LoadService.ListAsync`)
+`status_type_id` VE `timeout` sorgu parametrelerini ZATEN destekliyordu (`timeout=1` → durum
+2/3/4/5 + yük numarası boş + 1 haftadır güncellenmemiş kayıtlar), yalnızca frontend hiç
+kullanmıyordu — yine "backend hazır, frontend eksik". Kaynak sekmelerinin `status_type_id`'yi SABİT
+(4/5/1/2/3) kullanması BİLEREK taşınmadı: DATA-002 düzeltmesi gereği (`StatusTypeCodes`, bkz. §1
+Kritik yön değişikliği #4 civarı) ham id'ye güvenilmiyor; Fatura'nın "Onay Bekliyor" sekmesiyle AYNI
+desende, sekmeler seed'in verdiği KARARLI isimle (`/api/v1/status_type` → `name` alanı) eşleştiriliyor.
+"Talep" sekmesi özel bir durum: altta yatan `status_type`'ın kendi adı "Teklif"tir (kaynakta da böyle
+— "Teklifler" sayfasında bir sekmeye "Teklif" değil "Talep" deniyor, muhtemelen sayfa başlığıyla
+çakışmasın diye) — `statusName: "Teklif"` ile eşleştirildi. "Zaman Aşımı" sekmesi `status_type_id`
+DEĞİL, backend'in ayrı `timeout=1` parametresiyle çalışıyor (`statusName: null` özel durumu).
+Artık gereksiz hâle gelen "Durum" sütunu kaldırıldı (kaynakta da yok — her sekme zaten TEK bir durumu
+temsil ediyor). Kaynağın 6 BAĞIMSIZ `lazy` tablo örneği yerine (her biri kendi sayfalama/yükleme
+state'iyle) bu portta ZATEN yerleşik olan tek-liste+filtre-değişince-yeniden-çek deseni kullanıldı
+(Fatura'nın kutu-tipi filtresiyle AYNI mimari — sekme değişince `page` sıfırlanır, `search` KORUNUR,
+kaynağın her sekmeyi taze bir bileşen olarak yeniden kurup arama kutusunu da sıfırlamasından bilinçli
+bir sapma, zaten Fatura'da da aynı karar verilmişti). "Mail Analizi" düğmesi/AI e-posta analizi modalı
+(kaynakta `Offer.vue`'nün aynı sayfasında) KESİNLİKLE eklenmedi — bu, oturumun başından beri süren,
+kullanıcının ayrı bir projede entegre edeceği açık kapsam-dışı karardır. Canlı Docker'da (Vite dev
+sunucusu, doğrudan SQL ile eklenen "Sipariş" durumundaki bir test teklifiyle) uçtan uca doğrulandı:
+6 sekme doğru sırada/etiketle render ediliyor, varsayılan "Talep" sekmesi boş (test kaydı Sipariş
+durumunda), "Sipariş" sekmesine geçince kayıt görünüyor (ağ isteği doğru `status_type_id=2` taşıyor),
+"Zaman Aşımı" sekmesi doğru şekilde boş (kayıt bugün oluşturulduğundan stale değil, ağ isteği doğru
+`timeout=1` taşıyor), "Durum" sütununun kaldırıldığı, Kritik yön değişikliği #22'deki Görevli/Müşteri
+ülkesi özelliklerinin yeni sekme yapısında regresyon olmadan çalışmaya devam ettiği. Backend'e hiç
+dokunulmadığından (uçlar zaten vardı) mevcut 118 test etkilenmedi, yeniden çalıştırılmadı (yalnızca
+`QuotesPage.tsx` değişti).
 
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
