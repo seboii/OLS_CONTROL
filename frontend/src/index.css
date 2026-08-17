@@ -11,3 +11,38 @@ body,
 body {
   font-family: 'Inter', system-ui, sans-serif;
 }
+
+/* olsold: config/theme-config.js'in "primary" semantic rengi — burada
+   uygulamanın var olan tüm `blue-*` sınıflarını (Sidebar/Btn/link/vb.)
+   yeniden yazmadan aynı mekanizmayı sağlamak için Tailwind'in `blue`
+   paletini bu değişkenlere yönlendiriyoruz. Varsayılan değerler kaynağın
+   ilk paleti olan "primary"yle birebir; theme-config.ts açılışta (ve
+   Profil > Arayüz'den renk seçilince) bunları document.documentElement
+   üzerinde satır-içi stil olarak ezer. */
+:root {
+  --color-primary-50: #edf1fc;
+  --color-primary-100: #dde3fa;
+  --color-primary-200: #c3ccf5;
+  --color-primary-300: #a0abef;
+  --color-primary-400: #7980e8;
+  --color-primary-500: #4241d5;
+  --color-primary-600: #4237be;
+  --color-primary-700: #51499a;
+  --color-primary-800: #3f3a72;
+  --color-primary-900: #383659;
+  --color-primary-950: #212033;
+}
+
+@theme {
+  --color-blue-50: var(--color-primary-50);
+  --color-blue-100: var(--color-primary-100);
+  --color-blue-200: var(--color-primary-200);
+  --color-blue-300: var(--color-primary-300);
+  --color-blue-400: var(--color-primary-400);
+  --color-blue-500: var(--color-primary-500);
+  --color-blue-600: var(--color-primary-600);
+  --color-blue-700: var(--color-primary-700);
+  --color-blue-800: var(--color-primary-800);
+  --color-blue-900: var(--color-primary-900);
+  --color-blue-950: var(--color-primary-950);
+}

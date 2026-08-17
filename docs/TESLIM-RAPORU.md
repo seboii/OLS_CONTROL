@@ -480,6 +480,33 @@ sayfa yenilemesinde hem telefon hem ülke kodu kalıcılığı), Kullanıcılar'
 Ülke Kodu seçicisinin de aynı şekilde "+49/+7/+90" gösterdiği. Backend'e dokunulmadığından mevcut 118
 test etkilenmedi (yalnızca `ProfilePage.tsx`, `UsersPage.tsx`, `lib/hooks.ts` değişti).
 
+**Kritik yön değişikliği #19 (bu güncellemede — Profil, "Arayüz" tema rengi kartı, saf frontend):**
+Kaynakta `AccountDetail.vue` dört kartı alt alta diziyor: Genel/İletişim/Şifre/`ThemeSetting.vue`.
+Bu portta Genel/İletişim/Şifre sekmeye dönüştürülmüştü (önceki bir fazda alınmış kapsam kararı) ama
+DÖRDÜNCÜ kart — "Arayüz" (tema rengi seçici) — hiç taşınmamıştı; backend'de de karşılığı yok (kaynakta
+da tamamen istemci-taraflı bir özellik, `theme-color` çerezi + `document.documentElement` üzerinde
+CSS custom property). `config/theme-config.js` (9 adlı renk paleti, her biri 50-950 tam ton skalası +
+`default`) birebir taşındı → `frontend/src/config/theme-config.ts`. Kaynak, PrimeVue'nün `definePreset`
+"primary" semantic rengini besliyordu; bu portta PrimeVue YOK — bunun yerine Tailwind v4'ün `@theme`
+bloğu (`index.css`) uygulamanın zaten her yerde (18 dosya, ~124 kullanım) tek vurgu rengi olarak
+kullandığı `blue-*` paletini AYNI `--color-primary-{ton}` değişkenlerine yönlendirecek şekilde
+tanımlandı — böylece TEK BİR bileşen bile değiştirilmeden mevcut `bg-blue-600`/`text-blue-500`/vb.
+her yerde yeni seçilen renkle boyanıyor (canlı doğrulama: Sidebar'daki OLS logosu `bg-blue-600`
+sınıfını hiç değiştirmeden `#4237be`→`#2b43e5` arası geçiş yaptı). `ProfilePage.tsx`'e kaynağın kart
+sırasıyla tutarlı 4. sekme olarak "Arayüz" eklendi: "Renk" başlığı, 9 dairesel renk düğmesi (`size-5`→
+`w-5 h-5`, `role="button"` yerine gerçek `<button>`), aktif olan `ring-2 ring-offset-2`, tıklanınca
+kaynaktaki AYNI davranış — çerez yazılır (`expires` verilmez, kaynaktaki gibi oturum çerezi) ve TAM
+SAYFA YENİLENİR (canlı/reaktif CSS değişimi değil, kaynağın kendi `window.location.reload()` deseni
+birebir korundu). Çerez yokken varsayılan kaynaktaki gibi "primary" (`#4241d5` indigo tonu) — bu,
+uygulamanın ÖNCEKİ varsayılan Tailwind mavisinden (`#2563eb`) bilinçli bir sapma: kaynağın gerçek
+varsayılan davranışını birebir yansıtmak, "Arayüz" kartının kendisi zaten tek tıkla geri değiştirmeyi
+sağladığından kabul edilebilir ve tersinir bir görsel değişiklik. Canlı Docker'da (Vite dev sunucusu)
+uçtan uca doğrulandı: 9 düğme kaynaktaki TAM hex değerleriyle doğru sırada render ediliyor, varsayılan
+"primary" halka-vurgulu, "blue" seçilince çerez+CSS değişkeni+sayfa geneli renk (logo dahil) doğru
+güncelleniyor, bağımsız bir sekmede taze yüklemede hem seçim kalıcılığı hem konsol hatası SIFIR
+doğrulandı. Kaynakta da backend karşılığı olmadığından bu özellik için hiç API yok; mevcut 118 test
+etkilenmedi (yalnızca `ProfilePage.tsx`, `main.tsx`, `index.css`, yeni `config/theme-config.ts` değişti).
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

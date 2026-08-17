@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useToast } from "@/components/ui/Toast";
 import { useLookupOptions } from "@/lib/hooks";
 import { Btn, FormField, Tabs, TextInput, SelectInput } from "@/components/ui/primitives";
+import { activeColorName, primary_colors, setThemeColor } from "@/config/theme-config";
 
 function initials(name: string, surname: string) {
   return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
@@ -200,7 +201,7 @@ export function ProfilePage() {
         <h1 className="text-base font-semibold text-gray-900">Hesabım</h1>
       </div>
       <div className="flex-1 overflow-y-auto bg-white">
-        <Tabs tabs={["Genel", "İletişim", "Şifre"]} active={tab} onChange={setTab} className="px-6" />
+        <Tabs tabs={["Genel", "İletişim", "Şifre", "Arayüz"]} active={tab} onChange={setTab} className="px-6" />
         {tab === "Genel" && (
           <div className="p-6 max-w-md space-y-4">
             <FormField label="Profil Fotoğrafı" error={avatarError}>
@@ -284,6 +285,29 @@ export function ProfilePage() {
               <CheckCircle size={14} />
               Şifreyi Güncelle
             </Btn>
+          </div>
+        )}
+        {tab === "Arayüz" && (
+          <div className="p-6 max-w-md space-y-4">
+            <div>
+              <div className="font-semibold text-gray-800 mb-1">Renk</div>
+              <p className="text-xs text-gray-500 mb-3">Uygulamanın arayüz ayarlarını düzenleyebilirsiniz.</p>
+              <div className="flex flex-wrap gap-2">
+                {primary_colors.map((color) => (
+                  <button
+                    key={color.name}
+                    type="button"
+                    title={color.name}
+                    onClick={() => setThemeColor(color.name)}
+                    className={
+                      "w-5 h-5 rounded-full transition-shadow " +
+                      (activeColorName === color.name ? "ring-2 ring-offset-2 ring-gray-400" : "")
+                    }
+                    style={{ backgroundColor: color.colors.default }}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
