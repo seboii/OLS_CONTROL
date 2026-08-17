@@ -454,6 +454,32 @@ bu daha "yardımcı" ama kaynağın güvenlik duruşunu zayıflatıyordu — bir
 `LoginPage.tsx`/`api.ts`'te düzeltildi, canlı Docker'da (boş form, hatalı bilgiler, doğru bilgiler,
 göster/gizle düğmesi) uçtan uca doğrulandı. Backend'e dokunulmadığından mevcut 118 test etkilenmedi.
 
+**Kritik yön değişikliği #18 (bu güncellemede — Profil, saf frontend):** `ProfileController`/
+`ProfileService` backend'de `country_id`/`phone_country_id` uçtan uca ZATEN tam destekleniyordu
+(nested `ProfileCountryDto`), ama `ProfilePage.tsx`'te "Genel" sekmesinde Ülke, "İletişim" sekmesinde
+Ülke Kodu alanları TAMAMEN eksikti — yine bu oturumun tekrarlayan "backend hazır, frontend eksik"
+deseni. `AccountGeneralFormModal.vue`/`AccountContactFormModal.vue` satır satır karşılaştırılıp
+eklendi: iki `SelectInput` (`/api/v1/country` lookup'ı), Vuelidate kurallarıyla birebir istemci
+doğrulaması ("İsim/Soyisim/Ülke alanı boş bırakılamaz.", "E-Posta/Telefon/Ülke kodu boş
+bırakılamaz.", "Geçerli bir e-posta adresi giriniz.", "Telefon numarası sadece rakamlardan
+oluşmalıdır."). Doğrulama satır satır kaynaktan alındığından ayrıca gerçek bir sunucu-yanıtı
+turuna gerek kalmadan anında geri bildirim veriyor (kaynaktaki Vuelidate davranışıyla aynı).
+Kaynak dosyası okunurken İKİNCİ bir gerçek fark daha bulundu: `AccountContactFormModal.vue`
+(ve aynı desendeki `UserFormDrawer.vue`) "Ülke Kodu" seçicisinde `optionLabel="phone_code"`
+kullanıyor — yani seçenekler ÜLKE ADI değil `+90`/`+49`/`+7` gibi telefon koduyla gösteriliyor;
+ilk yazımda her iki sayfa da (`ProfilePage.tsx` YENİ eklenen alan, `UsersPage.tsx` Kritik yön
+değişikliği #12'den kalma) genel `countries` (ad etiketli) listesini yeniden kullanıyordu. Backend
+`Country` entity'sinde `phone_code` alanı zaten dönüyordu (`GeoController.Countries` filtresiz tüm
+alanları döner), yalnızca frontend'in `NamedOption` tipi/`useLookupOptions` bunu göz ardı ediyordu —
+`phone_code?: string | null` eklenip her iki sayfada da `+${phone_code}` etiketli ayrı bir seçenek
+listesi türetildi (`c.phone_code ? \`+${c.phone_code}\` : c.name` düşen geri dönüşle). Canlı Docker'da
+uçtan uca doğrulandı: Genel sekmesi (boş-ülke reddi, Türkiye seçip kaydetme, tam sayfa yenilemesinde
+kalıcılık), İletişim sekmesi (boş-gönderim HEM Ülke kodu HEM Telefon hatasını aynı anda gösterir,
+harf içeren telefon reddi, Ülke Kodu artık "+90/+49/+7" gösterir, geçerli değerlerle kaydetme VE tam
+sayfa yenilemesinde hem telefon hem ülke kodu kalıcılığı), Kullanıcılar'ın "Yeni Kullanıcı" formunda
+Ülke Kodu seçicisinin de aynı şekilde "+49/+7/+90" gösterdiği. Backend'e dokunulmadığından mevcut 118
+test etkilenmedi (yalnızca `ProfilePage.tsx`, `UsersPage.tsx`, `lib/hooks.ts` değişti).
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

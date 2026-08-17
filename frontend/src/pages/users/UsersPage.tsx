@@ -427,7 +427,11 @@ export function UsersPage() {
               <SelectInput
                 value={form.phone_country_id}
                 onChange={(v) => setForm((f) => ({ ...f, phone_country_id: v }))}
-                options={[{ value: "", label: "Seçiniz" }, ...countries.map((c) => ({ value: String(c.id), label: c.name }))]}
+                // olsold: UserFormDrawer.vue — SelectAjax optionLabel="phone_code", "+{{ phone_code }}" olarak gösterir.
+                options={[
+                  { value: "", label: "Seçiniz" },
+                  ...countries.map((c) => ({ value: String(c.id), label: c.phone_code ? `+${c.phone_code}` : c.name })),
+                ]}
               />
             </FormField>
             <FormField label="Telefon" required error={errors.phone?.[0]}>

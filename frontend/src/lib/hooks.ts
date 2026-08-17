@@ -4,6 +4,8 @@ import { api } from "./api";
 export interface NamedOption {
   id: string | number;
   name: string;
+  // Yalnızca /api/v1/country gibi bazı uçlarda dolu gelir (bkz. Country entity).
+  phone_code?: string | null;
 }
 
 /**
