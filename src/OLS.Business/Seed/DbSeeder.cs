@@ -286,29 +286,88 @@ public static class DbSeeder
             new LoadingType { Name = "Parsiyel", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
+        // olsold/Siber tarafında bu 4 "tanım" tablosu için hiç Seeder yoktu (yalnızca
+        // canlı ortamda admin ekranından elle giriliyor) — bu port da şimdiye kadar
+        // isim/kod uydurmuştu (ör. "Tır" diye bir Siber değeri hiç yok). 192.168.1.101
+        // üzerindeki gerçek sunucunun `skn_sabittanim` (grupkod=ARACTIP/ROMORKCINS/
+        // ARACSAHIP/ARACDURUM) ve `skn_arac`'ın denormalize ad sütunlarından SALT-OKUNUR
+        // sorgu ile çekilen GERÇEK kod+isim çiftleriyle değiştirildi.
         await SeedIfEmptyAsync(db.CarTypes, ct, () =>
         [
-            new CarType { Name = "Tır", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new CarType { Name = "Kamyon", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarType { Name = "Çekici", Code = 0, CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarType { Name = "Kamyon", Code = 1, CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarType { Name = "Römork", Code = 2, CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarType { Name = "Otomobil", Code = 3, CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarType { Name = "Konteyner", Code = 4, CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         await SeedIfEmptyAsync(db.RomorkTypes, ct, () =>
         [
-            new RomorkType { Name = "Tenteli", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Frigo", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Lowbed", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Frigo", Code = "0", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Jumbo", Code = "1", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Romork [Kamyon]", Code = "2", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Optima", Code = "3", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Tanker", Code = "4", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Tekstil Dorse", Code = "5", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Oto Taşıyıcı", Code = "6", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Silobas", Code = "7", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Low Bed", Code = "8", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Mega Maksima", Code = "9", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Maksima", Code = "10", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Mega", Code = "11", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         await SeedIfEmptyAsync(db.CarOwners, ct, () =>
         [
-            new CarOwner { Name = "Öz Mal", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new CarOwner { Name = "Anlaşmalı", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarOwner { Name = "Öz Mal", Code = 0, GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarOwner { Name = "Kiralık", Code = 1, GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarOwner { Name = "Sözleşmeli Kiralık", Code = 2, GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
+        // DÜRÜST NOT: kaynaktaki "Boşta/Seferde" isimleri Siber'in gerçek `aracdurum`
+        // alanının anlamıyla (araç bakım/hurda/satış durumu) örtüşmüyordu — ama bu C#
+        // alanı ZATEN SiberCarRepository üzerinden birebir `aracdurum` sütununa
+        // senkronlanıyor (CarService.SyncToSiberAsync). Yani isimler Siber'in GERÇEK
+        // anlamına göre düzeltildi; "araç şu an boşta mı seferde mi" ayrı bir
+        // (hesaplanan, statik tanım gerektirmeyen) kavram olarak kalmalı.
         await SeedIfEmptyAsync(db.CarStatusTypes, ct, () =>
         [
-            new CarStatusType { Name = "Boşta", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new CarStatusType { Name = "Seferde", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarStatusType { Name = "Çalışan", Code = 0, GroupCode = "ARACDURUM", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarStatusType { Name = "Bakımda", Code = 1, GroupCode = "ARACDURUM", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarStatusType { Name = "Hurda", Code = 2, GroupCode = "ARACDURUM", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarStatusType { Name = "Satıldı", Code = 3, GroupCode = "ARACDURUM", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarStatusType { Name = "Kombinasyonda", Code = 4, GroupCode = "ARACDURUM", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+        ]);
+
+        // olsold'da hiç Seeder yoktu, tablo tamamen boştu (canlı ortamda admin ekranından
+        // dolduruluyor). Siber'in skn_sabittanim (grupkod=SEFERTUR) tablosundan gerçek
+        // değerlerle dolduruldu — kaynaktaki "Sefer Tipi" dropdown'ı bu yüzden BOŞTU
+        // ve Sefer oluşturmayı fiilen imkânsız kılıyordu (zorunlu 4 alandan biri).
+        await SeedIfEmptyAsync(db.ExpeditionTypes, ct, () =>
+        [
+            new ExpeditionType { Name = "Kara", Code = "10", GroupCode = "SEFERTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new ExpeditionType { Name = "Hava", Code = "11", GroupCode = "SEFERTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new ExpeditionType { Name = "Deniz", Code = "12", GroupCode = "SEFERTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+        ]);
+
+        // Aynı şekilde boştu. Siber'in skn_sabittanim (grupkod=TALIMATGELISSEKLI) —
+        // "Talimat" alanının geliş şekli.
+        await SeedIfEmptyAsync(db.Instructions, ct, () =>
+        [
+            new Instruction { Name = "Telefon", Code = "0", GroupCode = "TALIMATGELISSEKLI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Instruction { Name = "E-Mail", Code = "1", GroupCode = "TALIMATGELISSEKLI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Instruction { Name = "Faks", Code = "2", GroupCode = "TALIMATGELISSEKLI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Instruction { Name = "Pazarlama", Code = "3", GroupCode = "TALIMATGELISSEKLI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+        ]);
+
+        // Aynı şekilde boştu. Siber'in skn_sabittanim (grupkod=REZERVASYONTASIMASEKLI) —
+        // GUID'ler doğrudan gerçek sunucudan (`sabittanimid`), olsold'un kendi
+        // system_data.js statik listesindeki GUID'lerle birebir eşleşti (çapraz doğrulandı).
+        await SeedIfEmptyAsync(db.TransportTypes, ct, () =>
+        [
+            new TransportType { Name = "RO-RO", Code = "1", GroupCode = "REZERVASYONTASIMASEKLI", SiberId = "9E45ED23-EF9F-45E4-9530-0FA9F2D6C51C", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new TransportType { Name = "Tren", Code = "2", GroupCode = "REZERVASYONTASIMASEKLI", SiberId = "E0ADF7B0-6711-48ED-B2F5-FFBDEBD405A2", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new TransportType { Name = "Kara", Code = "3", GroupCode = "REZERVASYONTASIMASEKLI", SiberId = "B84B6983-7328-469C-8CBE-58E4AB2B3DB4", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         await SeedIfEmptyAsync(db.InvoiceTypes, ct, () =>

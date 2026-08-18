@@ -903,6 +903,55 @@ yeni-kayıt varsayılan değerleri 2 modülde, istemci-taraflı zorunlu alan kon
 veri gizliliği 1, eksik salt-okunur alan 1). Bu, önceki "temiz" tarama turlarına rağmen hâlâ
 bulunabilecek somut eksiklerin var olduğunu doğruladı.
 
+**Kritik yön değişikliği #35 (bu güncellemede — kullanıcının gerçek Siber sunucusu erişimi vermesiyle
+başlayan inceleme):** Kullanıcı 192.168.1.101:1433 üzerindeki GERÇEK Siber2022 sunucusuna salt-okunur
+erişim verdi ("sadece şemayı gör, yazma yapma"). Bulgular:
+
+1. **Gerçek şema 2144 tablo içeriyor** (`sbr_firma` tek başına 250+ sütun) — bunun tamamını modellemek
+   anlamsız; yalnızca bizim entegrasyon kodumuzun dokunduğu ~34 tablo kapsam alındı.
+2. **Kritik keşif — birçok yerel "tanım" tablosu ya tamamen BOŞ ya da `code`/`siber_id` sütunu boştu:**
+   `expedition_types`, `instructions`, `load_transfer_types`, `transport_types` **0 satır** içeriyordu
+   (olsold/olimpikgama'da bu tablolar için hiç Seeder yoktu — yalnızca canlı ortamda admin ekranından
+   dolduruluyorlar). Bu, canlı testte "Sefer Tipi" dropdown'ının BOŞ çıkmasının ve — Sefer Tipi zorunlu
+   4 alandan biri olduğundan — **hiç yeni Sefer oluşturulamamasının** gerçek nedeniydi. Ayrıca
+   `car_types`/`car_owners`/`car_status_types`/`romork_types` kayıtları vardı ama `code` sütunları
+   tamamen boştu; `skn_arac.aracsahip` gerçek şemada NOT NULL olduğundan bu, Siber senkronunda kesin
+   hataya yol açacaktı.
+3. **"olimpikgama" (olsold ile birebir aynı ürünün başka müşteri dağıtımı, bkz. DbSeeder.cs'teki önceki
+   not) araştırıldı** — kendi `tools/SiberRawImporter` aracıyla dün gerçek sunucudan 8 tabloyu (7380
+   cari, 7882 yük vb.) içe aktarmış, ama KENDİ uygulama tablolarında (car_types vb.) AYNI boşluk
+   olduğu görüldü — yani kolay bir kopyalama kısayolu yoktu, gerçek değerler bizzat çıkarılmalıydı.
+4. **Gerçek değerler `skn_arac`'ın denormalize ad sütunlarından VE `skn_sabittanim` (grupkod bazlı
+   genel "sabit tanım" tablosu) üzerinden salt-okunur sorgularla çıkarıldı ve doğrulandı** — örn.
+   `REZERVASYONTASIMASEKLI` grubunun GUID'leri (RO-RO=9E45ED23-..., Tren=E0ADF7B0-..., Kara=B84B6983-...)
+   olsold'un `system_data.js` statik listesindeki GUID'lerle BİREBİR eşleşti (çapraz doğrulama).
+
+**Uygulanan düzeltmeler** (`DbSeeder.cs`, kullanıcı onayıyla "yerel isimleri gerçek Siber değerleriyle
+değiştir" kararı doğrultusunda):
+- `car_types`: "Tır"/"Kamyon" (uydurma) → Çekici(0)/Kamyon(1)/Römork(2)/Otomobil(3)/Konteyner(4) (gerçek `ARACTIP`)
+- `car_owners`: Öz Mal/Kiralık/Sözleşmeli Kiralık (0/1/2, gerçek `ARACSAHIP`)
+- `romork_types`: "Tenteli/Frigo/Lowbed" (uydurma, kod yok) → gerçek `ROMORKCINS`'in tam 12 kaydı
+  (Frigo/Jumbo/Romork[Kamyon]/Optima/Tanker/Tekstil Dorse/Oto Taşıyıcı/Silobas/Low Bed/Mega Maksima/
+  Maksima/Mega, kod 0-11)
+- `car_status_types`: "Boşta/Seferde" → Çalışan/Bakımda/Hurda/Satıldı/Kombinasyonda (gerçek `ARACDURUM`).
+  DÜRÜST NOT: bu alan zaten `CarService.SyncToSiberAsync` üzerinden birebir Siber'in `aracdurum`
+  sütununa senkronlanıyordu; kaynaktaki "Boşta/Seferde" ismi bu sütunun GERÇEK anlamıyla hiç
+  örtüşmüyordu (biri araç bakım/hurda durumu, diğeri sefer-meşguliyet durumu) — isim Siber'in gerçek
+  anlamına göre düzeltildi, "araç şu an boşta mı" ayrı (hesaplanan) bir kavram olarak ele alınmalı.
+- `expedition_types`, `instructions`, `transport_types`: boş tablolar gerçek `SEFERTUR` (Kara/Hava/Deniz),
+  `TALIMATGELISSEKLI` (Telefon/E-Mail/Faks/Pazarlama), `REZERVASYONTASIMASEKLI` (RO-RO/Tren/Kara + GUID)
+  değerleriyle dolduruldu.
+
+Canlı Docker'da doğrulandı: eski placeholder satırları silinip API yeniden başlatılarak seeder'ın
+gerçek değerlerle doldurduğu teyit edildi; Sefer'in "Sefer Tipi" dropdown'ı artık Deniz/Hava/Kara
+gösteriyor (önceden BOMBOŞTU); Araç formunun Araç Tipi/Romork Tipi/Sahiplik/Durum alanları gerçek
+Siber isim ve sırasıyla render oluyor. `dotnet build` + tam test paketi **121/121 geçti**.
+
+**Devam eden iş (henüz tamamlanmadı):** `payment_types`/`departments`'ın `code`/`siber_id` boşlukları,
+`load_transfer_types`, ve `SiberLoadRepository`/`SiberExpeditionRepository`/rezervasyon+fatura
+tarafındaki (`skn_yuk`, `skn_pozisyon`, `sfy_efatura` vb.) aynı derinlikte tip/kod hizalaması henüz
+yapılmadı — bu, ayrı bir devam oturumunda ele alınacak (görev takipçisinde #47-53 olarak izleniyor).
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
