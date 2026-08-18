@@ -178,13 +178,13 @@ export function VehiclesPage() {
     }
   }
 
+  // olsold: pages/car/list.vue — yalnızca 5 sütun (Plaka/Tipi/Araç Durumu/Sahiplik
+  // Durumu/Kilometre) bu sırayla. "Romork"/"Kapasite" kaynakta yok, kaldırıldı.
   const columns: Column<CarItem>[] = [
     { key: "plate_number", header: "Plaka", sortable: true, render: (r) => <span className="font-mono text-sm font-bold text-gray-900">{r.plate_number}</span> },
-    { key: "car_type", header: "Araç Tipi", render: (r) => r.car_type?.name ?? "—" },
-    { key: "romork_type", header: "Romork", render: (r) => <span className="text-gray-600">{r.romork_type?.name ?? "—"}</span> },
-    { key: "vehicle_owner", header: "Sahiplik", render: (r) => r.vehicle_owner?.name ?? "—" },
-    { key: "vehicle_status", header: "Durum", render: (r) => r.vehicle_status?.name ?? "—" },
-    { key: "capacity", header: "Kapasite", render: (r) => <span className="font-mono text-xs">{r.capacity ? `${r.capacity} kg` : "—"}</span> },
+    { key: "car_type", header: "Tipi", render: (r) => r.car_type?.name ?? "—" },
+    { key: "vehicle_status", header: "Araç Durumu", render: (r) => r.vehicle_status?.name ?? "—" },
+    { key: "vehicle_owner", header: "Sahiplik Durumu", render: (r) => r.vehicle_owner?.name ?? "—" },
     { key: "km", header: "Kilometre", render: (r) => <span className="font-mono text-xs">{r.km ?? "—"}</span> },
   ];
 

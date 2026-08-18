@@ -844,6 +844,18 @@ parite deseni). Aynı kontrol + mesaj eklendi.
 Canlı Docker'da doğrulandı: boş formda "Kaydet" tıklanınca `/api/v1/invoice`'a POST atılmadığı ağ
 izinde teyit edildi. Backend'e dokunulmadı, mevcut 121 test etkilenmedi.
 
+**Kritik yön değişikliği #31 (bu güncellemede — yeniden tarama, Araç modülü):** `pages/car/list.vue`
+incelendi — kaynakta liste yalnızca 5 sütun (Plaka/Tipi/Araç Durumu/Sahiplik Durumu/Kilometre), target
+7 sütun gösteriyordu ("Romork" ve "Kapasite" kaynakta yok, fazladan eklenmişti — Müşteri'deki #26'ya
+benzer bir "fazla sütun" durumu, "eksik sütun" değil). 5 sütuna indirildi, kaynaktaki sıra ve etiketler
+(Plaka/Tipi/Araç Durumu/Sahiplik Durumu/Kilometre) birebir uygulandı; "Romork Tipi" ve "Kapasite" alanları
+formda kaldı (yalnızca liste görünümünden kaldırıldı, kaynakla aynı). `pages/car/form.vue`'nin
+`form_data` başlangıç değerlerinde (Teklif/Sefer'deki gibi) anlamlı bir varsayılan yoktu (hepsi boş/0),
+dolayısıyla o kategoride ek bir eksik bulunmadı — Task #19'daki 9 zorunlu alan çalışması zaten sağlamdı.
+
+Canlı Docker'da doğrulandı: "34 TEST 29" kaydıyla liste artık tam 5 sütun (Plaka/Tipi/Araç Durumu/
+Sahiplik Durumu/Kilometre) gösteriyor. Backend'e dokunulmadı, mevcut 121 test etkilenmedi.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
