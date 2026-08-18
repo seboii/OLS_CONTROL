@@ -802,6 +802,21 @@ Canlı Docker'da doğrulandı: "TEST-LT-29-1" kaydının Genel Bilgiler sekmesin
 Lademetre (m³)"/"Ağırlık Ücreti" alan yuvalarının artık göründüğü (test verisinde boş ama alan present)
 teyit edildi. `dotnet build` + tam test paketi **121/121 geçti**.
 
+**Kritik yön değişikliği #29 (bu güncellemede — yeniden tarama, Sefer modülü):** `ExpeditionTable.vue` +
+`ExpeditionFormDrawer.vue` incelendi, 2 küçük eksik bulundu (backend zaten hazırdı):
+1. Liste 7 kaynak sütunundan birini ("Tipi" — `expedition_type_id`) hiç göstermiyordu; `ExpeditionItem`
+   arayüzünde alan zaten vardı (backend liste uç noktası zaten dönüyordu), yalnızca sütun eklendi.
+2. Yeni sefer formu backend'in zaten zorunlu tuttuğu 4 alanı (Araç/İş Tipi/Departman/Sefer Tipi) istemci
+   tarafında hiç kontrol etmiyordu — kaynakta `handleForm` bu 4 alan boşsa "Lütfen tüm alanları
+   doldurunuz." ile isteği hiç göndermeden engelliyor. Backend zaten aynı 4 alanı 422 ile reddediyordu
+   (`LoadTransferController.cs` — "Romork Zorunludur" vb.), yani bu GERÇEK bir veri-bütünlüğü açığı
+   değildi (arka planda güvenlik ağı zaten vardı), yalnızca gereksiz bir round-trip'i önleyen UX
+   parite eksikliğiydi. Aynı istemci kontrolü + mesaj eklendi.
+
+Canlı Docker'da doğrulandı: "Tipi" sütunu render oldu; boş formda "Kaydet" tıklanınca ağ izinde
+`/api/v1/expedition`'a HİÇ POST atılmadığı (yalnızca GET istekleri) teyit edildi. Backend'e
+dokunulmadığından mevcut 121 test etkilenmedi.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

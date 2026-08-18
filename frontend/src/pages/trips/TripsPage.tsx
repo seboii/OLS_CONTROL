@@ -172,6 +172,15 @@ export function TripsPage() {
   }
 
   async function handleSubmit() {
+    // olsold: ExpeditionFormDrawer.vue handleForm — bu 4 alan boşsa istemci
+    // tarafında engelleniyor ("Lütfen tüm alanları doldurunuz."), backend'e hiç
+    // gitmiyor (backend de aynı 4 alanı zorunlu tutuyor, burada ek bir güvenlik
+    // ağı değil, kaynaktaki anında-engelleme UX'i taşınıyor).
+    if (!form.expedition_type || !form.department_id || !form.work_type || !form.romork_id) {
+      addToast("Lütfen tüm alanları doldurunuz.", "error");
+      return;
+    }
+
     setSaving(true);
     setErrors({});
     const body: Record<string, unknown> = {
@@ -415,6 +424,8 @@ export function TripsPage() {
 
   const columns: Column<ExpeditionItem>[] = [
     { key: "expedition_number", header: "Sefer No", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">{r.expedition_number ?? `SEF-${r.id}`}</span> },
+    // olsold: ExpeditionTable.vue — "Tipi" (expedition_type_id) target'ta hiç yoktu.
+    { key: "expedition_type_id", header: "Tipi", render: (r) => <span className="text-xs text-gray-500">{r.expedition_type_id?.name ?? "—"}</span> },
     { key: "romork_id", header: "Araç", render: (r) => <span className="font-mono text-xs font-semibold">{r.romork_id?.plate_number ?? "—"}</span> },
     { key: "work_type", header: "İş Tipi", render: (r) => r.work_type?.name ?? "—" },
     { key: "route", header: "Güzergâh", render: (r) => <span>{r.start_city_id?.name ?? "—"} → {r.end_city_id?.name ?? "—"}</span> },
