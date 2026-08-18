@@ -817,6 +817,33 @@ Canlı Docker'da doğrulandı: "Tipi" sütunu render oldu; boş formda "Kaydet" 
 `/api/v1/expedition`'a HİÇ POST atılmadığı (yalnızca GET istekleri) teyit edildi. Backend'e
 dokunulmadığından mevcut 121 test etkilenmedi.
 
+**Kritik yön değişikliği #30 (bu güncellemede — yeniden tarama, Fatura modülü):** `invoices.vue` +
+`InvoiceFormDrawer.vue` incelendi. Üst seviye 3 sekme ("Gelen Faturalar"/"Giden Faturalar"/"Onay
+Bekleyen Faturalar") zaten `InvoicesPage.tsx`'te birebir doğru bulundu (Task #28'den kalma, açıklayıcı
+yorumla belgelenmiş). Kaynağın sidebar'ında bu 3 görünüme AYRICA doğrudan alt-menü linkleriyle
+(`/panel/invoices/incoming` vb., ayrı sayfa dosyaları) erişilebiliyor — bu, projenin baştan beri
+kararlaştırılan "her modül tek birleşik sayfa" mimarisiyle zaten kapsanan bir gezinme kısayolu
+tekrarı olduğundan (içerik zaten mevcut sekmelerle birebir aynı), yeni bir sidebar alt-menü özelliği
+eklenmedi.
+
+**Bilinçli olarak dokunulmadı (mevcut kod zaten doğru uyarlanmış):** kaynakta fatura formundaki
+"Yön" (box_type) seçici `v-if="false"` ile TAMAMEN gizli — kayıt her zaman sessizce varsayılan değerle
+("Alış"/0) oluşturuluyor, kullanıcı hiç göremiyor; "Giden Fatura" oluşturmak yalnızca ayrı
+`/panel/invoices/outgoing` rotasının enjekte ettiği prop ile mümkün. Target birleşik tek sayfa
+mimarisinde bu ayrı rotalar yok; bu yüzden `InvoicesPage.tsx`'te "Yön" seçicisinin GÖRÜNÜR bırakılması
+(dead code'un birebir taşınmaması) kaynaktaki bir hatayı tekrarlamak değil, sayfa birleştirmesinin
+gerektirdiği ZORUNLU bir uyarlama — aksi halde birleşik sayfadan hiç "Giden Fatura" oluşturulamazdı.
+16-modal kararındaki "hatayı birebir taşı" ilkesi burada uygulanmadı çünkü bu görünürlük farkı, o
+karardaki gibi keyfi bir kopya-yapıştır hatası değil, mimari birleştirmenin doğrudan sonucu.
+
+Kalan tek eksik: yeni fatura formu backend'in zaten zorunlu tuttuğu 3 alanı (Yön/Müşteri hariç —
+Ticari Tip/Müşteri/Fatura Tipi) istemci tarafında kontrol etmiyordu (kaynakta `handleForm` aynı 3 alanı
+kontrol ediyor, backend de zaten 422 ile reddediyordu — Sefer'deki #29 ile aynı düşük öncelikli UX
+parite deseni). Aynı kontrol + mesaj eklendi.
+
+Canlı Docker'da doğrulandı: boş formda "Kaydet" tıklanınca `/api/v1/invoice`'a POST atılmadığı ağ
+izinde teyit edildi. Backend'e dokunulmadı, mevcut 121 test etkilenmedi.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

@@ -164,6 +164,13 @@ export function InvoicesPage() {
   }
 
   async function handleSubmit() {
+    // olsold: InvoiceFormDrawer.vue handleForm — bu 3 alan boşsa istemci tarafında
+    // engelleniyor ("Lütfen tüm alanları doldurunuz."), backend'e hiç gitmiyor.
+    if (!form.commercial_type || !account || !form.invoice_type_id) {
+      addToast("Lütfen tüm alanları doldurunuz.", "error");
+      return;
+    }
+
     setSaving(true);
     setErrors({});
     const fd = new FormData();
