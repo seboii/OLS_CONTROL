@@ -298,10 +298,13 @@ public static class DbSeeder
             new PaymentType { Name = "Vadeli", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
+        // Gerçek skn_sabittanim(YUKLEMETIP): Grupaj(0)/Komple(1)/Co-Load(2). "Parsiyel"
+        // isim olarak farklı ama kargo terminolojisinde Grupaj'ın (LTL/konsolide yük)
+        // birebir karşılığı — isim korundu, kod gerçeğe göre düzeltildi.
         await SeedIfEmptyAsync(db.LoadingTypes, ct, () =>
         [
-            new LoadingType { Name = "Komple", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new LoadingType { Name = "Parsiyel", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadingType { Name = "Parsiyel", Code = "0", GroupCode = "YUKLEMETIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadingType { Name = "Komple", Code = "1", GroupCode = "YUKLEMETIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         // olsold/Siber tarafında bu 4 "tanım" tablosu için hiç Seeder yoktu (yalnızca
