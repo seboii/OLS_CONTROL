@@ -65,7 +65,16 @@ services:
   #                                         bu yüzden (2)'den SONRA gelmeli
   #   5) sample-data.sql / sample-reservation.sql
   #                                       — referans + rezervasyon VERİSİ, şema
-  #                                         tamamlandıktan SONRA eklenir
+  #                                         tamamlandıktan SONRA eklenir; ama
+  #                                         sample-data.sql skn_sabittanim VE
+  #                                         sdn_rezervasyondurum'u kendi (canlı
+  #                                         doğrulanmamış) tahmini değerleriyle
+  #                                         DELETE+INSERT ediyor
+  #   6) reference-data-fix.sql          — (5)'in üzerine yazdığı skn_sabittanim/
+  #                                         sdn_rezervasyondurum satırlarını 192.168.1.101
+  #                                         üzerindeki GERÇEK sunucudan doğrulanan
+  #                                         değerlerle değiştirir; bu yüzden EN SONDA
+  #                                         çalışmalı (sample-data.sql'den SONRA)
   # einvoice-fix.sql/kzgelirgider-fix.sql bilinçli olarak ÇALIŞTIRILMIYOR — Uyumsoft
   # e-fatura ve Reports/Hedef-ciro bu portun kapsamı dışında (bkz. TESLIM-RAPORU.md §1).
   siber-init:
@@ -80,7 +89,7 @@ services:
     entrypoint: >
       /bin/bash -c "set -e; for f in init.sql init-reference.sql sample-movements.sql
       reservation-fix.sql loadtransfer-fix.sql loadrelease-fix.sql pozisyon-fix.sql
-      mapping-fix.sql sample-data.sql sample-reservation.sql; do
+      mapping-fix.sql sample-data.sql sample-reservation.sql reference-data-fix.sql; do
       echo \">> $$f\";
       /opt/mssql-tools18/bin/sqlcmd -S siber-mock -U sa -P '${SIBER_SA_PASSWORD:-Ols!Local2026}' -C -i /init/$$f;
       done; echo 'sahte Siber semasi ve verisi kuruldu'"

@@ -205,13 +205,17 @@ public static class DbSeeder
     // ------------------------------------------------------------------
     private static async Task SeedStatusTypesAsync(OlsDbContext db, CancellationToken ct)
     {
-        (string Code, string Name)[] statuses =
+        // SiberId = gerçek Siber sdn_rezervasyondurum.durumid (canlı sunucudan doğrulandı).
+        // TransferSiberService bu alanı skn_rezervasyon.durumid'ye yazıyor
+        // (olsold: TransferSiberController.php, $data->statusTypeId->siber_id ?? null);
+        // boş kalırsa "Durum boş olamaz" hatasıyla her teklif aktarımı baştan reddediliyordu.
+        (string Code, string Name, string SiberId)[] statuses =
         [
-            (StatusTypeCodes.Rejected, "Olumsuz"),
-            (StatusTypeCodes.Order, "Sipariş"),
-            (StatusTypeCodes.Correction, "Düzeltme Talebi"),
-            (StatusTypeCodes.Offer, "Teklif"),
-            (StatusTypeCodes.Approved, "Olumlu"),
+            (StatusTypeCodes.Rejected, "Olumsuz", "5E0B49DD-E425-4537-90F2-710EEB44A19F"),
+            (StatusTypeCodes.Order, "Sipariş", "DDF0614E-CA55-4C26-B125-A3AEBFAFB20B"),
+            (StatusTypeCodes.Correction, "Düzeltme Talebi", "FCF55F7C-876A-482B-B4A7-BADCA250BB91"),
+            (StatusTypeCodes.Offer, "Teklif", "EC922C9E-C2CF-4716-A198-F716FDA50358"),
+            (StatusTypeCodes.Approved, "Olumlu", "F377242D-0121-4090-BDD2-FF420F21235A"),
         ];
 
         var existingCodes = await db.StatusTypes
@@ -225,6 +229,7 @@ public static class DbSeeder
             {
                 Number = s.Code,
                 Name = s.Name,
+                SiberId = s.SiberId,
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now,
             })
@@ -338,11 +343,16 @@ public static class DbSeeder
             new RomorkType { Name = "Mega", Code = "11", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
+        // additional_code = Siber skn_sabittanim(ARACSAHIP).ekkod: ExpeditionWriteService.CreateAsync
+        // sefer numarasını Siber'de ararken skn_sefer.aracsahipad (nvarchar(10), kısa kod - "OZ"/"KR"/"SK")
+        // ile eşleştiriyor (olsold: ExpeditionController.php:90, ->where('aracsahipad', ...additional_code)).
+        // Bu alan boş bırakılırsa arama hiçbir zaman eşleşmez ve her pozisyon için gereksiz yeni
+        // skn_sefer satırı açılır - canlı Siber'den doğrulandı.
         await SeedIfEmptyAsync(db.CarOwners, ct, () =>
         [
-            new CarOwner { Name = "Öz Mal", Code = 0, GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new CarOwner { Name = "Kiralık", Code = 1, GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new CarOwner { Name = "Sözleşmeli Kiralık", Code = 2, GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarOwner { Name = "Öz Mal", Code = 0, AdditionalCode = "OZ", GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarOwner { Name = "Kiralık", Code = 1, AdditionalCode = "KR", GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CarOwner { Name = "Sözleşmeli Kiralık", Code = 2, AdditionalCode = "SK", GroupCode = "ARACSAHIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         // DÜRÜST NOT: kaynaktaki "Boşta/Seferde" isimleri Siber'in gerçek `aracdurum`
