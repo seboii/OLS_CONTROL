@@ -43,6 +43,7 @@ public sealed class LoadTransferListItemDto
     [JsonPropertyName("load_status_id")] public LoadStatusDto? LoadStatusId { get; init; }
     [JsonPropertyName("customer_id")] public NamedRefDto? CustomerId { get; init; }
     [JsonPropertyName("sender_id")] public NamedRefDto? SenderId { get; init; }
+    [JsonPropertyName("usercode_with_notification")] public NamedRefDto? AssignedUser { get; init; }
 }
 
 public sealed class LoadStatusDto
@@ -248,6 +249,9 @@ public sealed class LoadTransferService : ILoadTransferService
                     .FirstOrDefault(),
                 SenderId = _db.Accounts.Where(a => a.Id == t.SenderId)
                     .Select(a => new NamedRefDto { Id = a.Id, Name = a.Name })
+                    .FirstOrDefault(),
+                AssignedUser = _db.Users.Where(u => u.Id == t.UsercodeWithNotification)
+                    .Select(u => new NamedRefDto { Id = u.Id, Name = u.Name + " " + u.Surname })
                     .FirstOrDefault(),
             });
 

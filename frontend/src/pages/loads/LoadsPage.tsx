@@ -25,6 +25,7 @@ interface LoadTransferItem {
   customer_id: NamedRef | null;
   sender_id: NamedRef | null;
   load_status_id: NamedRef | null;
+  usercode_with_notification: NamedRef | null;
 }
 
 interface PackageDetail {
@@ -555,6 +556,7 @@ export function LoadsPage() {
     { key: "customer", header: "Müşteri", sortable: true, render: (r) => <span className="font-semibold">{r.customer_id?.name ?? "—"}</span> },
     { key: "sender", header: "Gönderici", render: (r) => <span>{r.sender_id?.name ?? "—"}</span> },
     { key: "status", header: "Durum", render: (r) => (r.load_status_id?.name ? <Badge label={r.load_status_id.name} /> : "—") },
+    { key: "assigned", header: "Görevli", render: (r) => <span className="text-xs text-gray-600">{r.usercode_with_notification?.name?.trim() || "—"}</span> },
     { key: "created_at", header: "Tarih", render: (r) => <span className="font-mono text-xs text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR") : "—"}</span> },
   ];
 

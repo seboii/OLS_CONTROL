@@ -437,7 +437,18 @@ export function TripsPage() {
     { key: "expedition_type_id", header: "Tipi", render: (r) => <span className="text-xs text-gray-500">{r.expedition_type_id?.name ?? "—"}</span> },
     { key: "romork_id", header: "Araç", render: (r) => <span className="font-mono text-xs font-semibold">{r.romork_id?.plate_number ?? "—"}</span> },
     { key: "work_type", header: "İş Tipi", render: (r) => r.work_type?.name ?? "—" },
-    { key: "route", header: "Güzergâh", render: (r) => <span>{r.start_city_id?.name ?? "—"} → {r.end_city_id?.name ?? "—"}</span> },
+    {
+      key: "route",
+      header: "Güzergâh",
+      render: (r) =>
+        r.start_city_id && r.end_city_id ? (
+          <span>{r.start_city_id.name} → {r.end_city_id.name}</span>
+        ) : (
+          <span className={r.start_city_id || r.end_city_id ? "" : "text-gray-400"}>
+            {r.start_city_id?.name ?? r.end_city_id?.name ?? "—"}
+          </span>
+        ),
+    },
     { key: "department_id", header: "Departman", render: (r) => r.department_id?.name ?? "—" },
     { key: "status_id", header: "Durum", render: (r) => (r.status_id?.name ? <Badge label={r.status_id.name} /> : "—") },
     { key: "created_at", header: "Tarih", render: (r) => <span className="font-mono text-xs text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR") : "—"}</span> },
