@@ -27,6 +27,7 @@ interface AccountListItem {
   email: string | null;
   avatar: string | null;
   country_id: NamedRef | null;
+  phone_country_id: { id: string; name: string | null; phone_code: string | null } | null;
   tax_office: { id: number; name: string | null } | null;
   account_type_mapping_id: AccountTypeMappingRow[];
 }
@@ -56,7 +57,6 @@ interface AccountDetail extends AccountListItem {
   discount: number;
   city_id: NamedRef | null;
   district_id: NamedRef | null;
-  phone_country_id: NamedRef | null;
   contact_language: NamedRef | null;
   account_contact_person: { id: number; name: string | null; email: string | null }[];
   user_account_mapping: { id: number; user_id: UserOption | null }[];
@@ -67,6 +67,16 @@ const PER_PAGE = 10;
 // olsold: AccountFormDrawer.vue TabList — "Genel Bilgiler"/"İletişim Bilgileri"/
 // "Görevli"/"Faturalar" (son ikisi bu güncellemede eklendi; önceden hiç yoktu).
 const TABS = ["Genel Bilgiler", "İletişim Bilgileri", "Görevli", "Faturalar"];
+// olsold: pages/accounts/index.vue — üst seviye 6 sekme, aynı listeyi account_type_id
+// ile filtreliyor. ID'ler AccountTypeSeeder ile birebir (Müşteri=1 ... Acente=5).
+const TYPE_TABS: { label: string; typeId: number | null }[] = [
+  { label: "Tümü", typeId: null },
+  { label: "Müşteriler", typeId: 1 },
+  { label: "Tedarikçiler", typeId: 2 },
+  { label: "Alıcılar", typeId: 3 },
+  { label: "Göndericiler", typeId: 4 },
+  { label: "Acenteler", typeId: 5 },
+];
 const INVOICE_COMMERCIAL_TYPE_LABELS: Record<number, string> = { 0: "Temel Fatura", 1: "Ticari Fatura", 4: "E-Arşiv" };
 const invoiceMoney = (value: number | null) =>
   (value ?? 0).toLocaleString("tr-TR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -81,6 +91,8 @@ export function CustomersPage() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
   const [page, setPage] = useState(1);
+  const [listTab, setListTab] = useState(TYPE_TABS[0].label);
+  const activeTypeId = TYPE_TABS.find((t) => t.label === listTab)?.typeId ?? null;
   const [rows, setRows] = useState<AccountListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -105,7 +117,7 @@ export function CustomersPage() {
     phone_country_id: "",
     email: "",
     contact_language_id: "",
-    individual_personal: "S",
+    individual_personal: "T",
     discount: "0",
     account_type_mapping: [] as string[],
   });
@@ -138,6 +150,7 @@ export function CustomersPage() {
     api
       .get<DataMessage<Paginated<AccountListItem>>>("/api/v1/account", {
         search: debouncedSearch || undefined,
+        account_type_id: activeTypeId ?? undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -152,7 +165,7 @@ export function CustomersPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page]);
+  }, [debouncedSearch, page, listTab]);
 
   function resetForm() {
     setForm({
@@ -167,7 +180,7 @@ export function CustomersPage() {
       phone_country_id: "",
       email: "",
       contact_language_id: "",
-      individual_personal: "S",
+      individual_personal: "T",
       discount: "0",
       account_type_mapping: [],
     });
@@ -228,6 +241,7 @@ export function CustomersPage() {
     api
       .get<DataMessage<Paginated<AccountListItem>>>("/api/v1/account", {
         search: debouncedSearch || undefined,
+        account_type_id: activeTypeId ?? undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -245,9 +259,22 @@ export function CustomersPage() {
         ? f.account_type_mapping.filter((t) => t !== id)
         : [...f.account_type_mapping, id],
     }));
+    setErrors((e) => {
+      if (!e.account_type_mapping) return e;
+      const { account_type_mapping: _drop, ...rest } = e;
+      return rest;
+    });
   }
 
   async function handleSubmit() {
+    // olsold: AccountFormDrawer.vue Vuelidate — name/account_type/country istemci
+    // tarafında zorunlu (backend yalnızca name/country_id/discount'u doğruluyor).
+    if (form.account_type_mapping.length === 0) {
+      setErrors({ account_type_mapping: ["Hesap türü zorunludur."] });
+      setTab(TABS[0]);
+      return;
+    }
+
     setSaving(true);
     setErrors({});
     try {
@@ -303,22 +330,41 @@ export function CustomersPage() {
     }
   }
 
+  // olsold: AccountTable.vue — yalnızca 3 sütun (Adı: avatar+isim+ülke alt yazısı,
+  // Telefon: ülke koduyla, E-Posta). Kod/Tip/Vergi Dairesi sütunları kaynakta yok.
   const columns: Column<AccountListItem>[] = [
-    { key: "id", header: "Kod", sortable: true, width: "w-20", render: (r) => <span className="font-mono text-[11px] text-blue-600">C{r.id}</span> },
-    { key: "name", header: "Müşteri Adı", sortable: true, render: (r) => <span className="font-semibold">{r.name}</span> },
     {
-      key: "type",
-      header: "Tip",
+      key: "name",
+      header: "Adı",
+      sortable: true,
       render: (r) => (
-        <span className="text-xs text-gray-500">
-          {r.account_type_mapping_id.map((m) => m.account_type_id?.name).filter(Boolean).join(", ") || "—"}
-        </span>
+        <div className="flex items-center gap-3">
+          <div className="bg-gray-100 w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-gray-200 flex items-center justify-center">
+            {r.avatar ? (
+              <img src={`/storage/${r.avatar}`} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-lg text-gray-400">{r.name?.charAt(0).toUpperCase()}</span>
+            )}
+          </div>
+          <div>
+            <div className="font-medium">{r.name}</div>
+            {r.country_id?.name && <div className="text-xs text-gray-500">{r.country_id.name}</div>}
+          </div>
+        </div>
       ),
     },
-    { key: "tax_office", header: "Vergi Dairesi", render: (r) => <span className="text-xs text-gray-500">{r.tax_office?.name ?? "—"}</span> },
-    { key: "country", header: "Ülke", render: (r) => r.country_id?.name ?? "—" },
-    { key: "phone", header: "Telefon", render: (r) => <span className="font-mono text-xs text-gray-500">{r.phone ?? "—"}</span> },
-    { key: "email", header: "E-Posta", render: (r) => <span className="text-xs text-gray-500">{r.email ?? "—"}</span> },
+    {
+      key: "phone",
+      header: "Telefon",
+      render: (r) =>
+        r.phone && r.phone.length > 2 ? (
+          <span className="text-nowrap">
+            {r.phone_country_id?.phone_code ? `+${r.phone_country_id.phone_code} ` : ""}
+            {r.phone}
+          </span>
+        ) : null,
+    },
+    { key: "email", header: "E-Posta", render: (r) => r.email },
   ];
 
   return (
@@ -330,9 +376,18 @@ export function CustomersPage() {
           setSearch(v);
           setPage(1);
         }}
-        searchPlaceholder="Ad, vergi no, e-posta..."
+        searchPlaceholder="Ad, telefon, e-posta, ülke..."
         action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Müşteri</Btn> : undefined}
       >
+        <Tabs
+          tabs={TYPE_TABS.map((t) => t.label)}
+          active={listTab}
+          onChange={(v) => {
+            setListTab(v);
+            setPage(1);
+          }}
+          className="mb-4"
+        />
         <div className="bg-white">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={Users} title="Kayıt bulunamadı" desc="Arama kriterlerinize uygun müşteri bulunamadı." />

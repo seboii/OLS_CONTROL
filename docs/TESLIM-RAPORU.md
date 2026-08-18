@@ -701,6 +701,55 @@ yeni kalem oluşturuldu (liste 2'den 3'e çıktı) VE oluşturulan kaydın sayfa
 doğru çalışıyor). Backend'e hiç dokunulmadığından (uçlar zaten vardı) mevcut 121 test etkilenmedi,
 yeniden çalıştırılmadı.
 
+**Kritik yön değişikliği #26 (bu güncellemede — kullanıcı talebiyle başlatılan tam modül yeniden
+taraması, Müşteri modülü):** 32+16-modal turundan sonra kullanıcı "baştan sona tüm modülleri tekrar
+birebir tara" talimatı verdi. Müşteri (Account) modülü `FrontAccountController.php` +
+`AccountFormDrawer.vue` + `AccountTable.vue` + `pages/accounts/index.vue` satır satır yeniden okunarak
+`AccountService.cs`/`AccountController.cs`/`CustomersPage.tsx` ile karşılaştırıldı. 6 somut eksik
+bulundu ve düzeltildi:
+1. **Liste sayfasında 6 tip-sekmesi tamamen eksikti** — kaynakta `pages/accounts/index.vue` üst
+   seviyede "Tümü/Müşteriler/Tedarikçiler/Alıcılar/Göndericiler/Acenteler" sekmeleri var, her biri AYNI
+   listeyi `account_type_id` (1-5) ile filtreliyor (backend zaten destekliyordu — `AccountService.
+   ListAsync`'te bu parametre vardı ama frontend hiç göndermiyordu). `TYPE_TABS` sabiti + `listTab`
+   state eklendi, Teklif modülünün 6-durum-sekmesi deseniyle (Kritik yön değişikliği #23) aynı yaklaşım.
+2. **Liste sütunları kaynaktan sapmıştı** — `AccountTable.vue`'da yalnızca 3 sütun var: "Adı" (avatar/baş
+   harf + isim + ülke adı alt yazı), "Telefon" (ülke koduyla, yalnızca `phone.length > 2` ise), "E-Posta".
+   Target'ta bunun yerine 7 sütun vardı (Kod/Tip/Vergi Dairesi gibi kaynakta HİÇ olmayan 3 fazla sütun +
+   avatar'sız düz isim + ayrı Ülke sütunu). 3 sütuna indirildi, avatar/baş-harf dairesi ve isim altı ülke
+   alt yazısı eklendi.
+3. **"Hesap Türü" istemci tarafında zorunlu değildi** — kaynakta Vuelidate bu alanı zorunlu kılıyor
+   ("Hesap türü zorunludur." mesajıyla submit'i engelliyor), ANCAK backend'in `RequestSave`/
+   `RequestUpdate`'i bu alanı hiç doğrulamıyor (yalnızca name/country_id/discount). Yani kaynakta bu
+   kural SADECE istemcide var ve tek güvenlik ağı bu. Target'ta hiç yoktu — en az bir tip seçilmeden
+   kayıt oluşturulabiliyordu. Aynı istemci-taraflı kontrol + mesaj eklendi.
+4. **`individual_personal` varsayılanı ters kutuplu idi** — kaynak yeni kayıtta "Tüzel" (T) ile başlıyor
+   (`createInitialFormState`), target "Şahıs" (S) ile başlıyordu.
+5. **`single()` yanıtında `Invoice` ilişkisi rol bazlı gizli değildi** — kaynakta yalnızca süper admin
+   dalı `'Invoice'` ilişkisini eager-load ediyor (normal kullanıcı dalı VE save/update yanıtları bu
+   ilişkiyi hiç yüklemiyor). `AccountService.BuildDetailAsync` her zaman fatura listesini dolduruyordu;
+   artık `includeInvoices` parametresiyle yalnızca `SingleAsync` + süper admin çağrısında dolduruluyor,
+   save/update ve normal kullanıcı görünümünde boş dizi dönüyor (`IAccountService.SingleAsync` imzası
+   `bool includeInvoices` aldı; `AccountController.Single` süper adminliği önceden hesaplayıp geçiriyor).
+6. **Arama placeholder'ı yanıltıcıydı** — "vergi no" ile aranabileceğini ima ediyordu, ancak ne kaynak ne
+   de backend arama sorgusu `tax_number` alanına dokunuyor; metin gerçek arama alanlarını yansıtacak
+   şekilde düzeltildi.
+
+**Bilinçli olarak DÜZELTİLMEDİ (belgelendi, kullanıcı isterse yeniden değerlendirilebilir):** kaynakta
+"İletişim Dili" alanı tüm ülkeler yerine 3 sabit UUID'e sabitlenmiş statik bir liste (İngilizce/Rusça/
+Türkçe). Bu UUID'ler target'ın `countries` tablosunda YOK — target'ın ülke referans verisi zaten baştan
+beri yalnızca 3 test kaydı içeriyor (Türkiye/Rusya/Almanya, kaynaktaki gerçek ~190 ülkelik tablonun
+YERİNE geçen bilinçli, erken-faz bir test verisi kararı). Kaynağın tam UUID'lerini birebir kopyalamak
+var olmayan kayıtlara referans vereceğinden özelliği BOZAR; bu yüzden alan mevcut `countries`
+lookup'ını kullanmaya devam ediyor (zaten kısa bir liste). Bu, kod taşıma değil veri sağlama kapsamına
+giren bir konu olduğundan bilinçli olarak ertelendi.
+
+Canlı Docker'da uçtan uca doğrulandı: 6 sekme + `account_type_id` filtresi ağ isteklerinde teyit edildi;
+liste 3 sütuna indi ve avatar/ülke-alt-yazısı doğru render edildi; "Hesap Türü" boşken submit tıklanınca
+HİÇBİR POST isteği atılmadan "Hesap türü zorunludur." hatası gösterildi, tip seçilince hata anında
+temizlendi; yeni kayıt "Tüzel" varsayılanıyla ve seçilen tiple başarıyla oluşturuldu (200 OK); oluşan
+kaydın "Faturalar" sekmesi (süper admin) hatasız render oldu. `dotnet build` + tam `dotnet test` **121/121
+geçti** (imza değişikliği tek çağrı noktasını etkiledi, mevcut testler kırılmadı).
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

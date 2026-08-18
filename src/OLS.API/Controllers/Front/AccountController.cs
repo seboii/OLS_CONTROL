@@ -62,11 +62,13 @@ public sealed class AccountController : ApiControllerBase
 
         // olsold: süper admin her cariyi görür; değilse yalnızca kendisine
         // atanmış cariler, aksi halde 403.
-        if (!await _accounts.IsVisibleToUserAsync(userId, id, cancellationToken))
+        var isSuperAdmin = await _accounts.IsSuperAdminAsync(userId, cancellationToken);
+        if (!isSuperAdmin && !await _accounts.IsVisibleToUserAsync(userId, id, cancellationToken))
             return StatusCode(StatusCodes.Status403Forbidden,
                 ApiResponse.Message(Translator.Get("Yetkisiz Erişim")));
 
-        var account = await _accounts.SingleAsync(id, cancellationToken);
+        // olsold: 'Invoice' ilişkisi single()'da yalnızca süper admin dalında yükleniyordu.
+        var account = await _accounts.SingleAsync(id, isSuperAdmin, cancellationToken);
 
         return account is null
             ? NotFoundError()

@@ -9,7 +9,7 @@ namespace OLS.Business.Services.Accounts;
 public interface IAccountService
 {
     Task<object> ListAsync(AccountListQuery query, CancellationToken cancellationToken = default);
-    Task<AccountDetailDto?> SingleAsync(long id, CancellationToken cancellationToken = default);
+    Task<AccountDetailDto?> SingleAsync(long id, bool includeInvoices, CancellationToken cancellationToken = default);
     Task<bool> IsVisibleToUserAsync(long userId, long accountId, CancellationToken cancellationToken = default);
     Task<bool> IsSuperAdminAsync(long userId, CancellationToken cancellationToken = default);
 
@@ -187,7 +187,7 @@ public sealed class AccountService : IAccountService
             .AnyAsync(m => m.UserId == userId && m.AccountId == (int)accountId, cancellationToken);
     }
 
-    public async Task<AccountDetailDto?> SingleAsync(long id, CancellationToken cancellationToken = default)
+    public async Task<AccountDetailDto?> SingleAsync(long id, bool includeInvoices, CancellationToken cancellationToken = default)
     {
         var account = await _db.Accounts.AsNoTracking()
             .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
@@ -195,7 +195,7 @@ public sealed class AccountService : IAccountService
         if (account is null)
             return null;
 
-        return await BuildDetailAsync(account, cancellationToken);
+        return await BuildDetailAsync(account, includeInvoices, cancellationToken);
     }
 
     public async Task<AccountSaveResult> CreateAsync(
@@ -252,7 +252,8 @@ public sealed class AccountService : IAccountService
         // kalır ve senkron dışı olur. olsold da aynı riski taşıyordu.
         await SyncToSiberAsync(account, model, alici, satici, isNew: true, cancellationToken);
 
-        var detail = await BuildDetailAsync(account, cancellationToken);
+        // olsold: save() yanıtı 'Invoice' ilişkisini hiç yüklemiyordu.
+        var detail = await BuildDetailAsync(account, includeInvoices: false, cancellationToken);
         return new AccountSaveResult(detail, null);
     }
 
@@ -316,7 +317,8 @@ public sealed class AccountService : IAccountService
 
         await SyncToSiberAsync(account, model, alici, satici, isNew: false, cancellationToken);
 
-        var detail = await BuildDetailAsync(account, cancellationToken);
+        // olsold: update() yanıtı da 'Invoice' ilişkisini yüklemiyordu.
+        var detail = await BuildDetailAsync(account, includeInvoices: false, cancellationToken);
         return new AccountSaveResult(detail, null);
     }
 
@@ -463,8 +465,13 @@ public sealed class AccountService : IAccountService
         }
     }
 
+    /// <summary>
+    /// olsold: <c>single()</c> yalnızca süper admin dalında <c>'Invoice'</c> ilişkisini
+    /// eager-load ediyordu; normal kullanıcı dalında (ve save/update yanıtlarında) bu
+    /// ilişki hiç yüklenmiyor, dolayısıyla JSON'da yer almıyordu.
+    /// </summary>
     private async Task<AccountDetailDto> BuildDetailAsync(
-        Account account, CancellationToken cancellationToken)
+        Account account, bool includeInvoices, CancellationToken cancellationToken)
     {
         var country = await LoadCountryAsync(account.CountryId, cancellationToken);
         var phoneCountry = await LoadCountryAsync(account.PhoneCountryId, cancellationToken);
@@ -527,28 +534,30 @@ public sealed class AccountService : IAccountService
             })
             .ToListAsync(cancellationToken);
 
-        var invoices = await _db.Invoices.AsNoTracking()
-            .Where(i => i.AccountId == account.Id)
-            .OrderByDescending(i => i.Id)
-            .Select(i => new AccountInvoiceDto
-            {
-                Id = i.Id,
-                InvoiceId = i.InvoiceId,
-                BoxType = i.BoxType,
-                CommercialType = i.CommercialType,
-                TargetTitle = i.TargetTitle,
-                TargetIdentityNo = i.TargetIdentityNo,
-                PayableAmount = i.PayableAmount,
-                TaxExclusiveAmount = i.TaxExclusiveAmount,
-                TaxAmount = i.TaxAmount,
-                TaxRate = i.TaxRate,
-                DocumentCurrencyCode = i.DocumentCurrencyCode,
-                InvoiceType = i.InvoiceType == null ? null
-                    : new AccountTypeDto { Id = i.InvoiceType.Id, Name = i.InvoiceType.Name ?? string.Empty },
-                InvoiceStatus = i.InvoiceStatus == null ? null
-                    : new AccountTypeDto { Id = i.InvoiceStatus.Id, Name = i.InvoiceStatus.Name ?? string.Empty },
-            })
-            .ToListAsync(cancellationToken);
+        var invoices = includeInvoices
+            ? await _db.Invoices.AsNoTracking()
+                .Where(i => i.AccountId == account.Id)
+                .OrderByDescending(i => i.Id)
+                .Select(i => new AccountInvoiceDto
+                {
+                    Id = i.Id,
+                    InvoiceId = i.InvoiceId,
+                    BoxType = i.BoxType,
+                    CommercialType = i.CommercialType,
+                    TargetTitle = i.TargetTitle,
+                    TargetIdentityNo = i.TargetIdentityNo,
+                    PayableAmount = i.PayableAmount,
+                    TaxExclusiveAmount = i.TaxExclusiveAmount,
+                    TaxAmount = i.TaxAmount,
+                    TaxRate = i.TaxRate,
+                    DocumentCurrencyCode = i.DocumentCurrencyCode,
+                    InvoiceType = i.InvoiceType == null ? null
+                        : new AccountTypeDto { Id = i.InvoiceType.Id, Name = i.InvoiceType.Name ?? string.Empty },
+                    InvoiceStatus = i.InvoiceStatus == null ? null
+                        : new AccountTypeDto { Id = i.InvoiceStatus.Id, Name = i.InvoiceStatus.Name ?? string.Empty },
+                })
+                .ToListAsync(cancellationToken)
+            : [];
 
         return new AccountDetailDto
         {
