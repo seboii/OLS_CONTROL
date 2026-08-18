@@ -750,6 +750,36 @@ temizlendi; yeni kayıt "Tüzel" varsayılanıyla ve seçilen tiple başarıyla 
 kaydın "Faturalar" sekmesi (süper admin) hatasız render oldu. `dotnet build` + tam `dotnet test` **121/121
 geçti** (imza değişikliği tek çağrı noktasını etkiledi, mevcut testler kırılmadı).
 
+**Kritik yön değişikliği #27 (bu güncellemede — yeniden tarama, Teklif modülü):**
+`OfferTable.vue` + `OfferFormDrawer.vue`'nin `offer_data` başlangıç durumu satır satır yeniden okunarak
+`QuotesPage.tsx` ile karşılaştırıldı, 2 eksik bulundu (backend zaten tüm alanları döndürüyordu —
+`LoadListItemDto`'da `load_number`/`loading_type_id` zaten vardı, sıfır backend değişikliği gerekti):
+1. **Liste 4 sütunu 2'ye sıkıştırıyordu** — kaynakta "Yük No" (`load_number`) ve "Rezervasyon No"
+   (`reservation_number`) AYRI sütunlar, target tek bir "Teklif No" sütununda birleştiriyordu (teklif
+   Yük'e dönüştükten sonra oluşan `load_number` hiç görünmüyordu). Aynı şekilde "Yük Tipi"
+   (`loading_type_id` — Parsiyel/Komple) ve "Yük Türü" (`work_type_id` — İhracat/İthalat/Transit) ayrı
+   sütunlar; target yalnızca "İş Tipi" (work_type_id) gösteriyordu. 4 sütuna ayrıldı, kaynaktaki sıra
+   korundu (Yük No, Rezervasyon No, Yük Tipi, Yük Türü, Müşteri, İçerik, Görevli, Tarih).
+2. **Yeni teklif formu varsayılan değerleri eksikti** — kaynakta her yeni teklif Ödeme Tipi="PEŞİN",
+   Durum="TEKLİF", Departman="SATIŞ & PAZARLAMA" ve Geçerlilik Tarihi=bugün+7 ile önceden dolu açılıyor
+   (`offer_data` reactive başlangıç nesnesi); target bu 4 alanı boş bırakıyordu. Ad-eşlemeli (ID değil)
+   varsayılan eklendi — Kritik yön değişikliği #23'teki durum-sekmesi yaklaşımıyla aynı desen. ÖNEMLİ:
+   target'ın seed verisi kaynaktan farklı yazımda ("Peşin"/"Teklif" — büyük harf değil — ve departman
+   "SATIŞ & PAZARLAMA" yerine kısaca "Satış") olduğu canlı DB sorgusuyla tespit edildi; eşleme buna göre
+   düzeltildi (ilk denemede büyük/küçük harf uyuşmazlığından ötürü hiçbir varsayılan uygulanmıyordu —
+   canlı testte fark edilip düzeltildi).
+
+Doğrulama: "Ürünler" popup'ının (`OfferListProductsDialog.vue`) tetikleyici düğmesi hâlâ `v-if="false"`
+olduğu yeniden teyit edildi (önceki oturumdaki tespit doğru). "Yük İçeriği" sekmesi kaynakta ayrı bir
+TabPanel, target'ta "Genel Bilgiler" içinde satır-tabanlı bir alt bölüm — tüm alanlar mevcut, yalnızca
+yerleşim farklı (Task #14'ten kalma bilinçli karar, yeniden değerlendirilmedi). "E-Posta Ayarları"
+sekmesi (Gönderilecek/CC) zaten tam çalışır durumda bulundu.
+
+Canlı Docker'da doğrulandı: yeni teklif formu açıldığında Ödeme Tipi="Peşin"(id 1), Durum="Teklif"(id 4),
+Departman="Satış"(id 2), Geçerlilik Tarihi=bugün+7 olarak JS ile okunan gerçek `<select>` value'larından
+teyit edildi. Backend'e dokunulmadığından (`dotnet build`/`test` çalıştırılmadı — sadece frontend
+değişti) mevcut 121 test etkilenmedi.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

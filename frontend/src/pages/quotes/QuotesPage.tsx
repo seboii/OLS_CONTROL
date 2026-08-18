@@ -23,6 +23,7 @@ interface LoadItem {
   offer_date: string | null;
   status_type_id: number | null;
   work_type_id: NamedRef | null;
+  loading_type_id: NamedRef | null;
   customer_id: AccountOption | null;
   load_content_count: number;
   siber_id: string | null;
@@ -340,10 +341,21 @@ export function QuotesPage() {
   }, [debouncedSearch, page, listTab, statusTypes.length]);
 
   function resetForm() {
+    // olsold: OfferFormDrawer.vue offer_data başlangıç değerleri — yeni teklif her
+    // zaman Ödeme Tipi="PEŞİN", Durum="TEKLİF", Departman="SATIŞ & PAZARLAMA" ve
+    // Geçerlilik Tarihi=bugün+7 ile açılır (ID değil AD ile eşleniyor — Kritik yön
+    // değişikliği #23'teki durum-sekmesi eşlemesiyle aynı yaklaşım). target'ın seed
+    // verisi kaynaktan farklı yazım kullanıyor (ör. "Peşin"/"Teklif" — büyük harf
+    // değil — ve departman "SATIŞ & PAZARLAMA" yerine kısaca "Satış"), o yüzden ad
+    // eşlemesi target'ın GERÇEK kayıtlarına göre yapılıyor.
     setForm({
-      work_type_id: "", loading_type_id: "", payment_type_id: "", status_type_id: "",
-      load_transfer_type_id: "", instruction_id: "", romork_type_id: "", department_id: "",
-      offer_date: new Date().toISOString().slice(0, 10), offer_validity_date: "",
+      work_type_id: "", loading_type_id: "",
+      payment_type_id: String(paymentTypes.find((t) => t.name === "Peşin")?.id ?? ""),
+      status_type_id: String(statusTypes.find((t) => t.name === "Teklif")?.id ?? ""),
+      load_transfer_type_id: "", instruction_id: "", romork_type_id: "",
+      department_id: String(departments.find((t) => t.name === "Satış")?.id ?? ""),
+      offer_date: new Date().toISOString().slice(0, 10),
+      offer_validity_date: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
       marketing_notification_date: new Date().toISOString().slice(0, 10),
       payer_company: "", description: "", way_of_working: "0",
     front_transportation_by_us: "0", final_transportation_by_us: "0",
@@ -604,8 +616,13 @@ export function QuotesPage() {
     }
   }
 
+  // olsold: OfferTable.vue — "Yük No"/"Rezervasyon No" ve "Yük Tipi"/"Yük Türü" AYRI
+  // sütunlar (load_number/reservation_number, loading_type_id/work_type_id).
   const columns: Column<LoadItem>[] = [
-    { key: "id", header: "Teklif No", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">{r.reservation_number ?? `T${r.id}`}</span> },
+    { key: "load_number", header: "Yük No", render: (r) => <span className="font-mono text-[11px]">{r.load_number ?? "—"}</span> },
+    { key: "id", header: "Rezervasyon No", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">{r.reservation_number ?? "—"}</span> },
+    { key: "loading_type", header: "Yük Tipi", render: (r) => <span className="text-xs text-gray-500">{r.loading_type_id?.name ?? "—"}</span> },
+    { key: "work_type", header: "Yük Türü", render: (r) => <span className="text-xs text-gray-500">{r.work_type_id?.name ?? "—"}</span> },
     {
       key: "customer",
       header: "Müşteri",
@@ -619,7 +636,6 @@ export function QuotesPage() {
         </div>
       ),
     },
-    { key: "work_type", header: "İş Tipi", render: (r) => <span className="text-xs text-gray-500">{r.work_type_id?.name ?? "—"}</span> },
     { key: "content_count", header: "İçerik", render: (r) => <span className="font-mono text-xs">{r.load_content_count} kalem</span> },
     { key: "charge_person", header: "Görevli", render: (r) => <ChargePersonsCell people={r.load_charge_person} /> },
     { key: "offer_date", header: "Tarih", render: (r) => <span className="font-mono text-xs text-gray-500">{r.offer_date ? new Date(r.offer_date).toLocaleDateString("tr-TR") : "—"}</span> },
