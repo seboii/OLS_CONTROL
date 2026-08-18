@@ -880,6 +880,29 @@ etiketlemiş bulundu (Kullanıcılar modülündeki password_confirmation kararı
 kazara etiket yazım hatası, davranışsal/işlevsel bir kural değil — replikasyona değer görülmedi, zaten
 düzeltilmiş durumda). Bu modül için kod değişikliği yapılmadı.
 
+**Kritik yön değişikliği #34 (bu güncellemede — yeniden tarama, Ortak Altyapı, TEMİZ TARAMA):**
+`FrontLoginController.php`, `system_data.js`'in tam `app_menu` dizisi ve `GuestLogin.vue` yeniden
+incelendi. Giriş/Dashboard'ın görsel tasarımının kaynağı zaten olsold'un kendi Vue arayüzü değil
+(Kritik yön değişikliği #1/#2'de `docs/tasarım` referansına bilinçli geçildi), bu yüzden bu iki sayfa
+için pixel karşılaştırması değil iş akışı/API sözleşmesi karşılaştırması yapıldı.
+`FrontLoginController::login()`'daki "Bu Kullanıcı Pasif Durumdadır." (pasif kullanıcı 401 ile
+reddediliyor) kontrolü `AuthController.cs`'te birebir aynı mesajla zaten mevcut bulundu (Task #25'ten
+kalma). Tam `app_menu` taranarak kapsam-dışı modüllerin (Raporlar'ın 7 alt-raporu, vb.) zaten
+belgelendiği ve 8 modül + Dashboard'ın sidebar'da doğru path'lerle olduğu teyit edildi. Son olarak,
+oturumdaki TÜM değişikliklerden sonra uçtan uca canlı regresyon yapıldı: çıkış yapılıp
+admin@ols-scoped.local ile yeniden giriş denendi, Dashboard doğru yüklendi ve bu oturumda oluşturulan
+test kayıtlarını doğru yansıttı — hiçbir değişikliğin uygulamayı bozmadığı doğrulandı. Bu görev için
+kod değişikliği yapılmadı.
+
+---
+
+**Bu 9 görevlik ("baştan sona tüm modülleri tekrar birebir tara") turun özeti:** 8 modülün 7'sinde
+gerçek, somut eksik bulundu ve düzeltildi (yalnızca Destek Talebi ve Ortak Altyapı temiz çıktı) — 8
+ayrı commit, ~20 farklı düzeltme (liste sütunları 5 modülde, üst-seviye tip/durum sekmeleri 2 modülde,
+yeni-kayıt varsayılan değerleri 2 modülde, istemci-taraflı zorunlu alan kontrolü 2 modülde, rol bazlı
+veri gizliliği 1, eksik salt-okunur alan 1). Bu, önceki "temiz" tarama turlarına rağmen hâlâ
+bulunabilecek somut eksiklerin var olduğunu doğruladı.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
