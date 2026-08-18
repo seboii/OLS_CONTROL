@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
-import { Badge, Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
+import { Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
 
 interface NamedRef {
   id: string;
@@ -310,24 +310,30 @@ export function UsersPage() {
     }
   }
 
+  // olsold: UserTable.vue — yalnızca 3 sütun (Kullanıcı: avatar+ad soyad, Telefon,
+  // E-Posta). "Durum" kaynakta yok, kaldırıldı. Avatar+ad soyad tek sütunda birleşti
+  // (Müşteri'deki #26 ile aynı desen). "title" alt yazısı kaynakta da boş kalıyordu
+  // (User modelinde böyle bir alan yok — dead reference), taşınmadı.
   const columns: Column<UserItem>[] = [
     {
-      key: "avatar",
-      header: "",
-      width: "w-10",
-      render: (r) =>
-        r.avatar ? (
-          <img src={`/storage/${r.avatar}`} alt={r.name ?? ""} className="w-7 h-7 rounded-full object-cover" />
-        ) : (
-          <div className="w-7 h-7 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold">
-            {initials(r.name, r.surname)}
-          </div>
-        ),
+      key: "name",
+      header: "Kullanıcı",
+      sortable: true,
+      render: (r) => (
+        <div className="flex items-center gap-3">
+          {r.avatar ? (
+            <img src={`/storage/${r.avatar}`} alt={r.name ?? ""} className="w-8 h-8 rounded-lg object-cover border border-gray-200" />
+          ) : (
+            <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold border border-gray-200">
+              {initials(r.name, r.surname)}
+            </div>
+          )}
+          <span className="font-semibold">{r.name} {r.surname}</span>
+        </div>
+      ),
     },
-    { key: "name", header: "Ad Soyad", sortable: true, render: (r) => <span className="font-semibold">{r.name} {r.surname}</span> },
-    { key: "email", header: "E-posta", render: (r) => <span className="text-xs text-gray-500">{r.email}</span> },
     { key: "phone", header: "Telefon", render: (r) => <span className="font-mono text-xs text-gray-500">{r.phone ?? "—"}</span> },
-    { key: "status", header: "Durum", render: (r) => <Badge label={r.status ? "Aktif" : "Pasif"} /> },
+    { key: "email", header: "E-posta", render: (r) => <span className="text-xs text-gray-500">{r.email}</span> },
   ];
 
   return (

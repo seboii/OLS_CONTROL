@@ -856,6 +856,19 @@ dolayısıyla o kategoride ek bir eksik bulunmadı — Task #19'daki 9 zorunlu a
 Canlı Docker'da doğrulandı: "34 TEST 29" kaydıyla liste artık tam 5 sütun (Plaka/Tipi/Araç Durumu/
 Sahiplik Durumu/Kilometre) gösteriyor. Backend'e dokunulmadı, mevcut 121 test etkilenmedi.
 
+**Kritik yön değişikliği #32 (bu güncellemede — yeniden tarama, Kullanıcılar modülü):** `pages/user/list.vue`
++ `UserTable.vue` incelendi. Kaynakta liste yalnızca 3 sütun: "Kullanıcı" (avatar + ad soyad + `title`
+alt yazısı TEK sütunda), "Telefon", "E-Posta". Target 5 ayrı sütun gösteriyordu (çıplak avatar sütunu +
+Ad Soyad + E-posta + Telefon + kaynakta HİÇ olmayan "Durum"/Aktif-Pasif rozeti). Avatar+ad soyad
+Müşteri'deki #26 ile aynı desenle TEK "Kullanıcı" sütununda birleştirildi, "Durum" kaldırıldı, sıra
+kaynakla (Kullanıcı/Telefon/E-Posta) eşitlendi. `title` alt yazısı taşınmadı: kaynakta `data.title`
+User modelinde HİÇ VAR OLMAYAN bir alana referans veriyor (Teklif'teki `data.employee` bulgusuyla aynı
+sınıf — sessizce boş render olan ölü bir referans), gerçek bir özellik değil.
+
+Canlı Docker'da doğrulandı: 5 kullanıcı kaydıyla liste artık tam 3 sütun (Kullanıcı/Telefon/E-Posta)
+gösteriyor, avatar-baş harf rozetleri doğru render oluyor. Backend'e dokunulmadı, mevcut 121 test
+etkilenmedi.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
