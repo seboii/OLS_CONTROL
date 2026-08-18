@@ -344,16 +344,16 @@ export function QuotesPage() {
     // olsold: OfferFormDrawer.vue offer_data başlangıç değerleri — yeni teklif her
     // zaman Ödeme Tipi="PEŞİN", Durum="TEKLİF", Departman="SATIŞ & PAZARLAMA" ve
     // Geçerlilik Tarihi=bugün+7 ile açılır (ID değil AD ile eşleniyor — Kritik yön
-    // değişikliği #23'teki durum-sekmesi eşlemesiyle aynı yaklaşım). target'ın seed
-    // verisi kaynaktan farklı yazım kullanıyor (ör. "Peşin"/"Teklif" — büyük harf
-    // değil — ve departman "SATIŞ & PAZARLAMA" yerine kısaca "Satış"), o yüzden ad
-    // eşlemesi target'ın GERÇEK kayıtlarına göre yapılıyor.
+    // değişikliği #23'teki durum-sekmesi eşlemesiyle aynı yaklaşım). "Peşin"/"Teklif"
+    // target'ın seed verisinde büyük harf değil (Kritik yön değişikliği #27); Departman
+    // artık gerçek Siber adıyla ("Satış & Pazarlama") eşleşiyor (Kritik yön
+    // değişikliği #35 — DbSeeder gerçek sbr_departman verisiyle güncellendi).
     setForm({
       work_type_id: "", loading_type_id: "",
       payment_type_id: String(paymentTypes.find((t) => t.name === "Peşin")?.id ?? ""),
       status_type_id: String(statusTypes.find((t) => t.name === "Teklif")?.id ?? ""),
       load_transfer_type_id: "", instruction_id: "", romork_type_id: "",
-      department_id: String(departments.find((t) => t.name === "Satış")?.id ?? ""),
+      department_id: String(departments.find((t) => t.name === "Satış & Pazarlama")?.id ?? ""),
       offer_date: new Date().toISOString().slice(0, 10),
       offer_validity_date: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
       marketing_notification_date: new Date().toISOString().slice(0, 10),

@@ -260,23 +260,41 @@ public static class DbSeeder
             new AccountType { Name = "Acente", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
+        // olsold'un kendi kodları ("IHR"/"ITH"/"TRN") gerçek Siber'in ne sayısal kod'una
+        // (0-3) ne de ekkod'una (EX/IM/TR) uyuyordu, ayrıca "Yurtiçi" (kod 3) hiç yoktu.
+        // Gerçek `skn_sabittanim` (grupkod=ISTURU) ile düzeltildi.
         await SeedIfEmptyAsync(db.WorkTypes, ct, () =>
         [
-            new WorkType { Name = "İhracat", Code = "IHR", GroupCode = "ISTURU", AdditionalCode = "IHR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new WorkType { Name = "İthalat", Code = "ITH", GroupCode = "ISTURU", AdditionalCode = "ITH", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new WorkType { Name = "Transit", Code = "TRN", GroupCode = "ISTURU", AdditionalCode = "TRN", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new WorkType { Name = "İhracat", Code = "0", GroupCode = "ISTURU", AdditionalCode = "EX", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new WorkType { Name = "İthalat", Code = "1", GroupCode = "ISTURU", AdditionalCode = "IM", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new WorkType { Name = "Transit", Code = "2", GroupCode = "ISTURU", AdditionalCode = "TR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new WorkType { Name = "Yurtiçi", Code = "3", GroupCode = "ISTURU", AdditionalCode = "YI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
+        // Yerel 3 genel isim ("Operasyon"/"Satış"/"Muhasebe") gerçek sunucudaki 7
+        // departmanla hiç eşleşmiyordu. `sbr_departman`'dan birebir kopyalandı —
+        // "SATIŞ & PAZARLAMA"nın gerçek GUID'i (C249E951-...) Teklif formunun kendi
+        // varsayılan departman GUID'iyle (Kritik yön değişikliği #27) birebir eşleşti.
         await SeedIfEmptyAsync(db.Departments, ct, () =>
         [
-            new Department { Name = "Operasyon", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new Department { Name = "Satış", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new Department { Name = "Muhasebe", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Department { Name = "İdari İşler", SiberId = "3416B6FC-2323-4471-B0AD-12B673317109", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Department { Name = "İhracat Operasyon", SiberId = "D919053A-2CF0-4CB7-AD77-C487D312A71C", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Department { Name = "İthalat Operasyon", SiberId = "4575BDF4-B72F-44D0-BFA9-7C63BBD913F5", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Department { Name = "Muhasebe & Finans", SiberId = "CD95920F-12E3-48ED-821C-620A7442240E", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Department { Name = "Satış & Pazarlama", SiberId = "C249E951-FB3F-4FF9-A1C4-EF0223A00B75", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Department { Name = "Transit Operasyon", SiberId = "33289770-585F-4AFC-A007-C699CA8F7FBB", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Department { Name = "Yönetim", SiberId = "DB3B6E91-B9D4-430B-BE96-AD5030EBC967", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
+        // DÜRÜST NOT: gerçek `sbr_odemesekli` 12 ayrıntılı ödeme şekli içeriyor (Mal
+        // Mukabili/Akreditif/Vesaik Mükabili vb.) — bizim basit "Peşin/Vadeli" ikilisi
+        // bunlarla 1:1 eşleşmiyor. Yalnızca "Peşin" tam eşleşme (kod+GUID, Teklif'in
+        // kendi PEŞİN varsayılanıyla da birebir aynı); "Vadeli" için TEK bir doğru
+        // karşılık yok (VADELİ AKREDİTİF mi, MAL MUKABİLİ mi — iş kararı gerektirir),
+        // bu yüzden kodsuz bırakıldı.
         await SeedIfEmptyAsync(db.PaymentTypes, ct, () =>
         [
-            new PaymentType { Name = "Peşin", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new PaymentType { Name = "Peşin", Code = "2", SiberId = "97081C47-4F6A-4F37-9557-BC1CAC802106", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
             new PaymentType { Name = "Vadeli", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
