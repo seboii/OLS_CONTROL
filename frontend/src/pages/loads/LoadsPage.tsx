@@ -62,6 +62,8 @@ interface LoadTransferDetail extends LoadTransferItem {
   total_gross_weight: number | null;
   total_volume: number | null;
   total_lademeter: number | null;
+  total_lademeter_m3: number | null;
+  total_cap: number | null;
   weight_fee: number | null;
   in_truck: number | null;
   in_tail: number | null;
@@ -643,6 +645,18 @@ export function LoadsPage() {
                     </FormField>
                     <FormField label="Lademetre">
                       <TextInput value={form.total_lademeter} onChange={(v) => setForm((f) => ({ ...f, total_lademeter: v }))} />
+                    </FormField>
+                    {/* olsold: LoadFormDrawer.vue "Yük İçeriği" sekmesindeki salt-okunur toplam
+                        grid'i (Toplam Kap/Toplam Lademetre m³/Ağırlık Ücreti) — kaynakta sunucu
+                        tarafından hesaplanıyor, formda düzenlenemiyor. */}
+                    <FormField label="Toplam Kap">
+                      <TextInput value={detail?.total_cap != null ? String(detail.total_cap) : ""} onChange={() => {}} disabled placeholder="—" />
+                    </FormField>
+                    <FormField label="Toplam Lademetre (m³)">
+                      <TextInput value={detail?.total_lademeter_m3 != null ? String(detail.total_lademeter_m3) : ""} onChange={() => {}} disabled placeholder="—" />
+                    </FormField>
+                    <FormField label="Ağırlık Ücreti">
+                      <TextInput value={detail?.weight_fee != null ? String(detail.weight_fee) : ""} onChange={() => {}} disabled placeholder="—" />
                     </FormField>
                     <FormField label="Talimat Varış Tarihi">
                       <TextInput value={form.instruction_arrival_date} onChange={(v) => setForm((f) => ({ ...f, instruction_arrival_date: v }))} type="date" />

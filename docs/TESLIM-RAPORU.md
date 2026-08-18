@@ -780,6 +780,28 @@ Departman="Satış"(id 2), Geçerlilik Tarihi=bugün+7 olarak JS ile okunan ger�
 teyit edildi. Backend'e dokunulmadığından (`dotnet build`/`test` çalıştırılmadı — sadece frontend
 değişti) mevcut 121 test etkilenmedi.
 
+**Kritik yön değişikliği #28 (bu güncellemede — yeniden tarama, Yük modülü):** `LoadTable.vue` +
+`LoadFormDrawer.vue` incelendi. Liste (`/api/v1/load_transfer`, 4 sütun) ve 7 sekme (Genel Bilgiler/
+Paketler/Finans/Görevliler/Hareketler/Faturalar/Dosya Arşivi) zaten birebir doğru bulundu (Task #15/#16/
+#24'ten kalma sağlam iş). Tek gerçek eksik: kaynağın "Yük İçeriği" sekmesindeki salt-okunur 6'lı toplam
+grid'inden ("Toplam Kap", "Toplam Brüt Ağırlık", "Toplam Lademetre", "Toplam Lademetre (m³)", "Toplam
+Hacim", "Ağırlık Ücreti") target yalnızca 3'ünü gösteriyordu — "Toplam Kap", "Toplam Lademetre (m³)" ve
+"Ağırlık Ücreti" hiç render edilmiyordu. Backend'de `total_cap`/`weight_fee` zaten `LoadTransferDetailDto`
+içinde vardı; yalnızca `total_lademeter_m3` eksikti (entity'de `TotalLademeterM3` alanı zaten mevcuttu,
+DTO'ya ve query projeksiyonuna eklendi). 3 alan da frontend'e salt-okunur (disabled) olarak eklendi.
+
+**Yanlış pozitiften dönüldü (dikkatli inceleme sayesinde):** İlk bakışta `car_height`, `cmr_waiting`,
+`fcr_waiting`, `in_tail`, `in_truck` alanlarının da eksik olduğu düşünüldü (`LoadTransferUpdateService.cs`
+bu alanları `280`/sabitler ile YOK SAYARAK üzerine yazıyor — ilk bakışta şüpheli göründü). Ancak
+kaynağı satır satır yeniden okuyunca bu alanların TAMAMEN `v-if="false"` sarmalayıcı içinde olduğu
+görüldü (kaynakta hiç görünmüyorlar) — `LoadTransferUpdateService.cs`'teki "// Kaynaktaki sabitler."
+yorumu zaten bunu doğru şekilde belgeliyordu; bu ÖNCEDEN doğru tespit edilip düzeltilmiş bir bulgu,
+yeni bir eksik değil. Gereksiz bir "düzeltme" yapılmadı.
+
+Canlı Docker'da doğrulandı: "TEST-LT-29-1" kaydının Genel Bilgiler sekmesinde "Toplam Kap"/"Toplam
+Lademetre (m³)"/"Ağırlık Ücreti" alan yuvalarının artık göründüğü (test verisinde boş ama alan present)
+teyit edildi. `dotnet build` + tam test paketi **121/121 geçti**.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

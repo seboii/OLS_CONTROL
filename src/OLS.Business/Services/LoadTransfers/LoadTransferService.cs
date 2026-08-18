@@ -61,6 +61,7 @@ public sealed class LoadTransferDetailDto
     [JsonPropertyName("total_gross_weight")] public decimal? TotalGrossWeight { get; init; }
     [JsonPropertyName("total_volume")] public decimal? TotalVolume { get; init; }
     [JsonPropertyName("total_lademeter")] public decimal? TotalLademeter { get; init; }
+    [JsonPropertyName("total_lademeter_m3")] public decimal? TotalLademeterM3 { get; init; }
     [JsonPropertyName("total_cap")] public decimal? TotalCap { get; init; }
     [JsonPropertyName("in_truck")] public int? InTruck { get; init; }
     [JsonPropertyName("in_tail")] public int? InTail { get; init; }
@@ -264,6 +265,7 @@ public sealed class LoadTransferService : ILoadTransferService
             TotalGrossWeight = t.TotalGrossWeight,
             TotalVolume = t.TotalVolume,
             TotalLademeter = t.TotalLademeter,
+            TotalLademeterM3 = t.TotalLademeterM3,
             TotalCap = t.TotalCap,
             InTruck = t.InTruck,
             InTail = t.InTail,
