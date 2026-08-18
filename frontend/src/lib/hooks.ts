@@ -17,6 +17,11 @@ export interface NamedOption {
 export function useLookupOptions(path: string | null, query?: Record<string, string>) {
   const [options, setOptions] = useState<NamedOption[]>([]);
   const [loading, setLoading] = useState(!!path);
+  // olsold'un SelectAjax'ı her açılışta arar (her zaman taze); burada bir kez
+  // çekilip önbelleklendiğinden, bir LookupManagerModal ile yeni kayıt
+  // eklendikten sonra dropdown'ın güncel kalması için manuel bir yeniden-çekim
+  // tetikleyicisi gerekiyor (bkz. components/shared/LookupManagerModal.tsx).
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     if (!path) {
@@ -42,9 +47,9 @@ export function useLookupOptions(path: string | null, query?: Record<string, str
     // query kasıtlı olarak referans eşitliğiyle izleniyor; çağıran taraf
     // stabil bir nesne geçirmeli (örn. useMemo) — aksi halde sonsuz döngü olur.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path, JSON.stringify(query ?? {})]);
+  }, [path, JSON.stringify(query ?? {}), refreshToken]);
 
-  return { options, loading };
+  return { options, loading, refresh: () => setRefreshToken((n) => n + 1) };
 }
 
 export function useDebouncedValue<T>(value: T, delayMs = 300): T {

@@ -8,6 +8,7 @@ import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SearchInput, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
+import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerModal";
 
 interface NamedRef {
   id: string;
@@ -132,11 +133,16 @@ export function TripsPage() {
   });
 
   const { options: workTypes } = useLookupOptions("/api/v1/work_type");
-  const { options: departments } = useLookupOptions("/api/v1/department");
+  const { options: departments, refresh: refreshDepartments } = useLookupOptions("/api/v1/department");
   const { options: expeditionTypes } = useLookupOptions("/api/v1/expedition_type");
   const { options: expeditionStatuses } = useLookupOptions("/api/v1/expedition_status");
   const { options: destinations } = useLookupOptions("/api/v1/destination");
   const { options: cities } = useLookupOptions("/api/v1/city");
+  // olsold: ExpeditionFormDrawer.vue — Römork/Sefer Durumu/Sefer Tipi/Çalışma
+  // Tipi/Departman alanlarının HEPSİNİN "Yeni Ekle" düğmesi kopyala-yapıştır
+  // sonucu AYNI Departmanlar penceresini açıyor (yalnızca Departman alanı için
+  // bu doğru). Kullanıcı isteğiyle birebir korunuyor.
+  const [departmentModalOpen, setDepartmentModalOpen] = useState(false);
 
   function opts(list: { id: string | number; name: string }[]) {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
@@ -464,15 +470,19 @@ export function TripsPage() {
         <div className="p-6 grid grid-cols-2 gap-4">
           <FormField label="Araç (Plaka)" required error={errors.romork_id?.[0]}>
             <TextInput value={form.romork_id} onChange={(v) => setForm((f) => ({ ...f, romork_id: v }))} placeholder="Araç ID" error={!!errors.romork_id} />
+            <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
           </FormField>
           <FormField label="İş Tipi" required error={errors.work_type?.[0]}>
             <SelectInput value={form.work_type} onChange={(v) => setForm((f) => ({ ...f, work_type: v }))} options={opts(workTypes)} />
+            <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
           </FormField>
           <FormField label="Departman" required error={errors.department_id?.[0]}>
             <SelectInput value={form.department_id} onChange={(v) => setForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
+            <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
           </FormField>
           <FormField label="Sefer Tipi" required error={errors.expedition_type?.[0]}>
             <SelectInput value={form.expedition_type} onChange={(v) => setForm((f) => ({ ...f, expedition_type: v }))} options={opts(expeditionTypes)} />
+            <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
           </FormField>
           <FormField label="Çıkış Tarihi" error={errors.release_date?.[0]}>
             <TextInput value={form.release_date} onChange={(v) => setForm((f) => ({ ...f, release_date: v }))} type="date" error={!!errors.release_date} />
@@ -514,18 +524,23 @@ export function TripsPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <FormField label="Araç (Plaka)" required error={detailErrors.romork_id?.[0]}>
                     <TextInput value={detailForm.romork_id} onChange={(v) => setDetailForm((f) => ({ ...f, romork_id: v }))} placeholder="Araç ID" error={!!detailErrors.romork_id} />
+                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                   </FormField>
                   <FormField label="Durum" required error={detailErrors.expedition_status_id?.[0]}>
                     <SelectInput value={detailForm.status_id} onChange={(v) => setDetailForm((f) => ({ ...f, status_id: v }))} options={opts(expeditionStatuses)} />
+                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                   </FormField>
                   <FormField label="İş Tipi" required error={detailErrors.work_type?.[0]}>
                     <SelectInput value={detailForm.work_type} onChange={(v) => setDetailForm((f) => ({ ...f, work_type: v }))} options={opts(workTypes)} />
+                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                   </FormField>
                   <FormField label="Departman" required error={detailErrors.department_id?.[0]}>
                     <SelectInput value={detailForm.department_id} onChange={(v) => setDetailForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
+                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                   </FormField>
                   <FormField label="Sefer Tipi" required error={detailErrors.expedition_type?.[0]}>
                     <SelectInput value={detailForm.expedition_type} onChange={(v) => setDetailForm((f) => ({ ...f, expedition_type: v }))} options={opts(expeditionTypes)} />
+                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                   </FormField>
                   <FormField label="Araç Çıkış Tarihi" error={detailErrors.car_exit_date?.[0]} hint="Sefer durumu 8 iken zorunlu.">
                     <TextInput value={detailForm.car_exit_date} onChange={(v) => setDetailForm((f) => ({ ...f, car_exit_date: v }))} type="date" error={!!detailErrors.car_exit_date} />
@@ -800,6 +815,8 @@ export function TripsPage() {
           </div>
         </div>
       </Modal>
+
+      <DepartmentManagerModal open={departmentModalOpen} onClose={() => setDepartmentModalOpen(false)} onSaved={refreshDepartments} />
     </>
   );
 }

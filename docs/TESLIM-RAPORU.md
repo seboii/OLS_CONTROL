@@ -654,6 +654,53 @@ gösteriliyor, düzeltilip kaydedilince kullanıcı gerçekten oluşuyor (liste 
 `dotnet test` tam takım çalıştırıldı: **121/121 geçti** (29 birim + 92 entegrasyon, önceki 118 +
 bu güncellemenin 3 yeni testi).
 
+**Kritik yön değişikliği #25 (bu güncellemede — daha önce sona bırakılan 16 "Yeni Ekle" hızlı-ekleme
+modalı):** `general_store.js`'teki 16 `SET_*_MODAL_STATUS` eyleminin TÜM kullanım noktaları (~40
+konum, tüm ilgili `.vue` dosyaları) tek tek incelendi. Bulgular:
+- Konumların BÜYÜK ÇOĞUNLUĞU (`OfferFormDrawer.vue`, `RealLoad/LoadFormDrawer.vue`, `car/form.vue`'daki
+  neredeyse tüm alanlar) `v-if="...&& false"` ile kaynağın KENDİSİNDE devre dışı — birebirlik gereği
+  hiçbiri taşınmadı.
+- Gerçekten AKTİF olan az sayıdaki konum ayrı bir kaynak hatası taşıyor: Sefer formundaki 5 alanın
+  (Römork/Sefer Durumu/Sefer Tipi/Çalışma Tipi/Departman) VE Araç formundaki "İstenilen Römork Cinsi"
+  alanının "Yeni Ekle" düğmeleri kopyala-yapıştır sonucu HEPSİ aynı `SET_DEPARTMENTS_MODAL_STATUS`
+  çağrısına bağlı — yani örneğin "Sefer Tipi" yanındaki + işaretine tıklayınca "Sefer Tipi Ekle" değil
+  "Departman Ekle" penceresi açılıyor. Kullanıcıya bu hata açıkça soruldu; **birebir taşınması**
+  istendi ve öyle yapıldı.
+- Bunun TEK istisnası: Yük (RealLoad) formunun "Mali Kalem" alanı — `financial_item_management`
+  yetkisiyle `v-if="...&& false"` OLMADAN, kendi `SET_LOAD_FINANCIAL_ITEMS_MODAL_STATUS`'una doğru
+  bağlı. Teklif (Offer) formunun AYNI kavramdaki eşdeğeri ise (`OfferFormFinancialItem.vue`) `&& false`
+  ile kapalı — modüller arası bu asimetri de birebir korundu (Teklif'e Mali Kalem hızlı-ekleme
+  eklenmedi, yalnızca Yük'e eklendi).
+
+Backend tarafı SIFIR ek iş gerektirdi: `LookupControllerBase<TEntity>`/`LookupService<TEntity>`
+(olsold'daki 27 neredeyse-özdeş referans modülünü tek generic servise indirgeyen, DAHA ÖNCEKİ bir
+fazda kurulmuş altyapı) `Department`/`FinancialItem` dahil TÜM lookup tipleri için POST/PUT/DELETE
+uçlarını ZATEN sağlıyordu — yalnızca frontend hiç kullanmıyordu (bu oturumun en büyük ölçekli "backend
+hazır, frontend eksik" örneği).
+
+Frontend: `components/FeatureModals/Department.vue`/`LoadFinancialItem.vue`'nin İKİ KATMANLI deseni
+(liste-yönet penceresi → iç oluştur/düzenle diyaloğu) birebir taşındı — genel `LookupManagerModal<T>`
+bileşeni (`frontend/src/components/shared/`) + iki somut sarmalayıcı (`DepartmentManagerModal`,
+`FinancialItemManagerModal`). Kaynağın PrimeVue `DatatableAjax`'ının satır-içi (`rowEditor`)
+düzenlemesi yerine bu portun HER YERDE kullandığı "satıra tıkla → diyalog aç" deseni izlendi (görsel
+widget farkı, iş akışı aynı). Kaynakta iç form kaydedildikten sonra orijinal alanın dropdown'ı OTOMATİK
+yenilenmiyor (kullanıcı elle arayıp seçmeli) — ama kaynağın `SelectAjax`'ı her açılışta arar, bu
+portun `useLookupOptions`'ı ise BİR KEZ çekip önbelleğe alır; bu MİMARİ fark nedeniyle yeni kayıt asla
+görünmezdi. Bu yüzden `useLookupOptions`'a `refresh()` eklendi ve `LookupManagerModal`'ın `onSaved`
+callback'i ilgili dropdown'ı (yalnızca kavramsal olarak DOĞRU eşleşen alanlarda — Departman ve Mali
+Kalem — kopyala-yapıştır hatasının etkilediği DİĞER 5 alanda anlamsız olacağından bağlanmadı)
+tazeliyor.
+
+Canlı Docker'da (Docker Desktop'ın oturum sırasında kapanıp yeniden başlatılması + Vite proxy hedefinin
+`VITE_API_TARGET=http://localhost:8106` ile yeniden kurulması gerekti — veri named volume sayesinde
+kalıcı kaldı) uçtan uca doğrulandı: Araç'ın "Romork Tipi" alanından "Departmanlar" penceresi açılıp
+yeni departman oluşturuldu (liste 3'ten 4 kayda çıktı); Sefer'in 5 alanının HEPSİNİN aynı Departmanlar
+penceresini açtığı doğrulandı; Yük'ün "Mali Kalem" alanından "Yük Finansal Ürünleri" penceresi açılıp
+yeni kalem oluşturuldu (liste 2'den 3'e çıktı) VE oluşturulan kaydın sayfa yenilemeden diğer
+(Satış/Alış) Kalem dropdown'ında ANINDA seçilebilir hâle geldiği teyit edildi (`refresh()` mekanizması
+doğru çalışıyor). Backend'e hiç dokunulmadığından (uçlar zaten vardı) mevcut 121 test etkilenmedi,
+yeniden çalıştırılmadı.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +

@@ -10,6 +10,7 @@ import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
+import { FinancialItemManagerModal } from "@/components/shared/FinancialItemManagerModal";
 
 interface NamedRef {
   id: number;
@@ -238,8 +239,12 @@ export function LoadsPage() {
   const { options: productTypes } = useLookupOptions("/api/v1/product_type");
   const { options: caseTypes } = useLookupOptions("/api/v1/case_type");
   // olsold: SelectAjax fetchParams={type: buysell} -- Alış/Satış'a göre farklı kalem listesi.
-  const { options: financialItemsBuy } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_BUY_QUERY);
-  const { options: financialItemsSell } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_SELL_QUERY);
+  const { options: financialItemsBuy, refresh: refreshFinancialItemsBuy } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_BUY_QUERY);
+  const { options: financialItemsSell, refresh: refreshFinancialItemsSell } = useLookupOptions("/api/v1/financial_item", FINANCIAL_ITEM_SELL_QUERY);
+  // olsold: LoadFormDrawer.vue — Mali Kalem alanının "Yeni Ekle" düğmesi kaynakta
+  // doğru bağlı (RealLoad/LoadFormFinancialItem.vue ile aynı), Teklif'in kendi
+  // eşdeğerinden farklı olarak burada devre dışı DEĞİL.
+  const [financialItemModalOpen, setFinancialItemModalOpen] = useState(false);
   const { options: currencies } = useLookupOptions("/api/v1/currency");
   const { options: destinations } = useLookupOptions("/api/v1/destination");
   const { options: expeditionStatuses } = useLookupOptions("/api/v1/expedition_status");
@@ -746,6 +751,7 @@ export function LoadsPage() {
                                     onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, item_id: v } : x)))}
                                     options={opts(item.buysell === "1" ? financialItemsBuy : financialItemsSell)}
                                   />
+                                  <button type="button" onClick={() => setFinancialItemModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                                 </FormField>
                                 <FormField label="Para Birimi">
                                   <SelectInput value={item.currency_code} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, currency_code: v } : x)))} options={opts(currencies)} />
@@ -1024,6 +1030,12 @@ export function LoadsPage() {
           )}
         </div>
       </Modal>
+
+      <FinancialItemManagerModal
+        open={financialItemModalOpen}
+        onClose={() => setFinancialItemModalOpen(false)}
+        onSaved={() => { refreshFinancialItemsBuy(); refreshFinancialItemsSell(); }}
+      />
     </>
   );
 }

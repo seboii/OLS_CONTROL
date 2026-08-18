@@ -9,6 +9,7 @@ import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/co
 import { Drawer } from "@/components/ui/Overlay";
 import { Btn, FormField, TextInput, SelectInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
+import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerModal";
 
 interface NamedRef {
   id: number;
@@ -63,6 +64,10 @@ export function VehiclesPage() {
     capacity: "",
   });
   const [customer, setCustomer] = useState<AccountOption | null>(null);
+  // olsold: car/form.vue — "İstenilen Römork Cinsi" alanının "Yeni Ekle" düğmesi
+  // kopyala-yapıştır sonucu Departmanlar penceresini açıyor (Romork Tipi ile
+  // ilgisiz). Kullanıcı isteğiyle bu hata birebir korunuyor.
+  const [departmentModalOpen, setDepartmentModalOpen] = useState(false);
 
   const { options: carTypes } = useLookupOptions("/api/v1/car_type");
   const { options: romorkTypes } = useLookupOptions("/api/v1/romork_type");
@@ -243,6 +248,7 @@ export function VehiclesPage() {
           </FormField>
           <FormField label="Romork Tipi" required error={errors.romork_type?.[0]}>
             <SelectInput value={form.romork_type} onChange={(v) => setForm((f) => ({ ...f, romork_type: v }))} options={[{ value: "", label: "Seçiniz" }, ...romorkTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
+            <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
           </FormField>
           <FormField label="Sahiplik Durumu" required error={errors.vehicle_owner?.[0]}>
             <SelectInput value={form.vehicle_owner} onChange={(v) => setForm((f) => ({ ...f, vehicle_owner: v }))} options={[{ value: "", label: "Seçiniz" }, ...carOwners.map((t) => ({ value: String(t.id), label: t.name }))]} />
@@ -267,6 +273,8 @@ export function VehiclesPage() {
           </FormField>
         </div>
       </Drawer>
+
+      <DepartmentManagerModal open={departmentModalOpen} onClose={() => setDepartmentModalOpen(false)} />
     </>
   );
 }
