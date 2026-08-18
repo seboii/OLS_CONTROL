@@ -869,6 +869,17 @@ Canlı Docker'da doğrulandı: 5 kullanıcı kaydıyla liste artık tam 3 sütun
 gösteriyor, avatar-baş harf rozetleri doğru render oluyor. Backend'e dokunulmadı, mevcut 121 test
 etkilenmedi.
 
+**Kritik yön değişikliği #33 (bu güncellemede — yeniden tarama, Destek Talebi modülü, TEMİZ TARAMA):**
+`pages/website/contact/forms.vue` + `FormsTable.vue` + `FormDetailDrawer.vue` satır satır yeniden
+okundu ve `SupportPage.tsx` ile karşılaştırıldı. **Yeni eksik bulunamadı** — liste 6 sütunu (Kullanıcı/
+Tarih/Telefon/E-Posta/Okunma Durumu/Yanıtlanma Durumu) ve detay görünümü (Kullanıcı/E-posta/Telefon/
+Tarih/Mesaj/Yanıtlanma Durumu seçici) zaten birebir doğru. Dikkat çekici bulgu: kaynağın detay
+formunda 4. alanın ETİKETİ "Telefon Numarası" yazıyor ama İÇERİĞİ `created_at` (tarih) gösteriyor —
+kaynağın kendi kopyala-yapıştır etiket hatası. Target bunu zaten doğru şekilde "Tarih" olarak
+etiketlemiş bulundu (Kullanıcılar modülündeki password_confirmation kararıyla aynı ilkeyle: bariz,
+kazara etiket yazım hatası, davranışsal/işlevsel bir kural değil — replikasyona değer görülmedi, zaten
+düzeltilmiş durumda). Bu modül için kod değişikliği yapılmadı.
+
 ## 2. Tamamlanan iş (gerçekten çalışır, doğrulanmış)
 
 - **Backend:** 3 katman (`OLS.API`→`OLS.Business`→`OLS.DataAccess`), 59 tablo, EF Core/Npgsql +
