@@ -24,7 +24,7 @@ public interface ILoadTransferService
 }
 
 public sealed record LoadTransferListQuery(
-    string? Search, int? WorkTypeId, int? PerPage, int Page, string Path);
+    string? Search, int? WorkTypeId, DateOnly? DateFrom, DateOnly? DateTo, int? PerPage, int Page, string Path);
 
 /// <summary>
 /// Liste yanıtı. olsold yalnızca beş sütun seçip üç ilişkiyi yüklüyordu;
@@ -36,6 +36,8 @@ public sealed class LoadTransferListItemDto
 
     [JsonPropertyName("load_number_work_type")]
     public string? LoadNumberWorkType { get; init; }
+
+    [JsonPropertyName("created_at")] public DateTime? CreatedAt { get; init; }
 
     // İlişkiler aynı adlı sütunları ezer
     [JsonPropertyName("load_status_id")] public LoadStatusDto? LoadStatusId { get; init; }
@@ -213,12 +215,25 @@ public sealed class LoadTransferService : ILoadTransferService
         if (query.WorkTypeId is { } workTypeId)
             transfers = transfers.Where(t => t.WorkType == workTypeId);
 
+        if (query.DateFrom is { } dateFrom)
+        {
+            var from = dateFrom.ToDateTime(TimeOnly.MinValue);
+            transfers = transfers.Where(t => t.CreatedAt >= from);
+        }
+
+        if (query.DateTo is { } dateTo)
+        {
+            var to = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            transfers = transfers.Where(t => t.CreatedAt < to);
+        }
+
         var projected = transfers
             .OrderByDescending(t => t.Id)
             .Select(t => new LoadTransferListItemDto
             {
                 Id = t.Id,
                 LoadNumberWorkType = t.LoadNumberWorkType,
+                CreatedAt = t.CreatedAt,
                 LoadStatusId = _db.LoadStatusTypes
                     .Where(s => s.Id == t.LoadStatusId)
                     .Select(s => new LoadStatusDto

@@ -54,6 +54,8 @@ public sealed class LoadController : ApiControllerBase
         [FromQuery] string? search,
         [FromQuery(Name = "status_type_id")] int? statusTypeId,
         [FromQuery] int? timeout,
+        [FromQuery(Name = "date_from")] DateOnly? dateFrom,
+        [FromQuery(Name = "date_to")] DateOnly? dateTo,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
         CancellationToken cancellationToken = default)
@@ -62,7 +64,7 @@ public sealed class LoadController : ApiControllerBase
             return Unauthorized(ApiResponse.Error(Translator.Get("Yetkisiz Erişim")));
 
         var result = await _loads.ListAsync(
-            new LoadListQuery(userId, search, statusTypeId, timeout is 1, perPage, page, CurrentPath),
+            new LoadListQuery(userId, search, statusTypeId, timeout is 1, dateFrom, dateTo, perPage, page, CurrentPath),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");

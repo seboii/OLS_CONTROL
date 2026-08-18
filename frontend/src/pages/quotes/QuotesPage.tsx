@@ -247,6 +247,8 @@ export function QuotesPage() {
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [listTab, setListTab] = useState(STATUS_TABS[0].label);
   const [rows, setRows] = useState<LoadItem[]>([]);
@@ -321,6 +323,8 @@ export function QuotesPage() {
         search: debouncedSearch || undefined,
         status_type_id: isTimeoutTab ? undefined : activeStatusTypeId,
         timeout: isTimeoutTab ? 1 : undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -338,7 +342,7 @@ export function QuotesPage() {
     if (!isTimeoutTab && statusTypes.length === 0) return;
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page, listTab, statusTypes.length]);
+  }, [debouncedSearch, dateFrom, dateTo, page, listTab, statusTypes.length]);
 
   function resetForm() {
     // olsold: OfferFormDrawer.vue offer_data başlangıç değerleri — yeni teklif her
@@ -648,6 +652,13 @@ export function QuotesPage() {
         search={search}
         onSearchChange={(v) => { setSearch(v); setPage(1); }}
         searchPlaceholder="Teklif no, müşteri..."
+        filters={
+          <div className="flex items-center gap-1.5">
+            <div className="w-[136px]"><TextInput type="date" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} /></div>
+            <span className="text-xs text-gray-400">–</span>
+            <div className="w-[136px]"><TextInput type="date" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} /></div>
+          </div>
+        }
         action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Teklif</Btn> : undefined}
       >
         <Tabs

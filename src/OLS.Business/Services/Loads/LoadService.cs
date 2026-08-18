@@ -26,6 +26,8 @@ public sealed record LoadListQuery(
     string? Search,
     int? StatusTypeId,
     bool TimeoutOnly,
+    DateOnly? DateFrom,
+    DateOnly? DateTo,
     int? PerPage,
     int Page,
     string Path);
@@ -80,6 +82,18 @@ public sealed class LoadService : ILoadService
                 l.StatusTypeId != null && offerStatuses.Contains(l.StatusTypeId.Value) &&
                 l.LoadNumber == null &&
                 l.UpdatedAt <= oneWeekAgo);
+        }
+
+        if (query.DateFrom is { } dateFrom)
+        {
+            var from = dateFrom.ToDateTime(TimeOnly.MinValue);
+            loads = loads.Where(l => l.CreatedAt >= from);
+        }
+
+        if (query.DateTo is { } dateTo)
+        {
+            var to = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            loads = loads.Where(l => l.CreatedAt < to);
         }
 
         if (!string.IsNullOrWhiteSpace(query.Search))

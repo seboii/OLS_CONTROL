@@ -20,12 +20,13 @@ public interface IExpeditionService
 }
 
 public sealed record ExpeditionListQuery(
-    string? Search, int? WorkTypeId, int? PerPage, int Page, string Path);
+    string? Search, int? WorkTypeId, DateOnly? DateFrom, DateOnly? DateTo, int? PerPage, int Page, string Path);
 
 public sealed class ExpeditionListItemDto
 {
     [JsonPropertyName("id")] public long Id { get; init; }
     [JsonPropertyName("expedition_number")] public string? ExpeditionNumber { get; init; }
+    [JsonPropertyName("created_at")] public DateTime? CreatedAt { get; init; }
 
     [JsonPropertyName("work_type")] public NamedRefDto? WorkType { get; init; }
     [JsonPropertyName("expedition_type_id")] public NamedRefDto? ExpeditionTypeId { get; init; }
@@ -101,12 +102,25 @@ public sealed class ExpeditionService : IExpeditionService
         if (query.WorkTypeId is { } workTypeId)
             expeditions = expeditions.Where(e => e.WorkType == workTypeId);
 
+        if (query.DateFrom is { } dateFrom)
+        {
+            var from = dateFrom.ToDateTime(TimeOnly.MinValue);
+            expeditions = expeditions.Where(e => e.CreatedAt >= from);
+        }
+
+        if (query.DateTo is { } dateTo)
+        {
+            var to = dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue);
+            expeditions = expeditions.Where(e => e.CreatedAt < to);
+        }
+
         var projected = expeditions
             .OrderByDescending(e => e.Id)
             .Select(e => new ExpeditionListItemDto
             {
                 Id = e.Id,
                 ExpeditionNumber = e.ExpeditionNumber,
+                CreatedAt = e.CreatedAt,
                 WorkType = _db.WorkTypes.Where(w => w.Id == e.WorkType)
                     .Select(w => new NamedRefDto { Id = w.Id, Name = w.Name, Code = w.Code })
                     .FirstOrDefault(),

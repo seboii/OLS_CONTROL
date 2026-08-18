@@ -21,6 +21,7 @@ interface LoadTransferItem {
   id: number;
   load_number: string | null;
   load_number_work_type: string | null;
+  created_at: string | null;
   customer_id: NamedRef | null;
   sender_id: NamedRef | null;
   load_status_id: NamedRef | null;
@@ -194,6 +195,8 @@ export function LoadsPage() {
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<LoadTransferItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -263,7 +266,13 @@ export function LoadsPage() {
   function load() {
     setLoading(true);
     api
-      .get<DataMessage<Paginated<LoadTransferItem>>>("/api/v1/load_transfer", { search: debouncedSearch || undefined, per_page: PER_PAGE, page })
+      .get<DataMessage<Paginated<LoadTransferItem>>>("/api/v1/load_transfer", {
+        search: debouncedSearch || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        per_page: PER_PAGE,
+        page,
+      })
       .then((res) => {
         setRows(res.data.data);
         setTotal(res.data.total);
@@ -275,7 +284,7 @@ export function LoadsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page]);
+  }, [debouncedSearch, dateFrom, dateTo, page]);
 
   function fetchMovements(loadTransferId: number) {
     api
@@ -546,6 +555,7 @@ export function LoadsPage() {
     { key: "customer", header: "Müşteri", sortable: true, render: (r) => <span className="font-semibold">{r.customer_id?.name ?? "—"}</span> },
     { key: "sender", header: "Gönderici", render: (r) => <span>{r.sender_id?.name ?? "—"}</span> },
     { key: "status", header: "Durum", render: (r) => (r.load_status_id?.name ? <Badge label={r.load_status_id.name} /> : "—") },
+    { key: "created_at", header: "Tarih", render: (r) => <span className="font-mono text-xs text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR") : "—"}</span> },
   ];
 
   if (!can("load_management", "read")) {
@@ -554,7 +564,19 @@ export function LoadsPage() {
 
   return (
     <>
-      <ModulePage title="Yükler" search={search} onSearchChange={(v) => { setSearch(v); setPage(1); }} searchPlaceholder="Yük no, müşteri...">
+      <ModulePage
+        title="Yükler"
+        search={search}
+        onSearchChange={(v) => { setSearch(v); setPage(1); }}
+        searchPlaceholder="Yük no, müşteri..."
+        filters={
+          <div className="flex items-center gap-1.5">
+            <div className="w-[136px]"><TextInput type="date" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} /></div>
+            <span className="text-xs text-gray-400">–</span>
+            <div className="w-[136px]"><TextInput type="date" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} /></div>
+          </div>
+        }
+      >
         <div className="bg-white">
           {!loading && rows.length === 0 ? (
             <EmptyState

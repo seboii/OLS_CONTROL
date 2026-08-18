@@ -22,6 +22,7 @@ interface CarRef {
 interface ExpeditionItem {
   id: number;
   expedition_number: string | null;
+  created_at: string | null;
   work_type: NamedRef | null;
   expedition_type_id: NamedRef | null;
   status_id: NamedRef | null;
@@ -119,6 +120,8 @@ export function TripsPage() {
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [rows, setRows] = useState<ExpeditionItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -151,7 +154,13 @@ export function TripsPage() {
   function load() {
     setLoading(true);
     api
-      .get<DataMessage<Paginated<ExpeditionItem>>>("/api/v1/expedition", { search: debouncedSearch || undefined, per_page: PER_PAGE, page })
+      .get<DataMessage<Paginated<ExpeditionItem>>>("/api/v1/expedition", {
+        search: debouncedSearch || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        per_page: PER_PAGE,
+        page,
+      })
       .then((res) => {
         setRows(res.data.data);
         setTotal(res.data.total);
@@ -163,7 +172,7 @@ export function TripsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page]);
+  }, [debouncedSearch, dateFrom, dateTo, page]);
 
   function openNew() {
     setForm({ romork_id: "", work_type: "", department_id: "", expedition_type: "", release_date: "", entry_date: "", loading_date: "", return_date: "" });
@@ -431,6 +440,7 @@ export function TripsPage() {
     { key: "route", header: "Güzergâh", render: (r) => <span>{r.start_city_id?.name ?? "—"} → {r.end_city_id?.name ?? "—"}</span> },
     { key: "department_id", header: "Departman", render: (r) => r.department_id?.name ?? "—" },
     { key: "status_id", header: "Durum", render: (r) => (r.status_id?.name ? <Badge label={r.status_id.name} /> : "—") },
+    { key: "created_at", header: "Tarih", render: (r) => <span className="font-mono text-xs text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR") : "—"}</span> },
   ];
 
   return (
@@ -440,6 +450,13 @@ export function TripsPage() {
         search={search}
         onSearchChange={(v) => { setSearch(v); setPage(1); }}
         searchPlaceholder="Sefer no, plaka..."
+        filters={
+          <div className="flex items-center gap-1.5">
+            <div className="w-[136px]"><TextInput type="date" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} /></div>
+            <span className="text-xs text-gray-400">–</span>
+            <div className="w-[136px]"><TextInput type="date" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} /></div>
+          </div>
+        }
         action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Sefer</Btn> : undefined}
       >
         <div className="bg-white">

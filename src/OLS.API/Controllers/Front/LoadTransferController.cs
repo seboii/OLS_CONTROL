@@ -41,12 +41,14 @@ public sealed class LoadTransferController : ApiControllerBase
     public async Task<IActionResult> All(
         [FromQuery] string? search,
         [FromQuery(Name = "work_type_id")] int? workTypeId,
+        [FromQuery(Name = "date_from")] DateOnly? dateFrom,
+        [FromQuery(Name = "date_to")] DateOnly? dateTo,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
         CancellationToken cancellationToken = default)
     {
         var result = await _transfers.ListAsync(
-            new LoadTransferListQuery(search, workTypeId, perPage, page, CurrentPath),
+            new LoadTransferListQuery(search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");
@@ -199,12 +201,14 @@ public sealed class ExpeditionController : ApiControllerBase
     public async Task<IActionResult> All(
         [FromQuery] string? search,
         [FromQuery(Name = "work_type_id")] int? workTypeId,
+        [FromQuery(Name = "date_from")] DateOnly? dateFrom,
+        [FromQuery(Name = "date_to")] DateOnly? dateTo,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
         CancellationToken cancellationToken = default)
     {
         var result = await _expeditions.ListAsync(
-            new ExpeditionListQuery(search, workTypeId, perPage, page, CurrentPath),
+            new ExpeditionListQuery(search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");
