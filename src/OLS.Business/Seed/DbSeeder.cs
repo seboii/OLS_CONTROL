@@ -371,6 +371,36 @@ public static class DbSeeder
             new ExpeditionType { Name = "Deniz", Code = "12", GroupCode = "SEFERTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
+        // Aynı şekilde boştu — SiberLoadRepository.InsertYukAsync'in gönderdiği
+        // "YukTurKod" doğrudan skn_yuk.yukturkod (tinyint) sütununa gidiyor; bu alanın
+        // gerçek karşılığı skn_sabittanim(grupkod=YUKTUR) — isim eşleşmesi çok net
+        // (yük TÜRÜ kodu ↔ YUKTUR). Karayolu dışı taşımalar nadiren kullanıldığından
+        // yalnızca 3 temel mod eklendi; çok modlu (HAVA>DENİZ vb.) kombinasyonlar
+        // olsold'un kapsamında yok.
+        await SeedIfEmptyAsync(db.LoadTransferTypes, ct, () =>
+        [
+            new LoadTransferType { Name = "Kara", Code = "1", GroupCode = "YUKTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Hava", Code = "2", GroupCode = "YUKTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Deniz", Code = "3", GroupCode = "YUKTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+        ]);
+
+        // DÜRÜST NOT: bu tabloda hiç seeder yoktu (yalnızca elle eklenmiş test kaydı
+        // vardı) — "Kap Tipi" Teklif/Yük'ün İçerik formunda ZORUNLU alan olduğundan bu
+        // da fiilen içerik satırı eklemeyi engelliyordu. Gerçek `skn_kapcins` yüzlerce
+        // kayıt içeriyor (kodu sütunu boş, yalnızca GUID+ad var); tamamını modellemek
+        // yerine en yaygın 8 paketleme türü seçildi.
+        await SeedIfEmptyAsync(db.CaseTypes, ct, () =>
+        [
+            new CaseType { Name = "Adet", SiberId = "066C7361-FD78-11D5-982A-00306E00B104", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CaseType { Name = "Koli", SiberId = "DAF41673-2114-494A-8F01-D9075A365B15", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CaseType { Name = "Kutu", SiberId = "A60036AA-CCB9-4FD9-A71A-F3D988BD7D09", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CaseType { Name = "Palet", SiberId = "EAC8DA4F-895F-435B-BCB4-D5E6FF767D54", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CaseType { Name = "Kasa", SiberId = "E2B1D3CD-B181-4DCF-B4FA-5686ACF167B5", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CaseType { Name = "Fıçı", SiberId = "265A3BB7-644C-46AC-BE1B-6FDE00DD8B43", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CaseType { Name = "Rulo", SiberId = "4FCA74A2-26A7-11D6-982E-00306E00B104", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new CaseType { Name = "Konteyner", SiberId = "4FCA748B-26A7-11D6-982E-00306E00B104", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+        ]);
+
         // Aynı şekilde boştu. Siber'in skn_sabittanim (grupkod=TALIMATGELISSEKLI) —
         // "Talimat" alanının geliş şekli.
         await SeedIfEmptyAsync(db.Instructions, ct, () =>
