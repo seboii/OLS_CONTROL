@@ -92,12 +92,31 @@ public sealed class DashboardService : IDashboardService
         };
     }
 
+    /// <summary>Siber'de "boşaltıldı" durumu (skn_pozisyondurum.pozisyondurumid=14);
+    /// bu durumdaki sefer tamamlanmış sayılır (bkz. SiberExpeditionRepository.UnloadedStatusId
+    /// - aynı sabit orada aktif-sefer kontrolü için kullanılıyor).</summary>
+    private const int UnloadedStatusCode = 14;
+
     private async Task<DashboardMetricsDto> BuildMetricsAsync(
         DateTime now, DateTime monthStart, DateTime prevMonthStart, CancellationToken ct)
     {
-        var activeExpeditions = await _db.Expeditions.CountAsync(e => e.ReturnDate == null, ct);
-        var activeExpeditionsLastMonth = await _db.Expeditions.CountAsync(
-            e => e.ReturnDate == null && e.CreatedAt != null && e.CreatedAt < monthStart, ct);
+        var unloadedStatusId = await _db.ExpeditionStatuses
+            .Where(s => s.ExpeditionStatusId == UnloadedStatusCode)
+            .Select(s => (long?)s.Id)
+            .FirstOrDefaultAsync(ct);
+
+        // "Dönüşü girilmemiş" tek başına yanıltıcı - boşaltıldı olarak işaretlenmiş bir sefer
+        // dönüş tarihi girilmemiş olsa bile artık aktif değildir (kullanıcı geri bildirimi).
+        // "Boşaltıldı" durumu yerelde hiç tanımlı değilse (ör. Siber içe aktarımı hiç
+        // yapılmamış taze bir ortam) eski dönüş-tarihi sinyaline düşülür.
+        var activeExpeditions = unloadedStatusId is { } uid1
+            ? await _db.Expeditions.CountAsync(e => e.StatusId != uid1, ct)
+            : await _db.Expeditions.CountAsync(e => e.ReturnDate == null, ct);
+        var activeExpeditionsLastMonth = unloadedStatusId is { } uid2
+            ? await _db.Expeditions.CountAsync(
+                e => e.StatusId != uid2 && e.CreatedAt != null && e.CreatedAt < monthStart, ct)
+            : await _db.Expeditions.CountAsync(
+                e => e.ReturnDate == null && e.CreatedAt != null && e.CreatedAt < monthStart, ct);
 
         var loadTransfersThisMonth = await _db.LoadTransfers.CountAsync(
             l => l.CreatedAt != null && l.CreatedAt >= monthStart, ct);
@@ -125,11 +144,12 @@ public sealed class DashboardService : IDashboardService
 
         var expeditionsThisMonth = await _db.Expeditions
             .Where(e => e.CreatedAt != null && e.CreatedAt >= monthStart)
-            .Select(e => new { e.ReturnDate })
+            .Select(e => new { e.ReturnDate, e.StatusId })
             .ToListAsync(ct);
         var completionRate = expeditionsThisMonth.Count == 0
             ? 0
-            : 100.0 * expeditionsThisMonth.Count(e => e.ReturnDate != null) / expeditionsThisMonth.Count;
+            : 100.0 * expeditionsThisMonth.Count(e => unloadedStatusId is { } uid3 ? e.StatusId == uid3 : e.ReturnDate != null)
+                / expeditionsThisMonth.Count;
 
         return new DashboardMetricsDto
         {

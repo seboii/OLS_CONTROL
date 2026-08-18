@@ -497,6 +497,7 @@ export function TripsPage() {
         onClose={() => setDrawerOpen(false)}
         title="Yeni Sefer"
         subtitle="Yeni sefer kaydı oluştur"
+        width="w-[720px]"
         footer={
           canCreate && (
             <div className="flex gap-2">
@@ -506,7 +507,7 @@ export function TripsPage() {
           )
         }
       >
-        <div className="p-6 grid grid-cols-2 gap-4">
+        <div className="p-8 grid grid-cols-2 gap-x-6 gap-y-5">
           <FormField label="Araç (Plaka)" required error={errors.romork_id?.[0]}>
             <TextInput value={form.romork_id} onChange={(v) => setForm((f) => ({ ...f, romork_id: v }))} placeholder="Araç ID" error={!!errors.romork_id} />
             <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
@@ -543,7 +544,7 @@ export function TripsPage() {
         onClose={() => setDetailOpen(false)}
         title={detail?.expedition_number ?? "Sefer"}
         subtitle={detail?.romork_id?.plate_number ?? undefined}
-        width="w-[640px]"
+        width="w-[760px]"
         footer={
           detailTab === "Genel Bilgiler" && canUpdate ? (
             <div className="flex gap-2">
@@ -558,9 +559,9 @@ export function TripsPage() {
           <div className="p-10 text-center text-sm text-gray-400">Yükleniyor...</div>
         ) : (
           detail && (
-            <div className="p-6">
+            <div className="p-8">
               {detailTab === "Genel Bilgiler" && (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-x-6 gap-y-5">
                   <FormField label="Araç (Plaka)" required error={detailErrors.romork_id?.[0]}>
                     <TextInput value={detailForm.romork_id} onChange={(v) => setDetailForm((f) => ({ ...f, romork_id: v }))} placeholder="Araç ID" error={!!detailErrors.romork_id} />
                     <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>

@@ -600,7 +600,7 @@ export function LoadsPage() {
         onClose={() => setDrawerOpen(false)}
         title={detail?.load_number_work_type ?? detail?.load_number ?? "Yük"}
         subtitle={detail?.customer_id?.name ?? undefined}
-        width="w-[640px]"
+        width="w-[780px]"
         footer={
           canUpdate ? (
             <div className="flex gap-2">
@@ -615,13 +615,13 @@ export function LoadsPage() {
           <div className="p-10 text-center text-sm text-gray-400">Yükleniyor...</div>
         ) : (
           detail && (
-            <div className="p-6">
+            <div className="p-8">
               {tab === "Genel Bilgiler" && (
-                <div className="space-y-4">
+                <div className="space-y-6">
                   <AccountPicker label="Müşteri" value={customer} onChange={setCustomer} />
                   <AccountPicker label="Gönderici" value={sender} onChange={setSender} />
                   <AccountPicker label="Alıcı" value={receiver} onChange={setReceiver} />
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-x-6 gap-y-5">
                     <FormField label="Durum">
                       <SelectInput value={form.load_status_id} onChange={(v) => setForm((f) => ({ ...f, load_status_id: v }))} options={opts(loadStatusTypes)} />
                     </FormField>

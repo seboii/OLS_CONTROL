@@ -714,7 +714,7 @@ export function QuotesPage() {
         onClose={() => setDrawerOpen(false)}
         title={editingId ? `Teklif — ${customer?.name ?? ""}` : "Yeni Teklif"}
         subtitle={editingId ? undefined : "Yeni teklif oluştur"}
-        width="w-[720px]"
+        width="w-[860px]"
         footer={
           (editingId ? canUpdate : canCreate) ? (
             <div className="flex gap-2">
@@ -729,11 +729,11 @@ export function QuotesPage() {
         {detailLoading ? (
           <p className="text-sm text-gray-400 text-center py-10">Yükleniyor...</p>
         ) : (
-          <div className="p-6">
+          <div className="p-8">
             {tab === "Genel Bilgiler" && (
-              <div className="space-y-6">
+              <div className="space-y-8">
                 <AccountPicker label="Müşteri" value={customer} onChange={setCustomer} required error={errors.customer_id?.[0]} />
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-x-6 gap-y-5">
                   <FormField label="İş Tipi" required error={errors.work_type_id?.[0]}>
                     <SelectInput
                       value={form.work_type_id}

@@ -112,12 +112,12 @@ export function DashboardPage() {
   const m = data.metrics;
 
   const METRICS = [
-    { label: "Aktif Seferler", value: String(m.active_expeditions), sub: "Dönüşü girilmemiş", trend: formatSigned(m.active_expeditions_delta, ""), trendUp: m.active_expeditions_delta >= 0, icon: Truck, color: "bg-indigo-50 text-indigo-600" },
+    { label: "Aktif Seferler", value: String(m.active_expeditions), sub: "Boşaltılmamış", trend: formatSigned(m.active_expeditions_delta, ""), trendUp: m.active_expeditions_delta >= 0, icon: Truck, color: "bg-indigo-50 text-indigo-600" },
     { label: "Bu Ay Yükler", value: String(m.load_transfers_this_month), sub: "Bu ay oluşturulan", trend: formatSigned(m.load_transfers_this_month_change_percent, "%"), trendUp: m.load_transfers_this_month_change_percent >= 0, icon: Package, color: "bg-blue-50 text-blue-600" },
     { label: "Aylık Gelir", value: formatEuroLike(m.revenue_this_month), sub: "Faturalanan tutar", trend: formatSigned(m.revenue_this_month_change_percent, "%"), trendUp: m.revenue_this_month_change_percent >= 0, icon: TrendingUp, color: "bg-emerald-50 text-emerald-600" },
     { label: "Bekleyen Teklifler", value: String(m.pending_quotes), sub: "Teklif durumunda", trend: undefined, trendUp: true, icon: FileText, color: "bg-amber-50 text-amber-600" },
     { label: "Aktif Müşteriler", value: String(m.active_customers), sub: "Toplam kayıtlı", trend: formatSigned(m.active_customers_delta, ""), trendUp: m.active_customers_delta >= 0, icon: Users, color: "bg-violet-50 text-violet-600" },
-    { label: "Tamamlanma Oranı", value: `%${m.completion_rate_percent}`, sub: "Bu ay, dönüşü girilenler", trend: undefined, trendUp: true, icon: Target, color: "bg-rose-50 text-rose-600" },
+    { label: "Tamamlanma Oranı", value: `%${m.completion_rate_percent}`, sub: "Bu ay, boşaltılanlar", trend: undefined, trendUp: true, icon: Target, color: "bg-rose-50 text-rose-600" },
   ];
 
   const QUICK_LINKS = [
