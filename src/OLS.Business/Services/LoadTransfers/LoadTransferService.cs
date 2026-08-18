@@ -228,7 +228,8 @@ public sealed class LoadTransferService : ILoadTransferService
         }
 
         var projected = transfers
-            .OrderByDescending(t => t.Id)
+            .OrderByDescending(t => t.CreatedAt)
+            .ThenByDescending(t => t.Id)
             .Select(t => new LoadTransferListItemDto
             {
                 Id = t.Id,

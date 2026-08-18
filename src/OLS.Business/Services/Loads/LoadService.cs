@@ -129,7 +129,8 @@ public sealed class LoadService : ILoadService
         }
 
         var projected = loads
-            .OrderByDescending(l => l.Id)
+            .OrderByDescending(l => l.CreatedAt)
+            .ThenByDescending(l => l.Id)
             .Select(l => new LoadListItemDto
             {
                 Id = l.Id,

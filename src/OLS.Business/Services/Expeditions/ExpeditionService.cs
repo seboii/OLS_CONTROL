@@ -115,7 +115,8 @@ public sealed class ExpeditionService : IExpeditionService
         }
 
         var projected = expeditions
-            .OrderByDescending(e => e.Id)
+            .OrderByDescending(e => e.CreatedAt)
+            .ThenByDescending(e => e.Id)
             .Select(e => new ExpeditionListItemDto
             {
                 Id = e.Id,
