@@ -96,7 +96,8 @@ services:
     entrypoint: >
       /bin/bash -c "set -e; for f in init.sql init-reference.sql sample-movements.sql
       reservation-fix.sql loadtransfer-fix.sql loadrelease-fix.sql pozisyon-fix.sql
-      mapping-fix.sql sample-data.sql sample-reservation.sql reference-data-fix.sql; do
+      mapping-fix.sql sample-data.sql sample-reservation.sql reference-data-fix.sql
+      finance-fix.sql; do
       echo \">> $$f\";
       /opt/mssql-tools18/bin/sqlcmd -S siber-mock -U sa -P '${SIBER_SA_PASSWORD:-Ols!Local2026}' -C -i /init/$$f;
       done; echo 'sahte Siber semasi ve verisi kuruldu'"

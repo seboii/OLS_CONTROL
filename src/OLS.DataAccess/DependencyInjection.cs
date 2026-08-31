@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OLS.DataAccess.Context;
@@ -44,6 +44,8 @@ public static class DependencyInjection
         services.AddScoped<ISiberAccountRepository, SiberAccountRepository>();
         services.AddScoped<ISiberCarRepository, SiberCarRepository>();
         services.AddScoped<ISiberExpeditionRepository, SiberExpeditionRepository>();
+        services.AddScoped<ISiberFinanceRepository, SiberFinanceRepository>();
+        services.AddScoped<ISiberInvoiceWriter, SiberInvoiceWriter>();
         services.AddScoped<ISiberLoadRepository, SiberLoadRepository>();
         services.AddScoped<ISiberLoadMappingRepository, SiberLoadMappingRepository>();
         services.AddScoped<ISiberLoadReleaseRepository, SiberLoadReleaseRepository>();
