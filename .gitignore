@@ -7,3 +7,6 @@ dist/
 .env
 storage/app/public/*
 !storage/app/public/.gitkeep
+
+# Kurum içi raporlar depoya girmez
+docs/
