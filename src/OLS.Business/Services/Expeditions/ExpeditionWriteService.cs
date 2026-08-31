@@ -66,8 +66,6 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
     /// <summary>Sefer numarasındaki iki harf arasındaki sayıyı yakalar (ör. "26A0007I" -> 0007).</summary>
     private static readonly Regex SeferNoPattern = new(@"[A-Za-z](\d+)[A-Za-z]", RegexOptions.Compiled);
 
-    /// <summary>olsold: araç sahibi id'si 2 ise 1, değilse 0.</summary>
-    private const long OwnedVehicleOwnerId = 2;
 
     private readonly OlsDbContext _db;
     private readonly ISiberExpeditionRepository _siber;
@@ -113,7 +111,17 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         var owner = await _db.CarOwners.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == car.VehicleOwner, cancellationToken);
 
-        var ownerFlag = car.VehicleOwner == OwnedVehicleOwnerId ? 1 : 0;
+        // ARAÇ SAHİBİ KODU. Eskiden bu satır yerel bir id'ye bakıyordu
+        // (`car.VehicleOwner == 2 ? 1 : 0`, olsold'dan taşınmış). Referans verisi
+        // Siber'den yeniden içe aktarıldıktan sonra car_owners artık id 3'ten
+        // başlıyor (Öz Mal=3, Kiralık=4, ...), yani id=2 diye bir satır KALMADI ve
+        // bayrak HER ZAMAN 0 üretiyordu — kiralık bir araçla açılan seferde bile
+        // "özmal" seferleri taranıyordu.
+        //
+        // Doğru kaynak, tanımın kendi kodu: car_owners.code Öz Mal=0, Kiralık=1
+        // olarak duruyor ve Siber'in skn_sefer.aracsahip / skn_pozisyon.romorkaracsahip
+        // kodlamasıyla birebir aynı (canlıda doğrulandı: aracsahip 0 -> OZ, 1 -> KR).
+        var ownerFlag = owner?.Code ?? 0;
 
         var now = _clock.Now;
         var fullYear = now.ToString("yyyy");
@@ -139,13 +147,14 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         if (seferId is null)
         {
             var newSeferId = (await _siber.GenerateSeferIdAsync(cancellationToken)).ToString();
-            var seferNo = await _siber.NextSeferNoAsync(shortYear, cancellationToken);
 
-            await _siber.InsertSeferAsync(new SiberSefer
+            // Numara Siber tarafında, aynı kilitli işlem içinde üretiliyor —
+            // sayacın (yıl, araç sahibi) kapsamı ve yarış durumu için bkz.
+            // InsertSeferWithLockedNumberAsync'in XML açıklaması.
+            await _siber.InsertSeferWithLockedNumberAsync(new SiberSefer
             {
                 SeferId = newSeferId,
-                AracSahip = owner?.Code,
-                SeferNo = seferNo,
+                AracSahip = ownerFlag,
                 CikisTarih = ToDateTime(model.ReleaseDate),
                 DonusTarih = ToDateTime(model.EntryDate),
                 Yil = shortYear,
@@ -273,9 +282,26 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         {
             _db.ExpeditionMovements.RemoveRange(
                 _db.ExpeditionMovements.Where(m => m.ExpeditionId == expedition.Id));
+
+            // Sefer–Yük eşlemeleri yerel sefer id'sini METİN olarak tutuyor
+            // (bkz. SyncExpeditionLoadMappingsAsync) — FK yok, elle temizlenir.
+            var key = expedition.Id.ToString();
+            _db.ExpeditionLoadMappings.RemoveRange(
+                _db.ExpeditionLoadMappings.Where(m => m.ExpeditionId == key));
         }
 
         _db.Expeditions.RemoveRange(expeditions);
+
+        // ÖNCE SİBER, SONRA YEREL — bkz. LoadTransferWriteService.DeleteAsync'teki
+        // gerekçe: yalnızca yerelden silinirse senkron kaydı geri getiriyor, ters
+        // sırada ise Siber hatasında iki taraf tutarsız kalıyor.
+        if (_siber.IsConfigured)
+        {
+            foreach (var siberId in expeditions.Select(e => e.ExpeditionId)
+                         .Where(s => !string.IsNullOrWhiteSpace(s)).Distinct())
+                await _siber.DeletePozisyonAsync(siberId!, cancellationToken);
+        }
+
         await _db.SaveChangesAsync(cancellationToken);
     }
 

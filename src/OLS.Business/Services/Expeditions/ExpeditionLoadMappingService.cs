@@ -97,6 +97,23 @@ public sealed class MappedLoadTransferDto
     [JsonPropertyName("load_transfer_id")] public string? LoadTransferId { get; init; }
     [JsonPropertyName("customer_id")] public MappedNameDto? CustomerId { get; init; }
     [JsonPropertyName("load_transfer_package")] public IReadOnlyList<MappedPackageDto> LoadTransferPackage { get; init; } = [];
+
+    /// <summary>
+    /// Bu yükün Siber arşivindeki evrakları. Sefer ekranında da gösterilir:
+    /// sefere bağlı yüklerin belgelerine ulaşmak için yük kartına gitmek
+    /// gerekmesin (kullanıcı isteği).
+    /// </summary>
+    [JsonPropertyName("siber_archive")] public IReadOnlyList<MappedArchiveDto> SiberArchive { get; init; } = [];
+}
+
+public sealed class MappedArchiveDto
+{
+    [JsonPropertyName("id")] public string Id { get; init; } = string.Empty;
+    [JsonPropertyName("name")] public string? Name { get; init; }
+    [JsonPropertyName("created_at")] public DateTime? CreatedAt { get; init; }
+    [JsonPropertyName("created_by")] public string? CreatedBy { get; init; }
+    [JsonPropertyName("personal_data")] public bool PersonalData { get; init; }
+    [JsonPropertyName("restricted_groups")] public string? RestrictedGroups { get; init; }
 }
 
 public sealed class MappedPackageDto
@@ -160,11 +177,15 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
     private readonly ISiberLoadMappingRepository _siber;
     private readonly IClock _clock;
 
+    private readonly ISiberArchiveRepository _archive;
+
     public ExpeditionLoadMappingService(
-        OlsDbContext db, ISiberLoadMappingRepository siber, IClock clock)
+        OlsDbContext db, ISiberLoadMappingRepository siber,
+        ISiberArchiveRepository archive, IClock clock)
     {
         _db = db;
         _siber = siber;
+        _archive = archive;
         _clock = clock;
     }
 
@@ -189,9 +210,11 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var pattern = $"%{search}%";
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(search)}%";
             transfers = transfers.Where(t =>
-                t.LoadNumberWorkType != null && EF.Functions.ILike(t.LoadNumberWorkType, pattern));
+                t.LoadNumberWorkType != null &&
+                EF.Functions.Like(t.LoadNumberWorkType.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern));
         }
 
         var projected = transfers
@@ -283,6 +306,9 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
             .Select(e => new MappedExpeditionDto { Id = e.Id, ExpeditionNumber = e.ExpeditionNumber })
             .FirstOrDefaultAsync(cancellationToken);
 
+        // Bağlı yüklerin arşivi TEK sorguda çekilir (yük başına gidiş-dönüş yerine).
+        var archivesByYukId = await _archive.ListByModulesAsync(transferKeys, cancellationToken);
+
         var totals = new MappingTotalsDto();
         var rows = new List<ExpeditionMappingDto>(mappings.Count);
 
@@ -316,6 +342,21 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
                                  customers.TryGetValue(transfer.CustomerId.Value, out var customer)
                         ? customer
                         : null,
+                    SiberArchive = (transfer.LoadTransferId is not null &&
+                                    archivesByYukId.TryGetValue(transfer.LoadTransferId, out var files)
+                        ? files
+                        : [])
+                        .Select(a => new MappedArchiveDto
+                        {
+                            Id = a.ArsivId,
+                            Name = a.Ad,
+                            CreatedAt = a.KayitGirisTarih,
+                            CreatedBy = a.KayitGiren,
+                            PersonalData = a.KisiselVeri,
+                            RestrictedGroups = string.IsNullOrWhiteSpace(a.YetkiliGruplar) ? null : a.YetkiliGruplar,
+                        })
+                        .ToList(),
+
                     LoadTransferPackage = own.Select(p => new MappedPackageDto
                     {
                         Id = p.Id,

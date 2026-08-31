@@ -1,8 +1,10 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Loads;
 using OLS.DataAccess.Context;
+using OLS.DataAccess.Siber;
 
 namespace OLS.Business.Services.Expeditions;
 
@@ -20,7 +22,8 @@ public interface IExpeditionService
 }
 
 public sealed record ExpeditionListQuery(
-    string? Search, int? WorkTypeId, DateOnly? DateFrom, DateOnly? DateTo, int? PerPage, int Page, string Path);
+    string? Search, int? WorkTypeId, DateOnly? DateFrom, DateOnly? DateTo, int? PerPage, int Page, string Path,
+    int? ExpeditionTypeId = null, int? StatusId = null, int? DepartmentId = null);
 
 public sealed class ExpeditionListItemDto
 {
@@ -37,6 +40,16 @@ public sealed class ExpeditionListItemDto
     [JsonPropertyName("end_city_id")] public CityRefDto? EndCityId { get; init; }
 }
 
+public sealed class ExpeditionArchiveDto
+{
+    [JsonPropertyName("id")] public string Id { get; init; } = string.Empty;
+    [JsonPropertyName("name")] public string? Name { get; init; }
+    [JsonPropertyName("created_at")] public DateTime? CreatedAt { get; init; }
+    [JsonPropertyName("created_by")] public string? CreatedBy { get; init; }
+    [JsonPropertyName("personal_data")] public bool PersonalData { get; init; }
+    [JsonPropertyName("restricted_groups")] public string? RestrictedGroups { get; init; }
+}
+
 public sealed class ExpeditionDetailDto
 {
     [JsonPropertyName("id")] public long Id { get; init; }
@@ -44,6 +57,12 @@ public sealed class ExpeditionDetailDto
     [JsonPropertyName("expedition_number")] public string? ExpeditionNumber { get; init; }
     [JsonPropertyName("sefer_id")] public string? SeferId { get; init; }
     [JsonPropertyName("year_week")] public string? YearWeek { get; init; }
+
+    /// <summary>
+    /// Seferin KENDİ Siber arşiv evrakları (sbr_arsiv.modulid = pozisyonid).
+    /// Bağlı yüklerin evrakları ayrı gelir — bkz. ExpeditionLoadMappingService.
+    /// </summary>
+    [JsonPropertyName("siber_archive")] public IReadOnlyList<ExpeditionArchiveDto> SiberArchive { get; init; } = [];
     [JsonPropertyName("registration_login_date")] public DateOnly? RegistrationLoginDate { get; init; }
     [JsonPropertyName("car_exit_date")] public DateOnly? CarExitDate { get; init; }
     [JsonPropertyName("release_date")] public DateOnly? ReleaseDate { get; init; }
@@ -78,29 +97,62 @@ public sealed class ExpeditionService : IExpeditionService
 {
     private readonly OlsDbContext _db;
 
-    public ExpeditionService(OlsDbContext db) => _db = db;
+    private readonly ISiberArchiveRepository _archive;
+    private readonly ICompanyScope _companyScope;
+    private readonly ICurrentUser _currentUser;
+
+    public ExpeditionService(
+        OlsDbContext db, ISiberArchiveRepository archive,
+        ICompanyScope companyScope, ICurrentUser currentUser)
+    {
+        _db = db;
+        _archive = archive;
+        _companyScope = companyScope;
+        _currentUser = currentUser;
+    }
 
     public async Task<object> ListAsync(
         ExpeditionListQuery query, CancellationToken cancellationToken = default)
     {
         var expeditions = _db.Expeditions.AsNoTracking();
 
+        // ŞİRKET GÖRÜNÜRLÜĞÜ — yüklerdeki ile aynı kural (bkz. CompanyScope).
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+
+        if (!visibility.SeesEverything)
+        {
+            expeditions = visibility.OnlyCompanyId is { } only
+                ? expeditions.Where(e => e.SiberCompanyId == only)
+                : expeditions.Where(e => e.SiberCompanyId == null ||
+                                         e.SiberCompanyId != visibility.ExcludeCompanyId);
+        }
+
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var pattern = $"%{query.Search}%";
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
 
             // olsold: sefer numarası VEYA römorkun plakası
             var matchingCarIds = _db.Cars
-                .Where(c => EF.Functions.ILike(c.PlateNumber!, pattern))
+                .Where(c => EF.Functions.Like(c.PlateNumber!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
                 .Select(c => (int)c.Id);
 
             expeditions = expeditions.Where(e =>
-                EF.Functions.ILike(e.ExpeditionNumber!, pattern) ||
+                EF.Functions.Like(e.ExpeditionNumber!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
                 (e.RomorkId != null && matchingCarIds.Contains(e.RomorkId.Value)));
         }
 
         if (query.WorkTypeId is { } workTypeId)
             expeditions = expeditions.Where(e => e.WorkType == workTypeId);
+
+        if (query.ExpeditionTypeId is { } expeditionTypeId)
+            expeditions = expeditions.Where(e => e.ExpeditionTypeId == expeditionTypeId);
+
+        if (query.StatusId is { } statusId)
+            expeditions = expeditions.Where(e => e.StatusId == statusId);
+
+        if (query.DepartmentId is { } departmentId)
+            expeditions = expeditions.Where(e => e.DepartmentId == departmentId);
 
         if (query.DateFrom is { } dateFrom)
         {
@@ -158,6 +210,11 @@ public sealed class ExpeditionService : IExpeditionService
         if (e is null)
             return null;
 
+        // Detay da filtrelenir — liste gizlese bile id ile doğrudan istenebilirdi.
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+        if (!visibility.Allows(e.SiberCompanyId))
+            return null;
+
         return new ExpeditionDetailDto
         {
             Id = e.Id,
@@ -190,6 +247,19 @@ public sealed class ExpeditionService : IExpeditionService
             StartCityId = await CityAsync(e.StartCityId, cancellationToken),
             LoadCityId = await CityAsync(e.LoadCityId, cancellationToken),
             EndCityId = await CityAsync(e.EndCityId, cancellationToken),
+
+            // Seferin Siber kimliği pozisyonid; arşiv bağı bunun üzerinden.
+            SiberArchive = (await _archive.ListByModuleAsync(e.ExpeditionId ?? string.Empty, cancellationToken))
+                .Select(a => new ExpeditionArchiveDto
+                {
+                    Id = a.ArsivId,
+                    Name = a.Ad,
+                    CreatedAt = a.KayitGirisTarih,
+                    CreatedBy = a.KayitGiren,
+                    PersonalData = a.KisiselVeri,
+                    RestrictedGroups = string.IsNullOrWhiteSpace(a.YetkiliGruplar) ? null : a.YetkiliGruplar,
+                })
+                .ToList(),
         };
     }
 
