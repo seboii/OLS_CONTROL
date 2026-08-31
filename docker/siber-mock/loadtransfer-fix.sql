@@ -19,10 +19,12 @@ GO
 -- DROP+CREATE ediyordu — reservation-fix.sql'den SONRA çalışırsa transfer_to_siber'in
 -- INSERT'i eksik kolon yüzünden patlıyordu. Bulunup düzeltildi.
 
--- sfy_modulkayit: fatura kalemlerinin modül kodu
+-- sfy_modulkayit: fatura kalemlerinin modül kodu. "yer" gerçek Siber'de kalemin
+-- HANGİ nesneye bağlı olduğunu söylüyor (YUK/SEFER/FIRMA/ARAC/PERSONEL/rzv) —
+-- canlı Siber'de doğrulandı, senkron artık bununla yalnızca YUK'u filtreliyor.
 DROP TABLE IF EXISTS sfy_modulkayit;
 CREATE TABLE sfy_modulkayit (
-    ad NVARCHAR(64), modulid NVARCHAR(64), modulkod NVARCHAR(64));
+    ad NVARCHAR(64), modulid NVARCHAR(64), modulkod NVARCHAR(64), yer NVARCHAR(64));
 GO
 
 -- sfy_modulkalem: yazma için ek kolonlar
@@ -30,6 +32,17 @@ ALTER TABLE sfy_modulkalem ADD
     kdvtutar DECIMAL(18,4) NULL, kdvoran DECIMAL(18,4) NULL,
     tutar DECIMAL(18,4) NULL, subeid NVARCHAR(64) NULL,
     kayitgiristarih DATETIME NULL, rezervasyondanaktarildi INT NULL;
+GO
+
+-- skn_yukevrak: Evrak Takibi (fiziksel evrak çeklisti — gerçek dosya değil).
+-- Gerçek Siber'de doğrulandı: evrakid hiçbir tabloya FK vermiyor (rastgele
+-- üretiliyor), sirano (1-10) sabit evrak türü kodu.
+DROP TABLE IF EXISTS skn_yukevrak;
+CREATE TABLE skn_yukevrak (
+    evrakid NVARCHAR(64) PRIMARY KEY, yukid NVARCHAR(64), sirano INT,
+    evrakad NVARCHAR(128), evrakno NVARCHAR(64), tarih DATETIME,
+    orjinaladet INT, kopyaadet INT, teslimalan NVARCHAR(128),
+    teslimtarih DATETIME, aciklama NVARCHAR(512));
 GO
 
 PRINT 'loadtransfer tablolari hazir';

@@ -23,15 +23,25 @@ public static class QueryableExtensions
         if (string.IsNullOrWhiteSpace(search))
             return query;
 
-        var pattern = $"%{EscapeLike(search)}%";
+        var pattern = $"%{EscapeLike(NormalizeTurkish(search))}%";
 
-        // x => EF.Functions.ILike(selector(x), pattern)
+        // x => EF.Functions.Like(selector(x).Replace("İ","i").Replace("I","i").Replace("ı","i").ToLower(), pattern)
+        // Replace(string,string) kasıtlı - Replace(char,char) Npgsql/EF Core tarafından
+        // SQL'e çevrilemiyor (query çalışma zamanında InvalidOperationException/500).
+        var replaceStr = typeof(string).GetMethod(nameof(string.Replace), [typeof(string), typeof(string)])!;
+        var toLower = typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!;
+        Expression normalized = selector.Body;
+        normalized = Expression.Call(normalized, replaceStr, Expression.Constant("İ"), Expression.Constant("i"));
+        normalized = Expression.Call(normalized, replaceStr, Expression.Constant("I"), Expression.Constant("i"));
+        normalized = Expression.Call(normalized, replaceStr, Expression.Constant("ı"), Expression.Constant("i"));
+        normalized = Expression.Call(normalized, toLower);
+
         var body = Expression.Call(
-            typeof(NpgsqlDbFunctionsExtensions).GetMethod(
-                nameof(NpgsqlDbFunctionsExtensions.ILike),
+            typeof(DbFunctionsExtensions).GetMethod(
+                nameof(DbFunctionsExtensions.Like),
                 [typeof(DbFunctions), typeof(string), typeof(string)])!,
             Expression.Constant(EF.Functions),
-            selector.Body,
+            normalized,
             Expression.Constant(pattern));
 
         var lambda = Expression.Lambda<Func<T, bool>>(body, selector.Parameters);
@@ -46,6 +56,23 @@ public static class QueryableExtensions
     /// </summary>
     internal static string EscapeLike(string input) =>
         input.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
+    /// <summary>
+    /// DÜRÜST NOT / gerçek bug: veritabanı en_US.utf8 yerelinde (bkz. Dockerfile) —
+    /// bu yerelde ILIKE, Türkçe noktasız 'I' harfini büyük/küçük eşleştiremiyor:
+    /// <c>'İSTANBUL' ILIKE '%istanbul%'</c> doğru eşleşiyor (İ/i standart Unicode
+    /// katlaması), ama <c>'TAŞIMA' ILIKE '%taşıma%'</c> HİÇ eşleşmiyor - çünkü
+    /// en_US'ta büyük 'I' küçük 'i'ye (noktalı) katlanıyor, Türkçe 'ı'ya (noktasız)
+    /// DEĞİL. Sonuç: Türkçe yazan bir kullanıcı için normal yazım (ör. "taşıma",
+    /// "vergisi", "çıkış") aramaların çoğu SESSİZCE boş dönüyor. Veritabanının
+    /// yerelini canlı, dolu bir veritabanında değiştirmek riskli (yeniden
+    /// oluşturma gerektirir) - bunun yerine İ/I/ı'nın tamamı karşılaştırmadan
+    /// önce tek bir kanonik harfe indirgeniyor (aksan farkı gözetilmeden "aynı
+    /// harf" kabul ediliyor - hem doğru hem rahat: kullanıcı İ/I/ı'yı karıştırsa
+    /// bile arama çalışır).
+    /// </summary>
+    internal static string NormalizeTurkish(string input) =>
+        input.Replace('İ', 'i').Replace('I', 'i').Replace('ı', 'i').ToLowerInvariant();
 
     /// <summary>
     /// per_page verilmişse Laravel paginator zarfı, verilmemişse düz liste döndürür.

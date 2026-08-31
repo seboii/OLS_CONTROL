@@ -14,7 +14,7 @@ VALUES
    '88888888-0000-0000-0000-000000000001');
 
 DELETE FROM sfy_modulkayit;
-INSERT INTO sfy_modulkayit (ad, modulid, modulkod) VALUES ('DUMMY', 'mod-1', 'YUK');
+INSERT INTO sfy_modulkayit (ad, modulid, modulkod, yer) VALUES ('DUMMY', 'mod-1', 'YUK', 'YUK');
 GO
 PRINT 'rezervasyon hazir';
 GO

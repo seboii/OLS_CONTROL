@@ -24,7 +24,7 @@ public sealed class TransferDataController : ApiControllerBase
 
     [HttpPost]
     public async Task<IActionResult> Save(CancellationToken cancellationToken) =>
-        Result(await _import.ImportReferenceDataAsync(cancellationToken));
+        Result(await _import.ImportReferenceDataAsync(cancellationToken: cancellationToken));
 
     [HttpGet("getSiberAccount")]
     public async Task<IActionResult> GetSiberAccount(CancellationToken cancellationToken) =>
