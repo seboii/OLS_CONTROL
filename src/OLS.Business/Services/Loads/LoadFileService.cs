@@ -25,8 +25,11 @@ public interface ILoadFileService
     /// <summary>
     /// Silinen dosyaların adlarını döner — çağıran bunları diskten temizler.
     /// </summary>
+    /// <param name="loadId">Teklif kimliği; teklifsiz yükte null.</param>
+    /// <param name="loadTransferId">Yük kimliği; teklif üzerinden gelen çağrıda null.</param>
     Task<IReadOnlyList<string>> SyncAsync(
-        long loadId, IReadOnlyList<long> keepIds, IReadOnlyList<NewLoadFile> newFiles,
+        long? loadId, long? loadTransferId,
+        IReadOnlyList<long> keepIds, IReadOnlyList<NewLoadFile> newFiles,
         CancellationToken cancellationToken = default);
 }
 
@@ -44,12 +47,18 @@ public sealed class LoadFileService : ILoadFileService
     }
 
     public async Task<IReadOnlyList<string>> SyncAsync(
-        long loadId, IReadOnlyList<long> keepIds, IReadOnlyList<NewLoadFile> newFiles,
+        long? loadId, long? loadTransferId,
+        IReadOnlyList<long> keepIds, IReadOnlyList<NewLoadFile> newFiles,
         CancellationToken cancellationToken = default)
     {
-        var existing = await _db.LoadFiles
-            .Where(f => f.LoadId == (int)loadId)
-            .ToListAsync(cancellationToken);
+        if (loadId is null && loadTransferId is null)
+            return [];
+
+        // Dosya ya teklife ya yüke bağlıdır; hangisi verildiyse onun listesi
+        // senkronlanır (bkz. LoadFile.LoadTransferId).
+        var existing = loadId is { } offerId
+            ? await _db.LoadFiles.Where(f => f.LoadId == (int)offerId).ToListAsync(cancellationToken)
+            : await _db.LoadFiles.Where(f => f.LoadTransferId == loadTransferId).ToListAsync(cancellationToken);
 
         var now = _clock.Now;
 
@@ -57,7 +66,8 @@ public sealed class LoadFileService : ILoadFileService
         {
             _db.LoadFiles.Add(new LoadFile
             {
-                LoadId = (int)loadId,
+                LoadId = loadId is { } id ? (int)id : null,
+                LoadTransferId = loadTransferId,
                 File = file.StoredName,
                 MimeType = file.Extension,
                 OrgName = file.OriginalName,

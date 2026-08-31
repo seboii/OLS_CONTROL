@@ -25,11 +25,17 @@ public sealed class LoadFileController : ApiControllerBase
 {
     private readonly ILoadFileService _files;
     private readonly IFileStorage _storage;
+    private readonly ILoadArchivePublisher _archive;
+    private readonly ILogger<LoadFileController> _logger;
 
-    public LoadFileController(ILoadFileService files, IFileStorage storage)
+    public LoadFileController(
+        ILoadFileService files, IFileStorage storage,
+        ILoadArchivePublisher archive, ILogger<LoadFileController> logger)
     {
         _files = files;
         _storage = storage;
+        _archive = archive;
+        _logger = logger;
     }
 
     [HttpPost("upload")]
@@ -37,7 +43,14 @@ public sealed class LoadFileController : ApiControllerBase
     {
         var form = await Request.ReadFormAsync(cancellationToken);
 
-        if (!long.TryParse(form["load_id"], out var loadId))
+        // Dosyalar teklife VEYA yüke bağlanabilir. Teklifsiz yüklerde (canlıda
+        // 7.998 yükün 4.285'i) load_id yok; o durumda load_transfer_id gelir.
+        long? loadId = long.TryParse(form["load_id"], out var parsedLoad) ? parsedLoad : null;
+        long? loadTransferId = long.TryParse(form["load_transfer_id"], out var parsedTransfer)
+            ? parsedTransfer
+            : null;
+
+        if (loadId is null && loadTransferId is null)
             return UnprocessableEntity(ApiResponse.ValidationErrors(
                 new Dictionary<string, string[]> { ["load_id"] = [Translator.Get("Zorunlu Alan")] }));
 
@@ -52,6 +65,7 @@ public sealed class LoadFileController : ApiControllerBase
             .ToList();
 
         var uploaded = new List<NewLoadFile>();
+        var archiveContents = new List<(string Name, byte[] Content)>();
 
         foreach (var file in form.Files)
         {
@@ -65,12 +79,34 @@ public sealed class LoadFileController : ApiControllerBase
 
             uploaded.Add(new NewLoadFile(
                 stored, Path.GetExtension(file.FileName).TrimStart('.'), file.FileName));
+
+            // Siber arşivine de gönderilecek — içerik burada okunur, çünkü
+            // istek gövdesi yanıt üretilmeden önce kapanıyor.
+            using var buffer = new MemoryStream();
+            await using (var source = file.OpenReadStream())
+                await source.CopyToAsync(buffer, cancellationToken);
+
+            archiveContents.Add((file.FileName, buffer.ToArray()));
         }
 
-        var removed = await _files.SyncAsync(loadId, keepIds, uploaded, cancellationToken);
+        var removed = await _files.SyncAsync(loadId, loadTransferId, keepIds, uploaded, cancellationToken);
 
         foreach (var name in removed)
             _storage.Delete(name);
+
+        // SİBER ARŞİVİ: yerel kayıt tamamlandıktan SONRA denenir ve hata
+        // yükleme akışını bozmaz — dosya her hâlükârda uygulamada duruyor.
+        // Siber yazımı başarısız olursa kaydın kendisi de geri alınıyor
+        // (bkz. SiberArchiveWriter), yani yarım kalmış arşiv satırı oluşmaz.
+        var archived = await _archive.PushAsync(
+            loadId, loadTransferId, archiveContents, cancellationToken);
+
+        if (archiveContents.Count > 0 && archived < archiveContents.Count)
+        {
+            _logger.LogWarning(
+                "Siber arşivine {Basarili}/{Toplam} dosya yazılabildi.",
+                archived, archiveContents.Count);
+        }
 
         return base.Ok(ApiResponse.Message("Kayıt Başarıyla Güncellendi"));
     }
@@ -235,9 +271,14 @@ public sealed class ContactFormController : ApiControllerBase
     public async Task<IActionResult> Index(
         [FromQuery] string? search,
         [FromQuery] int page = 1,
+        [FromQuery(Name = "is_read")] bool? isRead = null,
+        [FromQuery(Name = "is_answered")] bool? isAnswered = null,
+        [FromQuery(Name = "date_from")] DateOnly? dateFrom = null,
+        [FromQuery(Name = "date_to")] DateOnly? dateTo = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await _forms.ListAsync(search, page, CurrentPath, cancellationToken);
+        var result = await _forms.ListAsync(
+            search, page, CurrentPath, isRead, isAnswered, dateFrom, dateTo, cancellationToken);
 
         return base.Ok(new Dictionary<string, object?>
         {
