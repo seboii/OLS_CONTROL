@@ -15,6 +15,8 @@ açılan kayıtlar Siber'e geri yazılır.
 | Yükler | `/yukler` | `load_management` |
 | Seferler | `/seferler` | `expedition_management` |
 | Faturalar | `/faturalar` | `invoice_management` |
+| Finans | `/finans` | `finance_management` |
+| Muhasebe | `/muhasebe` | `accounting_management` |
 | Araçlar | `/araclar` | `car_management` |
 | Kullanıcılar | `/kullanicilar` | `user_management`, `role_management` |
 | Destek talepleri | `/destek-talepleri` | `support_request_management` |
@@ -100,6 +102,37 @@ yük, sefer ve tekliflerini görür; diğer kullanıcılar Avrora kayıtlarını
 şirket alanından, o boşsa e-posta alan adından belirlenir; yönetici yetkisi olanlar her iki tarafı da
 görür.
 
+## Finans ve muhasebe
+
+Modül Siber'in muhasebe tablolarını (`sfy_*`) yerele aynalar ve iki ayrı ekrana böler.
+
+**Finans** (`finance_management`) — operasyonun günlük kullandığı taraf:
+
+- **Cari bakiye ve ekstre.** Bakiye hiçbir yerde SAKLANMAZ, her sorguda fiş satırlarından
+  hesaplanır. Cari bağı Siber'in `sfy_fisdetay.kartoteksid` alanından kurulur;
+  `sbr_firma.muhasebekod` canlıda 7.429 firmanın hiçbirinde dolu olmadığı için hesap kodundan
+  eşleme yapılamaz. Ekstrede tarih aralığı verilirse açılış bakiyesi aralıktan önceki tüm
+  hareketlerden hesaplanır, böylece kapanış cari bakiyesiyle birebir tutar.
+- **Fatura.** Gelir ve gider faturaları Siber'de tek tabloda tutulur, ayrım `gc` alanıyla yapılır.
+  Yük bağı fatura BAŞLIĞINDAKİ `modulid`/`modulkod` çiftinden kurulur — satırdaki `yukid` sütunu
+  Siber'de hiç doldurulmamıştır.
+- **Tahsilat/ödeme.** Kayıt çift taraflıdır; bir taraf cari, diğeri kasa/banka hesabı olabilir.
+  Çek/senet alanları taşınmadı: Siber'de 29.007 kaydın hiçbirinde dolu değil.
+
+**Muhasebe** (`accounting_management`) — defter ekranları: mizan, yevmiye fişleri ve hesap planı.
+Fiş satırı hesap planına METİN eşleşmesiyle bağlanır (Siber'de yabancı anahtar yoktur); planda
+karşılığı olmayan kod adsız görünür ama tutarı mizandan düşmez.
+
+**Fatura açma.** Uygulamadan gelir ve gider faturası açılabilir. Kayıt ÖNCE Siber'e yazılır;
+oradaki yazma başarısız olursa yerelde de kayıt oluşmaz. Gelir faturasının numarası
+(seri, yıl) sayacından `sp_getapplock` ile kilitlenmiş tek işlem içinde üretilir; gider
+faturasında numara tedarikçinin belgesinden alınır. Tutarlar sunucuda, satırlardan hesaplanır.
+
+**Yaşlandırma raporu yoktur ve bu bilinçlidir.** Klasik yaşlandırma hangi faturanın ödendiğini
+bilmeyi gerektirir; Siber `kapalifatura` alanını 38.425 faturanın 36.713'ünde boş bırakıyor.
+Bunun yerine iki ayrı ve doğrulanabilir bilgi verilir: carinin net bakiyesi ve vadesi geçmiş
+faturaların listesi.
+
 ## Denetim kaydı
 
 Kayıt ekleme, güncelleme ve silme işlemleri kullanıcı, zaman ve değişen alan bazında saklanır. Parola
@@ -135,8 +168,8 @@ referanslarıyla çalıştığı için `tsc --noEmit` hiçbir dosyayı denetleme
 dotnet test
 ```
 
-129 test: `tests/OLS.Business.Tests` altında 29 birim testi (veritabanı gerekmez),
-`tests/OLS.API.IntegrationTests` altında 100 entegrasyon testi (Postgres gerekir).
+135 test: `tests/OLS.Business.Tests` altında 29 birim testi (veritabanı gerekmez),
+`tests/OLS.API.IntegrationTests` altında 106 entegrasyon testi (Postgres gerekir).
 
 Entegrasyon testleri her çalıştırmada rastgele adlı izole bir veritabanı (`ols_scoped_inttest_*`)
 oluşturup siler; geliştirme veritabanını etkilemez.
@@ -148,7 +181,7 @@ oluşturup siler; geliştirme veritabanını etkilemez.
   (`jti` tabanlı iptal listesi), snake_case JSON, `/api/v1` öneki.
 - **Ön yüz:** React 19 + TypeScript + Vite + Tailwind v4. Daraltılabilir yan menü, kompakt kurumsal
   bileşenler, modül başına tek sayfa.
-- **Veri modeli:** 64 tablo. Durum kodları (1 Olumsuz, 2 Sipariş, 3 Düzeltme Talebi, 4 Teklif,
+- **Veri modeli:** 70 tablo. Durum kodları (1 Olumsuz, 2 Sipariş, 3 Düzeltme Talebi, 4 Teklif,
   5 Olumlu) Siber ile birebir sabittir; bu değerler değiştirilemez.
 
 ## Yapılandırma
@@ -170,6 +203,14 @@ oluşturup siler; geliştirme veritabanını etkilemez.
 
 ## Bilinen kısıtlar
 
+- **Siber'in yevmiye defteri kendi içinde dengede değil.** OLS şirketinde borç ve alacak toplamı
+  arasında yaklaşık 308 milyon TL fark var (AVRORA tarafı tam dengede, 0,00). Fark ağırlıklı olarak
+  2022-2023 kayıtlarında ve dönem kapanış kayıtlarının eksikliğinden kaynaklanıyor. Bu uygulamanın
+  aktarımından değil, kaynak verinin kendisinden gelir; mizan ekranı Siber'in gösterdiği rakamı
+  gösterir.
+- **Tutarlarda kuruş düzeyinde sapma olabilir.** Siber parayı `float(53)` (ikili kayan nokta) olarak
+  saklıyor. Uygulama satır bazında 2 haneye yuvarlar; toplam sapma 5,05 milyar TL'lik defterde
+  0,13 TL ölçüsünde kalıyor.
 - Bir yük yalnızca tek bir sefere bağlanır; buna karşılık Siber'in geçmiş verisinde birden fazla sefere
   bağlı yük kayıtları mevcuttur ve bunlar liste olarak gösterilir.
 - Siber'in kendi verisindeki boş alanlar (departmansız sefer kayıtları gibi) uygulamada da boş görünür;
