@@ -7,6 +7,13 @@ public partial class Expedition
 {
     public long Id { get; set; }
 
+    /// <summary>
+    /// Seferin ait olduğu Siber şirketi (skn_yuk/skn_pozisyon.sirketid).
+    /// Siber'de iki şirket var: AVRORA ve OLS. Görünürlük ayrımı bu sütuna
+    /// dayanıyor — bkz. CompanyScope.
+    /// </summary>
+    public string? SiberCompanyId { get; set; }
+
     public string? ExpeditionId { get; set; }
 
     public string? ExpeditionNumber { get; set; }

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OLS.DataAccess.Context;
@@ -11,9 +12,11 @@ using OLS.DataAccess.Context;
 namespace OLS.DataAccess.Migrations
 {
     [DbContext(typeof(OlsDbContext))]
-    partial class OlsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260831072520_AddOfferCompanyScope")]
+    partial class AddOfferCompanyScope
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2035,10 +2038,6 @@ namespace OLS.DataAccess.Migrations
                     b.Property<int?>("LoadId")
                         .HasColumnType("integer")
                         .HasColumnName("load_id");
-
-                    b.Property<long?>("LoadTransferId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("load_transfer_id");
 
                     b.Property<string>("MimeType")
                         .HasMaxLength(191)

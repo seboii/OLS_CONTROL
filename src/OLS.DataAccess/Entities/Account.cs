@@ -43,6 +43,9 @@ public partial class Account
 
     public string? ContactLanguage { get; set; }
 
+    /// <summary>Siber sbr_firma.aktif — pasif (false) cariler varsayılan listede gösterilmez.</summary>
+    public bool IsActive { get; set; } = true;
+
     public DateTime? CreatedAt { get; set; }
 
     public DateTime? UpdatedAt { get; set; }

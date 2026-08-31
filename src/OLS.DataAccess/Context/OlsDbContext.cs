@@ -54,7 +54,11 @@ public partial class OlsDbContext : DbContext
 
     public virtual DbSet<District> Districts { get; set; }
 
+    public virtual DbSet<EvrakTuru> EvrakTurus { get; set; }
+
     public virtual DbSet<Expedition> Expeditions { get; set; }
+
+    public virtual DbSet<ExpeditionFinanceRecord> ExpeditionFinanceRecords { get; set; }
 
     public virtual DbSet<ExpeditionLoadMapping> ExpeditionLoadMappings { get; set; }
 
@@ -98,6 +102,8 @@ public partial class OlsDbContext : DbContext
 
     public virtual DbSet<LoadTransferDeliveryMethod> LoadTransferDeliveryMethods { get; set; }
 
+    public virtual DbSet<LoadTransferDocument> LoadTransferDocuments { get; set; }
+
     public virtual DbSet<LoadTransferInvoiceItem> LoadTransferInvoiceItems { get; set; }
 
     public virtual DbSet<LoadTransferInvoiceMap> LoadTransferInvoiceMaps { get; set; }
@@ -125,6 +131,14 @@ public partial class OlsDbContext : DbContext
     public virtual DbSet<TransportType> TransportTypes { get; set; }
 
     public virtual DbSet<User> Users { get; set; }
+
+    public virtual DbSet<AccountRepresentative> AccountRepresentatives { get; set; }
+
+    public virtual DbSet<AuditLog> AuditLogs { get; set; }
+
+    public virtual DbSet<Role> Roles { get; set; }
+
+    public virtual DbSet<RolePermission> RolePermissions { get; set; }
 
     public virtual DbSet<UserAccountMapping> UserAccountMappings { get; set; }
 
@@ -159,6 +173,9 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.ContactLanguage)
                 .HasMaxLength(191)
                 .HasColumnName("contact_language");
+            entity.Property(e => e.IsActive)
+                .HasDefaultValue(true)
+                .HasColumnName("is_active");
             entity.Property(e => e.ContactPerson)
                 .HasMaxLength(191)
                 .HasColumnName("contact_person");
@@ -583,6 +600,27 @@ public partial class OlsDbContext : DbContext
                 .HasColumnName("updated_at");
         });
 
+        modelBuilder.Entity<EvrakTuru>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("evrak_turus_pkey");
+
+            entity.ToTable("evrak_turus");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Code)
+                .HasMaxLength(191)
+                .HasColumnName("code");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Name)
+                .HasMaxLength(191)
+                .HasColumnName("name");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("updated_at");
+        });
+
         modelBuilder.Entity<Expedition>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("expeditions_pkey");
@@ -590,6 +628,7 @@ public partial class OlsDbContext : DbContext
             entity.ToTable("expeditions");
 
             entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
             entity.Property(e => e.CarExitDate).HasColumnName("car_exit_date");
             entity.Property(e => e.CreatedAt)
                 .HasColumnType("timestamp(0) without time zone")
@@ -653,6 +692,45 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.Yukaktarmaid)
                 .HasMaxLength(191)
                 .HasColumnName("yukaktarmaid");
+        });
+
+        modelBuilder.Entity<ExpeditionFinanceRecord>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("expedition_finance_records_pkey");
+
+            entity.ToTable("expedition_finance_records");
+
+            entity.HasIndex(e => e.SiberId).IsUnique();
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.SiberId).HasColumnName("siber_id");
+            entity.Property(e => e.ExpeditionId).HasColumnName("expedition_id");
+            entity.Property(e => e.LoadTransferId).HasColumnName("load_transfer_id");
+            entity.Property(e => e.ExpeditionNumber).HasColumnName("expedition_number");
+            entity.Property(e => e.LoadNumber).HasColumnName("load_number");
+            entity.Property(e => e.ItemName).HasColumnName("item_name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.DocumentDate).HasColumnName("document_date");
+            entity.Property(e => e.ExpectedIncomeTry).HasColumnType("numeric(18,2)").HasColumnName("expected_income_try");
+            entity.Property(e => e.ExpectedExpenseTry).HasColumnType("numeric(18,2)").HasColumnName("expected_expense_try");
+            entity.Property(e => e.RealizedIncomeTry).HasColumnType("numeric(18,2)").HasColumnName("realized_income_try");
+            entity.Property(e => e.RealizedExpenseTry).HasColumnType("numeric(18,2)").HasColumnName("realized_expense_try");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("updated_at");
+
+            entity.HasOne(d => d.Expedition).WithMany()
+                .HasForeignKey(d => d.ExpeditionId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("expedition_finance_records_expedition_id_foreign");
+
+            entity.HasOne(d => d.LoadTransfer).WithMany()
+                .HasForeignKey(d => d.LoadTransferId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("expedition_finance_records_load_transfer_id_foreign");
         });
 
         modelBuilder.Entity<ExpeditionMovement>(entity =>
@@ -750,6 +828,66 @@ public partial class OlsDbContext : DbContext
                 .HasColumnName("updated_at");
         });
 
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("audit_logs_pkey");
+            entity.ToTable("audit_logs");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.UserName).HasMaxLength(191).HasColumnName("user_name");
+            entity.Property(e => e.Action).HasMaxLength(32).HasColumnName("action");
+            entity.Property(e => e.EntityType).HasMaxLength(64).HasColumnName("entity_type");
+            entity.Property(e => e.EntityId).HasMaxLength(64).HasColumnName("entity_id");
+            entity.Property(e => e.EntityLabel).HasMaxLength(191).HasColumnName("entity_label");
+            entity.Property(e => e.Changes).HasColumnType("text").HasColumnName("changes");
+            entity.Property(e => e.IpAddress).HasMaxLength(64).HasColumnName("ip_address");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+
+            // Denetim ekranı "en son ne oldu" ile açılıyor ve etikete göre arıyor.
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasIndex(e => e.EntityLabel);
+            entity.HasIndex(e => e.UserId);
+        });
+
+        modelBuilder.Entity<Role>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("roles_pkey");
+            entity.ToTable("roles");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Name).HasMaxLength(191).HasColumnName("name");
+            entity.Property(e => e.Slug).HasMaxLength(191).HasColumnName("slug");
+            entity.Property(e => e.Description).HasMaxLength(500).HasColumnName("description");
+            entity.Property(e => e.IsDefault).HasColumnName("is_default");
+            entity.Property(e => e.CreatedAt).HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt).HasColumnType("timestamp(0) without time zone").HasColumnName("updated_at");
+
+            entity.HasIndex(e => e.Slug).IsUnique();
+        });
+
+        modelBuilder.Entity<RolePermission>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("role_permissions_pkey");
+            entity.ToTable("role_permissions");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.RoleId).HasColumnName("role_id");
+            entity.Property(e => e.UserPermissionPageId).HasColumnName("user_permission_page_id");
+            entity.Property(e => e.Read).HasColumnName("read");
+            entity.Property(e => e.Create).HasColumnName("create");
+            entity.Property(e => e.Update).HasColumnName("update");
+            entity.Property(e => e.Delete).HasColumnName("delete");
+
+            entity.HasIndex(e => new { e.RoleId, e.UserPermissionPageId }).IsUnique();
+
+            entity.HasOne(d => d.Role).WithMany(p => p.RolePermissions)
+                .HasForeignKey(d => d.RoleId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("role_permissions_role_id_foreign");
+        });
+
         modelBuilder.Entity<FinancialItem>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("financial_items_pkey");
@@ -757,6 +895,8 @@ public partial class OlsDbContext : DbContext
             entity.ToTable("financial_items");
 
             entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.DefaultAccountId).HasColumnName("default_account_id");
+            entity.Property(e => e.DefaultAccountName).HasMaxLength(255).HasColumnName("default_account_name");
             entity.Property(e => e.CreatedAt)
                 .HasColumnType("timestamp(0) without time zone")
                 .HasColumnName("created_at");
@@ -1013,6 +1153,8 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.MailId)
                 .HasMaxLength(191)
                 .HasColumnName("mail_id");
+            entity.Property(e => e.ApprovalDate).HasColumnName("approval_date");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
             entity.Property(e => e.MarketingNotificationDate).HasColumnName("marketing_notification_date");
             entity.Property(e => e.OfferDate).HasColumnName("offer_date");
             entity.Property(e => e.OfferValidityDate).HasColumnName("offer_validity_date");
@@ -1024,6 +1166,7 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.ReservationNumber)
                 .HasMaxLength(191)
                 .HasColumnName("reservation_number");
+            entity.Property(e => e.RejectionReason).HasColumnName("rejection_reason");
             entity.Property(e => e.RomorkTypeId).HasColumnName("romork_type_id");
             entity.Property(e => e.SenderId).HasColumnName("sender_id");
             entity.Property(e => e.SiberId)
@@ -1143,6 +1286,8 @@ public partial class OlsDbContext : DbContext
 
             entity.ToTable("load_files");
 
+            entity.Property(e => e.LoadTransferId).HasColumnName("load_transfer_id");
+
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.CreatedAt)
                 .HasColumnType("timestamp(0) without time zone")
@@ -1256,6 +1401,7 @@ public partial class OlsDbContext : DbContext
             entity.ToTable("load_transfers");
 
             entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
             entity.Property(e => e.CarHeight)
                 .HasPrecision(10, 2)
                 .HasColumnName("car_height");
@@ -1365,6 +1511,37 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.UpdatedAt)
                 .HasColumnType("timestamp(0) without time zone")
                 .HasColumnName("updated_at");
+        });
+
+        modelBuilder.Entity<LoadTransferDocument>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("load_transfer_documents_pkey");
+
+            entity.ToTable("load_transfer_documents");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CopyCount).HasColumnName("copy_count");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Date).HasColumnName("date");
+            entity.Property(e => e.DeliveredAt).HasColumnName("delivered_at");
+            entity.Property(e => e.DeliveredTo)
+                .HasMaxLength(191)
+                .HasColumnName("delivered_to");
+            entity.Property(e => e.DocumentNumber)
+                .HasMaxLength(191)
+                .HasColumnName("document_number");
+            entity.Property(e => e.EvrakTuruId).HasColumnName("evrak_turu_id");
+            entity.Property(e => e.LoadTransferId).HasColumnName("load_transfer_id");
+            entity.Property(e => e.Note).HasColumnName("note");
+            entity.Property(e => e.OriginalCount).HasColumnName("original_count");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.Yukevrakid)
+                .HasMaxLength(191)
+                .HasColumnName("yukevrakid");
         });
 
         modelBuilder.Entity<LoadTransferInvoiceItem>(entity =>
@@ -1832,6 +2009,10 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.RememberToken)
                 .HasMaxLength(100)
                 .HasColumnName("remember_token");
+            entity.Property(e => e.RoleId).HasColumnName("role_id");
+            entity.Property(e => e.SiberBlocked).HasColumnName("siber_blocked");
+            entity.Property(e => e.SiberDepartmentName).HasMaxLength(191).HasColumnName("siber_department_name");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
             entity.Property(e => e.SiberCode)
                 .HasMaxLength(191)
                 .HasColumnName("siber_code");
@@ -1853,6 +2034,29 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.WorkingTracking)
                 .HasDefaultValue(false)
                 .HasColumnName("working_tracking");
+        });
+
+        modelBuilder.Entity<AccountRepresentative>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("account_representatives_pkey");
+
+            entity.ToTable("account_representatives");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.UserType).HasColumnName("user_type");
+            entity.Property(e => e.SiberId)
+                .HasMaxLength(191)
+                .HasColumnName("siber_id");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("updated_at");
+
+            entity.HasIndex(e => new { e.AccountId, e.UserType });
         });
 
         modelBuilder.Entity<UserAccountMapping>(entity =>

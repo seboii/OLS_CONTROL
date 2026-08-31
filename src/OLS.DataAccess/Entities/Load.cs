@@ -25,6 +25,16 @@ public partial class Load
 
     public DateOnly? MarketingNotificationDate { get; set; }
 
+    /// <summary>
+    /// Teklifin "Olumlu"ya çekildiği gün. Siber'de <c>skn_rezervasyon.onaytarih</c>
+    /// sütununa karşılık gelir.
+    ///
+    /// <see cref="OfferDate"/> ile KARIŞTIRILMAMALI: o teklifin VERİLDİĞİ tarihtir
+    /// ve Olumlu'ya geçince değişmez — ikisinin farkı "teklif kaç günde
+    /// onaylandı" raporunu mümkün kılar. Durum Olumlu'dan çıkarsa temizlenir.
+    /// </summary>
+    public DateOnly? ApprovalDate { get; set; }
+
     public int? CustomerId { get; set; }
 
     public int? SenderId { get; set; }
@@ -45,6 +55,14 @@ public partial class Load
 
     public string? Description { get; set; }
 
+    /// <summary>
+    /// Teklif "Olumsuz" işaretlendiğinde kullanıcının girdiği gerekçe. Raporlamada
+    /// tekliflerin neden kaybedildiğini görebilmek için ayrı tutulur —
+    /// <see cref="Description"/> genel not alanıdır, bu ikisi karıştırılmamalı.
+    /// Yalnızca Olumsuz (status_type_id = 1) durumunda anlamlıdır.
+    /// </summary>
+    public string? RejectionReason { get; set; }
+
     public Guid? DepartureCountryId { get; set; }
 
     public Guid? TransitCountryId { get; set; }
@@ -56,6 +74,12 @@ public partial class Load
     public int FrontTransportationByUs { get; set; }
 
     public int FinalTransportationByUs { get; set; }
+
+    /// <summary>
+    /// Teklifin ait olduğu Siber şirketi (skn_rezervasyon.sirketid).
+    /// Yük ve seferdeki ile aynı görünürlük ayrımı — bkz. CompanyScope.
+    /// </summary>
+    public string? SiberCompanyId { get; set; }
 
     public string? SiberId { get; set; }
 

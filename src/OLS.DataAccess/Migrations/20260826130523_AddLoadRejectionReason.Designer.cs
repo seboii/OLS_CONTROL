@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OLS.DataAccess.Context;
@@ -11,9 +12,11 @@ using OLS.DataAccess.Context;
 namespace OLS.DataAccess.Migrations
 {
     [DbContext(typeof(OlsDbContext))]
-    partial class OlsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260826130523_AddLoadRejectionReason")]
+    partial class AddLoadRejectionReason
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -173,48 +176,6 @@ namespace OLS.DataAccess.Migrations
                     b.ToTable("account_contact_people", (string)null);
                 });
 
-            modelBuilder.Entity("OLS.DataAccess.Entities.AccountRepresentative", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("AccountId")
-                        .HasColumnType("integer")
-                        .HasColumnName("account_id");
-
-                    b.Property<DateTime?>("CreatedAt")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("SiberId")
-                        .HasMaxLength(191)
-                        .HasColumnType("character varying(191)")
-                        .HasColumnName("siber_id");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<int>("UserId")
-                        .HasColumnType("integer")
-                        .HasColumnName("user_id");
-
-                    b.Property<int>("UserType")
-                        .HasColumnType("integer")
-                        .HasColumnName("user_type");
-
-                    b.HasKey("Id")
-                        .HasName("account_representatives_pkey");
-
-                    b.HasIndex("AccountId", "UserType");
-
-                    b.ToTable("account_representatives", (string)null);
-                });
-
             modelBuilder.Entity("OLS.DataAccess.Entities.AccountType", b =>
                 {
                     b.Property<long>("Id")
@@ -283,71 +244,6 @@ namespace OLS.DataAccess.Migrations
                         .HasName("account_type_mappings_pkey");
 
                     b.ToTable("account_type_mappings", (string)null);
-                });
-
-            modelBuilder.Entity("OLS.DataAccess.Entities.AuditLog", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<string>("Action")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("character varying(32)")
-                        .HasColumnName("action");
-
-                    b.Property<string>("Changes")
-                        .HasColumnType("text")
-                        .HasColumnName("changes");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("EntityId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("entity_id");
-
-                    b.Property<string>("EntityLabel")
-                        .HasMaxLength(191)
-                        .HasColumnType("character varying(191)")
-                        .HasColumnName("entity_label");
-
-                    b.Property<string>("EntityType")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("entity_type");
-
-                    b.Property<string>("IpAddress")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("ip_address");
-
-                    b.Property<long?>("UserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("user_id");
-
-                    b.Property<string>("UserName")
-                        .HasMaxLength(191)
-                        .HasColumnType("character varying(191)")
-                        .HasColumnName("user_name");
-
-                    b.HasKey("Id")
-                        .HasName("audit_logs_pkey");
-
-                    b.HasIndex("CreatedAt");
-
-                    b.HasIndex("EntityLabel");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("audit_logs", (string)null);
                 });
 
             modelBuilder.Entity("OLS.DataAccess.Entities.Car", b =>
@@ -985,11 +881,6 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnType("character varying(191)")
                         .HasColumnName("sefer_id");
 
-                    b.Property<string>("SiberCompanyId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_company_id");
-
                     b.Property<Guid?>("StartCityId")
                         .HasColumnType("uuid")
                         .HasColumnName("start_city_id");
@@ -1310,15 +1201,6 @@ namespace OLS.DataAccess.Migrations
                     b.Property<DateTime?>("CreatedAt")
                         .HasColumnType("timestamp(0) without time zone")
                         .HasColumnName("created_at");
-
-                    b.Property<long?>("DefaultAccountId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("default_account_id");
-
-                    b.Property<string>("DefaultAccountName")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("default_account_name");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1699,10 +1581,6 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("agent_id");
 
-                    b.Property<DateOnly?>("ApprovalDate")
-                        .HasColumnType("date")
-                        .HasColumnName("approval_date");
-
                     b.Property<int?>("CompanyPayFreightId")
                         .HasColumnType("integer")
                         .HasColumnName("company_pay_freight_id");
@@ -1802,11 +1680,6 @@ namespace OLS.DataAccess.Migrations
                     b.Property<int?>("SenderId")
                         .HasColumnType("integer")
                         .HasColumnName("sender_id");
-
-                    b.Property<string>("SiberCompanyId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_company_id");
 
                     b.Property<string>("SiberId")
                         .HasMaxLength(191)
@@ -2035,10 +1908,6 @@ namespace OLS.DataAccess.Migrations
                     b.Property<int?>("LoadId")
                         .HasColumnType("integer")
                         .HasColumnName("load_id");
-
-                    b.Property<long?>("LoadTransferId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("load_transfer_id");
 
                     b.Property<string>("MimeType")
                         .HasMaxLength(191)
@@ -2379,11 +2248,6 @@ namespace OLS.DataAccess.Migrations
                     b.Property<int?>("SenderId")
                         .HasColumnType("integer")
                         .HasColumnName("sender_id");
-
-                    b.Property<string>("SiberCompanyId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_company_id");
 
                     b.Property<string>("SiberId")
                         .HasMaxLength(191)
@@ -3090,95 +2954,6 @@ namespace OLS.DataAccess.Migrations
                     b.ToTable("revoked_tokens", (string)null);
                 });
 
-            modelBuilder.Entity("OLS.DataAccess.Entities.Role", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<DateTime?>("CreatedAt")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("description");
-
-                    b.Property<bool>("IsDefault")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_default");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(191)
-                        .HasColumnType("character varying(191)")
-                        .HasColumnName("name");
-
-                    b.Property<string>("Slug")
-                        .IsRequired()
-                        .HasMaxLength(191)
-                        .HasColumnType("character varying(191)")
-                        .HasColumnName("slug");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("roles_pkey");
-
-                    b.HasIndex("Slug")
-                        .IsUnique();
-
-                    b.ToTable("roles", (string)null);
-                });
-
-            modelBuilder.Entity("OLS.DataAccess.Entities.RolePermission", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint")
-                        .HasColumnName("id");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("Create")
-                        .HasColumnType("integer")
-                        .HasColumnName("create");
-
-                    b.Property<int>("Delete")
-                        .HasColumnType("integer")
-                        .HasColumnName("delete");
-
-                    b.Property<int>("Read")
-                        .HasColumnType("integer")
-                        .HasColumnName("read");
-
-                    b.Property<long>("RoleId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("role_id");
-
-                    b.Property<int>("Update")
-                        .HasColumnType("integer")
-                        .HasColumnName("update");
-
-                    b.Property<long>("UserPermissionPageId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("user_permission_page_id");
-
-                    b.HasKey("Id")
-                        .HasName("role_permissions_pkey");
-
-                    b.HasIndex("RoleId", "UserPermissionPageId")
-                        .IsUnique();
-
-                    b.ToTable("role_permissions", (string)null);
-                });
-
             modelBuilder.Entity("OLS.DataAccess.Entities.RomorkType", b =>
                 {
                     b.Property<long>("Id")
@@ -3433,28 +3208,10 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("remember_token");
 
-                    b.Property<long?>("RoleId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("role_id");
-
-                    b.Property<bool?>("SiberBlocked")
-                        .HasColumnType("boolean")
-                        .HasColumnName("siber_blocked");
-
                     b.Property<string>("SiberCode")
                         .HasMaxLength(191)
                         .HasColumnType("character varying(191)")
                         .HasColumnName("siber_code");
-
-                    b.Property<string>("SiberCompanyId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_company_id");
-
-                    b.Property<string>("SiberDepartmentName")
-                        .HasMaxLength(191)
-                        .HasColumnType("character varying(191)")
-                        .HasColumnName("siber_department_name");
 
                     b.Property<string>("SiberId")
                         .HasMaxLength(191)
@@ -4049,18 +3806,6 @@ namespace OLS.DataAccess.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("OLS.DataAccess.Entities.RolePermission", b =>
-                {
-                    b.HasOne("OLS.DataAccess.Entities.Role", "Role")
-                        .WithMany("RolePermissions")
-                        .HasForeignKey("RoleId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired()
-                        .HasConstraintName("role_permissions_role_id_foreign");
-
-                    b.Navigation("Role");
-                });
-
             modelBuilder.Entity("OLS.DataAccess.Entities.User", b =>
                 {
                     b.HasOne("OLS.DataAccess.Entities.Country", "Country")
@@ -4181,11 +3926,6 @@ namespace OLS.DataAccess.Migrations
             modelBuilder.Entity("OLS.DataAccess.Entities.LoadTransferInvoiceItem", b =>
                 {
                     b.Navigation("LoadTransferInvoiceMaps");
-                });
-
-            modelBuilder.Entity("OLS.DataAccess.Entities.Role", b =>
-                {
-                    b.Navigation("RolePermissions");
                 });
 
             modelBuilder.Entity("OLS.DataAccess.Entities.User", b =>

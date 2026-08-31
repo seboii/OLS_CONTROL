@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OLS.DataAccess.Context;
@@ -11,9 +12,11 @@ using OLS.DataAccess.Context;
 namespace OLS.DataAccess.Migrations
 {
     [DbContext(typeof(OlsDbContext))]
-    partial class OlsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260831064702_AddCompanyScope")]
+    partial class AddCompanyScope
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1803,11 +1806,6 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("sender_id");
 
-                    b.Property<string>("SiberCompanyId")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_company_id");
-
                     b.Property<string>("SiberId")
                         .HasMaxLength(191)
                         .HasColumnType("character varying(191)")
@@ -2035,10 +2033,6 @@ namespace OLS.DataAccess.Migrations
                     b.Property<int?>("LoadId")
                         .HasColumnType("integer")
                         .HasColumnName("load_id");
-
-                    b.Property<long?>("LoadTransferId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("load_transfer_id");
 
                     b.Property<string>("MimeType")
                         .HasMaxLength(191)

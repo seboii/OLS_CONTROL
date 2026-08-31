@@ -7,6 +7,13 @@ public partial class LoadTransfer
 {
     public long Id { get; set; }
 
+    /// <summary>
+    /// Yükün ait olduğu Siber şirketi (skn_yuk/skn_pozisyon.sirketid).
+    /// Siber'de iki şirket var: AVRORA ve OLS. Görünürlük ayrımı bu sütuna
+    /// dayanıyor — bkz. CompanyScope.
+    /// </summary>
+    public string? SiberCompanyId { get; set; }
+
     public string? LoadTransferId { get; set; }
 
     public string? LoadNumber { get; set; }
