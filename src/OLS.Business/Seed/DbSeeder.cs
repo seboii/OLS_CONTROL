@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -248,6 +248,10 @@ public static class DbSeeder
             ("role_management", "Rol/Yetki Yönetimi"),
             ("support_request_management", "Destek Talebi Yönetimi"),
             ("report_management", "Raporlama Yönetimi"),
+            // Finans ve muhasebe AYRI sayfalar: operasyonun cari bakiyeyi
+            // görmesi gerekir ama yevmiye defterini görmesi gerekmez.
+            ("finance_management", "Finans Yönetimi"),
+            ("accounting_management", "Muhasebe Yönetimi"),
         ];
 
         var existingSlugs = await db.UserPermissionPages

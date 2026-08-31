@@ -1,4 +1,4 @@
-namespace OLS.Business.Services.Roles;
+﻿namespace OLS.Business.Services.Roles;
 
 /// <summary>Bir yetki sayfası üzerindeki CRUD şablonu.</summary>
 public readonly record struct PagePermission(string Slug, bool Read, bool Create, bool Update, bool Delete)
@@ -48,6 +48,12 @@ public static class RoleCatalog
     /// <summary>Denetim kaydı — kimin ne yaptığı. Yalnızca Yönetim rolünde.</summary>
     public const string AuditLog = "audit_log_management";
 
+    /// <summary>Cari bakiye/ekstre, fatura, tahsilat-ödeme.</summary>
+    public const string Finance = "finance_management";
+
+    /// <summary>Yevmiye fişi, mizan, hesap planı — defter ekranları.</summary>
+    public const string Accounting = "accounting_management";
+
     /// <summary>Açılır listeleri besleyen tanım sayfaları — her rolde okunabilir.</summary>
     public static readonly string[] DefinitionPages =
     [
@@ -81,6 +87,7 @@ public static class RoleCatalog
             Compose(
                 PagePermission.Full(Account), PagePermission.Full(Load),
                 PagePermission.ReadOnly(Expedition), PagePermission.ReadOnly(Invoice),
+                PagePermission.ReadOnly(Finance),
                 PagePermission.ReadOnly(Car), PagePermission.Full(Support))),
 
         new("ihracat-operasyon", "İhracat Operasyon",
@@ -99,6 +106,7 @@ public static class RoleCatalog
             "Fatura üzerinde tam yetki; cari güncellenebilir, yük/sefer okunur.", false,
             Compose(
                 PagePermission.Full(Invoice), PagePermission.ReadWrite(Account),
+                PagePermission.Full(Finance), PagePermission.Full(Accounting),
                 PagePermission.ReadOnly(Load), PagePermission.ReadOnly(Expedition),
                 PagePermission.ReadOnly(Car), PagePermission.Full(Support))),
 
@@ -131,6 +139,7 @@ public static class RoleCatalog
             PagePermission.Full(Support), PagePermission.Full(Report),
             PagePermission.Full(UserManagement), PagePermission.Full(RoleManagement),
             PagePermission.Full(AuditLog),
+            PagePermission.Full(Finance), PagePermission.Full(Accounting),
         };
 
         pages.AddRange(DefinitionPages.Select(PagePermission.Full));
@@ -140,7 +149,8 @@ public static class RoleCatalog
     private static IReadOnlyList<PagePermission> OperationsPages() => Compose(
         PagePermission.Full(Load), PagePermission.Full(Expedition),
         PagePermission.ReadWrite(Car), PagePermission.ReadOnly(Account),
-        PagePermission.ReadOnly(Invoice), PagePermission.Full(Support));
+        PagePermission.ReadOnly(Invoice), PagePermission.ReadOnly(Finance),
+        PagePermission.Full(Support));
 
     /// <summary>
     /// Siber departman adı → rol slug'ı. Karşılaştırma Türkçe normalizasyonlu
