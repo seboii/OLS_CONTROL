@@ -1,5 +1,7 @@
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using OLS.Business.Common;
+using OLS.Business.Services.LoadTransfers;
 using OLS.Business.Services.Loads;
 
 namespace OLS.API.Controllers.Front;
@@ -30,6 +32,8 @@ public sealed class LoadFormRequest
     [FromForm(Name = "agent_id")] public int? AgentId { get; set; }
     [FromForm(Name = "payer_company")] public string? PayerCompany { get; set; }
     [FromForm(Name = "description")] public string? Description { get; set; }
+    /// <summary>Teklif Olumsuz isaretlendiginde girilen gerekce.</summary>
+    [FromForm(Name = "rejection_reason")] public string? RejectionReason { get; set; }
     [FromForm(Name = "departure_country_id")] public Guid? DepartureCountryId { get; set; }
     [FromForm(Name = "transit_country_id")] public Guid? TransitCountryId { get; set; }
     [FromForm(Name = "target_country_id")] public Guid? TargetCountryId { get; set; }
@@ -75,6 +79,7 @@ public sealed class LoadFormRequest
         AgentId = AgentId,
         PayerCompany = PayerCompany,
         Description = Description,
+        RejectionReason = RejectionReason,
         DepartureCountryId = DepartureCountryId,
         TransitCountryId = TransitCountryId,
         TargetCountryId = TargetCountryId,
@@ -156,4 +161,100 @@ public sealed class LoadMovementForm
 {
     [FromForm(Name = "movement_type_id")] public int? MovementTypeId { get; set; }
     [FromForm(Name = "note")] public string? Note { get; set; }
+}
+
+/// <summary>
+/// Teklifsiz yük açma isteği (bkz. DirectLoadService). Alan adları teklif
+/// formuyla aynı tutuldu ki arayüz aynı seçicileri kullanabilsin.
+/// </summary>
+public sealed class DirectLoadRequest
+{
+    [JsonPropertyName("work_type_id")] public long? WorkTypeId { get; set; }
+    [JsonPropertyName("loading_type_id")] public long? LoadingTypeId { get; set; }
+    [JsonPropertyName("load_transfer_type_id")] public long? LoadTransferTypeId { get; set; }
+    [JsonPropertyName("instruction_id")] public long? InstructionId { get; set; }
+    [JsonPropertyName("romork_type_id")] public long? RomorkTypeId { get; set; }
+    [JsonPropertyName("payment_type_id")] public long? PaymentTypeId { get; set; }
+    [JsonPropertyName("customer_id")] public long? CustomerId { get; set; }
+    [JsonPropertyName("sender_id")] public long? SenderId { get; set; }
+    [JsonPropertyName("receiver_id")] public long? ReceiverId { get; set; }
+    [JsonPropertyName("department_id")] public long? DepartmentId { get; set; }
+    [JsonPropertyName("delivery_method_id")] public long? DeliveryMethodId { get; set; }
+    [JsonPropertyName("agent_id")] public long? AgentId { get; set; }
+    [JsonPropertyName("company_pay_freight_id")] public long? CompanyPayFreightId { get; set; }
+    [JsonPropertyName("payer_company")] public string? PayerCompany { get; set; }
+    [JsonPropertyName("departure_country_id")] public Guid? DepartureCountryId { get; set; }
+    [JsonPropertyName("transit_country_id")] public Guid? TransitCountryId { get; set; }
+    [JsonPropertyName("target_country_id")] public Guid? TargetCountryId { get; set; }
+    [JsonPropertyName("front_transportation_by_us")] public int FrontTransportationByUs { get; set; }
+    [JsonPropertyName("final_transportation_by_us")] public int FinalTransportationByUs { get; set; }
+    [JsonPropertyName("way_of_working")] public int WayOfWorking { get; set; }
+    [JsonPropertyName("instruction_arrival_date")] public DateOnly? InstructionArrivalDate { get; set; }
+    [JsonPropertyName("request_arrival_date")] public DateOnly? RequestArrivalDate { get; set; }
+    [JsonPropertyName("readiness_date")] public DateOnly? ReadinessDate { get; set; }
+    [JsonPropertyName("description")] public string? Description { get; set; }
+    [JsonPropertyName("packages")] public List<DirectLoadPackageRequest> Packages { get; set; } = [];
+    [JsonPropertyName("financial_items")] public List<DirectLoadFinancialItemRequest> FinancialItems { get; set; } = [];
+
+    public DirectLoadModel ToModel() => new()
+    {
+        WorkTypeId = WorkTypeId,
+        LoadingTypeId = LoadingTypeId,
+        LoadTransferTypeId = LoadTransferTypeId,
+        InstructionId = InstructionId,
+        RomorkTypeId = RomorkTypeId,
+        PaymentTypeId = PaymentTypeId,
+        CustomerId = CustomerId,
+        SenderId = SenderId,
+        ReceiverId = ReceiverId,
+        DepartmentId = DepartmentId,
+        DeliveryMethodId = DeliveryMethodId,
+        AgentId = AgentId,
+        CompanyPayFreightId = CompanyPayFreightId,
+        PayerCompany = PayerCompany,
+        DepartureCountryId = DepartureCountryId,
+        TransitCountryId = TransitCountryId,
+        TargetCountryId = TargetCountryId,
+        FrontTransportationByUs = FrontTransportationByUs,
+        FinalTransportationByUs = FinalTransportationByUs,
+        WayOfWorking = WayOfWorking,
+        InstructionArrivalDate = InstructionArrivalDate,
+        RequestArrivalDate = RequestArrivalDate,
+        ReadinessDate = ReadinessDate,
+        Description = Description,
+        Packages = Packages
+            .Select(p => new DirectLoadPackage(
+                p.ProductTypeId, p.CaseTypeId, p.Quantity, p.GrossWeight, p.NetWeight,
+                p.Volume, p.Lademeter, p.Width, p.Height, p.Length, p.Stackable))
+            .ToList(),
+        FinancialItems = FinancialItems
+            .Select(f => new DirectLoadFinancialItem(
+                f.ItemId, f.AccountId, f.CurrencyId, f.NetPrice, f.Quantity, f.Description))
+            .ToList(),
+    };
+}
+
+public sealed class DirectLoadFinancialItemRequest
+{
+    [JsonPropertyName("item_id")] public long? ItemId { get; set; }
+    [JsonPropertyName("account_id")] public long? AccountId { get; set; }
+    [JsonPropertyName("currency_id")] public long? CurrencyId { get; set; }
+    [JsonPropertyName("net_price")] public decimal? NetPrice { get; set; }
+    [JsonPropertyName("quantity")] public decimal? Quantity { get; set; }
+    [JsonPropertyName("description")] public string? Description { get; set; }
+}
+
+public sealed class DirectLoadPackageRequest
+{
+    [JsonPropertyName("product_type_id")] public long? ProductTypeId { get; set; }
+    [JsonPropertyName("case_type_id")] public long? CaseTypeId { get; set; }
+    [JsonPropertyName("quantity")] public int? Quantity { get; set; }
+    [JsonPropertyName("gross_weight")] public decimal? GrossWeight { get; set; }
+    [JsonPropertyName("net_weight")] public decimal? NetWeight { get; set; }
+    [JsonPropertyName("volume")] public decimal? Volume { get; set; }
+    [JsonPropertyName("lademeter")] public decimal? Lademeter { get; set; }
+    [JsonPropertyName("width")] public decimal? Width { get; set; }
+    [JsonPropertyName("height")] public decimal? Height { get; set; }
+    [JsonPropertyName("length")] public decimal? Length { get; set; }
+    [JsonPropertyName("stackable")] public int? Stackable { get; set; }
 }

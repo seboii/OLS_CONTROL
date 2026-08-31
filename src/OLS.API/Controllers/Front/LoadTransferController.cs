@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OLS.API.Filters;
 using OLS.Business.Common;
+using OLS.DataAccess.Siber;
 using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Expeditions;
 using OLS.Business.Services.LoadTransfers;
@@ -24,16 +25,26 @@ public sealed class LoadTransferController : ApiControllerBase
     private readonly ILoadTransferUpdateService _update;
     private readonly ICurrentUser _currentUser;
 
+    private readonly ISiberArchiveRepository _archive;
+    private readonly ISiberArchiveFileReader _archiveFiles;
+    private readonly IDirectLoadService _direct;
+
     public LoadTransferController(
         ILoadTransferService transfers,
         ILoadTransferWriteService write,
         ILoadTransferUpdateService update,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        ISiberArchiveRepository archive,
+        ISiberArchiveFileReader archiveFiles,
+        IDirectLoadService direct)
     {
         _transfers = transfers;
         _write = write;
         _update = update;
         _currentUser = currentUser;
+        _archive = archive;
+        _archiveFiles = archiveFiles;
+        _direct = direct;
     }
 
     [HttpGet]
@@ -45,10 +56,20 @@ public sealed class LoadTransferController : ApiControllerBase
         [FromQuery(Name = "date_to")] DateOnly? dateTo,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
+        [FromQuery(Name = "customer_id")] int? customerId = null,
+        [FromQuery(Name = "sender_id")] int? senderId = null,
+        [FromQuery(Name = "receiver_id")] int? receiverId = null,
+        [FromQuery(Name = "assigned_user_id")] int? assignedUserId = null,
+        [FromQuery(Name = "status_id")] int? statusId = null,
+        [FromQuery(Name = "case_type_id")] long? caseTypeId = null,
+        [FromQuery(Name = "financial_item")] string? financialItem = null,
+        [FromQuery] decimal? weight = null,
         CancellationToken cancellationToken = default)
     {
         var result = await _transfers.ListAsync(
-            new LoadTransferListQuery(search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath),
+            new LoadTransferListQuery(
+                search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath,
+                customerId, senderId, receiverId, assignedUserId, statusId, caseTypeId, financialItem, weight),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");
@@ -131,6 +152,96 @@ public sealed class LoadTransferController : ApiControllerBase
             new { yuk_no = result.LoadNumber }, "Güncelleme Başarılı"));
     }
 
+    /// <summary>
+    /// Kullanıcı teklifsiz yük açabilir mi — arayüz düğmeyi buna göre gösterir.
+    /// </summary>
+    [HttpGet("direct/allowed")]
+    [RequiresPermission(PermissionAction.Read, "load_management")]
+    public async Task<IActionResult> DirectAllowed(CancellationToken cancellationToken) =>
+        base.Ok(ApiResponse.Success(
+            new { allowed = await _direct.CanCreateAsync(_currentUser.Id, cancellationToken) },
+            "Kayıtlar"));
+
+    /// <summary>
+    /// TEKLİFSİZ YÜK AÇAR. Yalnızca Avrora ekibi ve yöneticiler kullanabilir;
+    /// yetki kontrolü serviste de tekrarlanır (bkz. DirectLoadService).
+    /// </summary>
+    [HttpPost("direct")]
+    [RequiresPermission(PermissionAction.Create, "load_management")]
+    public async Task<IActionResult> CreateDirect(
+        [FromBody] DirectLoadRequest request, CancellationToken cancellationToken)
+    {
+        if (_currentUser.Id is not { } userId)
+            return Unauthorized(ApiResponse.Error(Translator.Get("Yetkisiz Erişim")));
+
+        var result = await _direct.CreateAsync(request.ToModel(), userId, cancellationToken);
+
+        if (!result.IsSuccess)
+            return BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
+            {
+                ["message"] = [result.ErrorMessage!],
+            }));
+
+        return base.Ok(ApiResponse.Success(new { yuk_no = result.LoadNumber }, "Yük oluşturuldu"));
+    }
+
+    /// <summary>
+    /// Siber arşivindeki evrağı indirir.
+    ///
+    /// Dosya Siber'in FTP arşiv sunucusunda duruyor; API onu VEKİL olarak çekip
+    /// servis eder. FTP adresi ve parolası tarayıcıya asla verilmez — aksi hâlde
+    /// arşivin tamamı, yetki kontrolü olmadan herkese açılırdı.
+    ///
+    /// Dosya adı kullanıcıya gösterilen addan (sbr_arsiv.ad) alınır; FTP'deki ad
+    /// sayısal ve ".SBR" uzantılı olduğu için indirilen dosya doğru uzantıyla
+    /// (ör. .pdf) açılsın diye bu şart.
+    /// </summary>
+    // DİKKAT: controller zaten [Route("api/v1/load_transfer")] ile rotalı.
+    // Şablona "load_transfer/" eklemek ucu api/v1/load_transfer/load_transfer/...
+    // yapıyordu ve arayüzün çağırdığı adres 404 dönüyordu.
+    [HttpGet("archive/{arsivId}")]
+    [RequiresPermission(PermissionAction.Read, "load_management")]
+    public async Task<IActionResult> DownloadArchiveFile(
+        string arsivId, CancellationToken cancellationToken)
+    {
+        var record = await _archive.FindAsync(arsivId, cancellationToken);
+
+        if (record?.ModulKod is null || record.ModulId is null || record.FtpAd is null)
+            return NotFoundError();
+
+        var bytes = await _archiveFiles.DownloadAsync(
+            record.ModulKod, record.ModulId, record.FtpAd, cancellationToken);
+
+        if (bytes is null)
+            return NotFoundError();
+
+        var fileName = string.IsNullOrWhiteSpace(record.Ad) ? $"{record.FtpAd}.dat" : record.Ad!;
+
+        return File(bytes, ContentTypeFor(fileName), fileName);
+    }
+
+    /// <summary>
+    /// Uzantıdan içerik türü. PDF ve görseller tarayıcıda AÇILABİLSİN diye
+    /// gerçek tür veriliyor; bilinmeyen türler indirme olarak sunulur.
+    /// </summary>
+    private static string ContentTypeFor(string fileName) =>
+        Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".pdf" => "application/pdf",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".tif" or ".tiff" => "image/tiff",
+            ".txt" => "text/plain",
+            ".xml" => "application/xml",
+            ".zip" => "application/zip",
+            ".doc" => "application/msword",
+            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls" => "application/vnd.ms-excel",
+            ".xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            _ => "application/octet-stream",
+        };
+
     [HttpDelete]
     [RequiresPermission(PermissionAction.Delete, "load_management")]
     public async Task<IActionResult> Delete(
@@ -205,10 +316,15 @@ public sealed class ExpeditionController : ApiControllerBase
         [FromQuery(Name = "date_to")] DateOnly? dateTo,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
+        [FromQuery(Name = "expedition_type_id")] int? expeditionTypeId = null,
+        [FromQuery(Name = "status_id")] int? statusId = null,
+        [FromQuery(Name = "department_id")] int? departmentId = null,
         CancellationToken cancellationToken = default)
     {
         var result = await _expeditions.ListAsync(
-            new ExpeditionListQuery(search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath),
+            new ExpeditionListQuery(
+                search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath,
+                expeditionTypeId, statusId, departmentId),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");

@@ -1,9 +1,12 @@
+using System.Globalization;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Accounts;
 using OLS.Business.Services.Loads;
 using OLS.DataAccess.Context;
+using OLS.DataAccess.Siber;
 
 namespace OLS.Business.Services.LoadTransfers;
 
@@ -24,7 +27,9 @@ public interface ILoadTransferService
 }
 
 public sealed record LoadTransferListQuery(
-    string? Search, int? WorkTypeId, DateOnly? DateFrom, DateOnly? DateTo, int? PerPage, int Page, string Path);
+    string? Search, int? WorkTypeId, DateOnly? DateFrom, DateOnly? DateTo, int? PerPage, int Page, string Path,
+    int? CustomerId = null, int? SenderId = null, int? ReceiverId = null, int? AssignedUserId = null,
+    int? StatusId = null, long? CaseTypeId = null, string? FinancialItem = null, decimal? Weight = null);
 
 /// <summary>
 /// Liste yanıtı. olsold yalnızca beş sütun seçip üç ilişkiyi yüklüyordu;
@@ -43,7 +48,9 @@ public sealed class LoadTransferListItemDto
     [JsonPropertyName("load_status_id")] public LoadStatusDto? LoadStatusId { get; init; }
     [JsonPropertyName("customer_id")] public NamedRefDto? CustomerId { get; init; }
     [JsonPropertyName("sender_id")] public NamedRefDto? SenderId { get; init; }
+    [JsonPropertyName("receiver_id")] public NamedRefDto? ReceiverId { get; init; }
     [JsonPropertyName("usercode_with_notification")] public NamedRefDto? AssignedUser { get; init; }
+    [JsonPropertyName("work_type")] public NamedRefDto? WorkType { get; init; }
 }
 
 public sealed class LoadStatusDto
@@ -52,6 +59,29 @@ public sealed class LoadStatusDto
     [JsonPropertyName("name")] public string? Name { get; init; }
     [JsonPropertyName("load_status_id")] public int? LoadStatusId { get; init; }
     [JsonPropertyName("order_no")] public int? OrderNo { get; init; }
+}
+
+public sealed class LinkedExpeditionDto
+{
+    [JsonPropertyName("id")] public long Id { get; init; }
+    [JsonPropertyName("expedition_number")] public string? ExpeditionNumber { get; init; }
+    /// <summary>1 = Yükleme, 2 = Boşaltma.</summary>
+    [JsonPropertyName("upload_unload")] public int? UploadUnload { get; init; }
+    [JsonPropertyName("date")] public DateOnly? Date { get; init; }
+    [JsonPropertyName("plate_number")] public string? PlateNumber { get; init; }
+}
+
+public sealed class SiberArchiveFileDto
+{
+    [JsonPropertyName("id")] public string Id { get; init; } = string.Empty;
+    [JsonPropertyName("name")] public string? Name { get; init; }
+    [JsonPropertyName("description")] public string? Description { get; init; }
+    [JsonPropertyName("created_at")] public DateTime? CreatedAt { get; init; }
+    [JsonPropertyName("created_by")] public string? CreatedBy { get; init; }
+    /// <summary>KVKK işareti — arayüz uyarı rozeti gösterir.</summary>
+    [JsonPropertyName("personal_data")] public bool PersonalData { get; init; }
+    /// <summary>Doluysa Siber'de yalnızca bu gruplara açık.</summary>
+    [JsonPropertyName("restricted_groups")] public string? RestrictedGroups { get; init; }
 }
 
 public sealed class LoadTransferDetailDto
@@ -122,6 +152,24 @@ public sealed class LoadTransferDetailDto
     [JsonPropertyName("load_id")] public long? OriginalLoadId { get; init; }
     [JsonPropertyName("load_file")] public IReadOnlyList<LoadFileDto> LoadFile { get; init; } = [];
 
+    /// <summary>
+    /// Siber'in FTP arşivindeki evraklar (sbr_arsiv). Yerel yüklenen dosyalardan
+    /// (load_file) AYRI tutulur: bunlar Siber programından eklenmiş, sahibi Siber
+    /// olan belgelerdir — buradan silinemez/düzenlenemez.
+    /// </summary>
+    [JsonPropertyName("siber_archive")] public IReadOnlyList<SiberArchiveFileDto> SiberArchive { get; init; } = [];
+
+    /// <summary>
+    /// Bu yükün bağlı olduğu sefer(ler).
+    ///
+    /// LİSTE, tek değer değil: "bir yük yalnızca bir sefere bağlanır" kuralı
+    /// canlı veride tutmuyor — 7.686 yükün 143'ü birden fazla sefere bağlı ve bu
+    /// her yıl tekrarlıyor (2026'da 12). Kaynak tablonun adı da bunu açıklıyor:
+    /// skn_yukaktarma, yani yükün seferler arasında AKTARILMASI. Tek alan olarak
+    /// modellenirse bu yüklerde ikinci sefer sessizce kaybolurdu.
+    /// </summary>
+    [JsonPropertyName("expeditions")] public IReadOnlyList<LinkedExpeditionDto> Expeditions { get; init; } = [];
+
     [JsonPropertyName("invoices")] public IReadOnlyList<LoadTransferInvoiceDto> Invoices { get; init; } = [];
 
     [JsonPropertyName("load_transfer_package")]
@@ -158,7 +206,7 @@ public sealed class LoadTransferInvoiceItemDto
     [JsonPropertyName("quantity")] public decimal? Quantity { get; init; }
     [JsonPropertyName("description")] public string? Description { get; init; }
     [JsonPropertyName("status")] public string Status { get; init; } = string.Empty;
-    [JsonPropertyName("item_id")] public NamedRefDto? ItemId { get; init; }
+    [JsonPropertyName("item_id")] public FinancialItemRefDto? ItemId { get; init; }
     [JsonPropertyName("account_id")] public NamedRefDto? AccountId { get; init; }
     [JsonPropertyName("currency_code")] public CurrencyDto? CurrencyCode { get; init; }
 }
@@ -199,19 +247,156 @@ public sealed class LoadTransferService : ILoadTransferService
 {
     private readonly OlsDbContext _db;
 
-    public LoadTransferService(OlsDbContext db) => _db = db;
+    private readonly ISiberArchiveRepository _archive;
+    private readonly ICompanyScope _companyScope;
+    private readonly ICurrentUser _currentUser;
+
+    public LoadTransferService(
+        OlsDbContext db, ISiberArchiveRepository archive,
+        ICompanyScope companyScope, ICurrentUser currentUser)
+    {
+        _db = db;
+        _archive = archive;
+        _companyScope = companyScope;
+        _currentUser = currentUser;
+    }
 
     public async Task<object> ListAsync(
         LoadTransferListQuery query, CancellationToken cancellationToken = default)
     {
         var transfers = _db.LoadTransfers.AsNoTracking();
 
+        // ŞİRKET GÖRÜNÜRLÜĞÜ (AVRORA / OLS). Filtre listede uygulanır ki Avrora
+        // kayıtları yetkisiz kullanıcının listesinde HİÇ görünmesin; detay ucu da
+        // ayrıca korunur (bkz. SingleAsync) — aksi hâlde id tahmin edilerek
+        // doğrudan erişilebilirdi.
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+
+        if (!visibility.SeesEverything)
+        {
+            transfers = visibility.OnlyCompanyId is { } only
+                ? transfers.Where(t => t.SiberCompanyId == only)
+                : transfers.Where(t => t.SiberCompanyId == null ||
+                                       t.SiberCompanyId != visibility.ExcludeCompanyId);
+        }
+
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var pattern = $"%{query.Search}%";
+            // Arama kutusu "Yük no, müşteri..." yazıyor ama önceden sadece yük
+            // numarasını tarıyordu - müşteri/gönderici/alıcı/görevli/durum/kap
+            // tipi/mali kalem adına ve kiloya göre de aranabilsin diye genişletildi.
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
+
+            // LoadTransferPackage.CaseTypeId yerel case_types.id'sini METİN olarak
+            // tutuyor (bkz. LoadTransferPackagesAsync yorumu) - EF Core string->int
+            // karşılaştırmasını SQL'e çeviremiyor, o yüzden eşleşen id'leri önce
+            // küçük bir sorguyla metne çevirip çekiyoruz.
+            var matchingCaseTypeIds = await _db.CaseTypes
+                .Where(c => EF.Functions.Like(c.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Select(c => c.Id.ToString())
+                .ToListAsync(cancellationToken);
+
+            var matchingFinancialItemIds = await _db.FinancialItems
+                .Where(f => EF.Functions.Like(f.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Select(f => (int)f.Id)
+                .ToListAsync(cancellationToken);
+
+            // DÜRÜST NOT / performans: bu 3 alan önceden _db.Accounts.Any(...) ile
+            // korelasyonlu EXISTS olarak yazılıyordu - Postgres bunu 8 OR'lu koşulun
+            // TAMAMI birlikteyken (parametreli/hazırlanmış sorgu olarak) bazen doğru
+            // plana çeviremiyor ve saniyeler yerine 30+ SANİYE sürebiliyordu (canlı
+            // ölçüldü). Diğer alt sorgular gibi ÖNCEDEN materialize edilen (ToListAsync)
+            // küçük id listelerine çevrildi - Contains() her zaman güvenilir/hızlı
+            // (= ANY(@array)) çeviriliyor, sorgu planlayıcısının 8'li OR'u nasıl
+            // ele alacağına bağlı kalınmıyor.
+            var matchingAccountIds = await _db.Accounts
+                .Where(a => EF.Functions.Like(a.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Select(a => (int)a.Id)
+                .ToListAsync(cancellationToken);
+
+            var matchingUserIds = await _db.Users
+                .Where(u => EF.Functions.Like(((u.Name ?? "") + " " + (u.Surname ?? "")).Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Select(u => (int)u.Id)
+                .ToListAsync(cancellationToken);
+
+            var matchingStatusIds = await _db.LoadStatusTypes
+                .Where(s => EF.Functions.Like(s.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Select(s => (int)s.Id)
+                .ToListAsync(cancellationToken);
+
+            var searchWeight =
+                decimal.TryParse(query.Search, NumberStyles.Number, CultureInfo.InvariantCulture, out var w1) ? w1
+                : decimal.TryParse(query.Search, NumberStyles.Number, new CultureInfo("tr-TR"), out var w2) ? w2
+                : (decimal?)null;
+
+            // Aynı performans nedeniyle (yukarıdaki not) bu ikisi de korelasyonlu
+            // Any() yerine önceden çekilen eşleşen LoadTransferId/InsertName
+            // kümelerine çevrildi.
+            var matchingPackageTransferIds = await _db.LoadTransferPackages
+                .Where(p => matchingCaseTypeIds.Contains(p.CaseTypeId!) ||
+                            (searchWeight != null && (p.GrossWeight == searchWeight || p.NetWeight == searchWeight)))
+                .Select(p => p.LoadTransferId)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
+            var matchingInvoiceItemInsertNames = await _db.LoadTransferInvoiceItems
+                .Where(i => i.ItemId != null && matchingFinancialItemIds.Contains(i.ItemId.Value))
+                .Select(i => i.InsertName)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+
             transfers = transfers.Where(t =>
-                EF.Functions.ILike(t.LoadNumberWorkType!, pattern));
+                EF.Functions.Like(t.LoadNumberWorkType!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                (t.CustomerId != null && matchingAccountIds.Contains(t.CustomerId.Value)) ||
+                (t.SenderId != null && matchingAccountIds.Contains(t.SenderId.Value)) ||
+                (t.ReceiverId != null && matchingAccountIds.Contains(t.ReceiverId.Value)) ||
+                (t.UsercodeWithNotification != null && matchingUserIds.Contains(t.UsercodeWithNotification.Value)) ||
+                (t.LoadStatusId != null && matchingStatusIds.Contains(t.LoadStatusId.Value)) ||
+                matchingPackageTransferIds.Contains(t.LoadTransferId) ||
+                matchingInvoiceItemInsertNames.Contains(t.LoadNumberWorkType));
         }
+
+        // Detaylı arama bölümü: aşağıdakiler VE (AND) mantığıyla birleşir - genel
+        // arama kutusunun aksine her doldurulan alan sonucu daha da daraltır.
+        // Müşteri/Gönderici/Alıcı serbest metin değil, AccountPicker'dan seçilen
+        // gerçek cari id'sidir (kayıtlı Siber verisinden) - tam eşleşme.
+        if (query.CustomerId is { } customerId)
+            transfers = transfers.Where(t => t.CustomerId == customerId);
+
+        if (query.SenderId is { } senderId)
+            transfers = transfers.Where(t => t.SenderId == senderId);
+
+        if (query.ReceiverId is { } receiverId)
+            transfers = transfers.Where(t => t.ReceiverId == receiverId);
+
+        if (query.AssignedUserId is { } assignedUserId)
+            transfers = transfers.Where(t => t.UsercodeWithNotification == assignedUserId);
+
+        if (!string.IsNullOrWhiteSpace(query.FinancialItem))
+        {
+            var p = $"%{QueryableExtensions.NormalizeTurkish(query.FinancialItem)}%";
+            var financialItemIds = await _db.FinancialItems
+                .Where(f => EF.Functions.Like(f.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), p))
+                .Select(f => (int)f.Id)
+                .ToListAsync(cancellationToken);
+            transfers = transfers.Where(t => _db.LoadTransferInvoiceItems.Any(i =>
+                i.InsertName == t.LoadNumberWorkType && i.ItemId != null && financialItemIds.Contains(i.ItemId.Value)));
+        }
+
+        if (query.StatusId is { } statusId)
+            transfers = transfers.Where(t => t.LoadStatusId == statusId);
+
+        if (query.CaseTypeId is { } caseTypeId)
+        {
+            var caseTypeIdText = caseTypeId.ToString();
+            transfers = transfers.Where(t => _db.LoadTransferPackages.Any(p =>
+                p.LoadTransferId == t.LoadTransferId && p.CaseTypeId == caseTypeIdText));
+        }
+
+        if (query.Weight is { } weight)
+            transfers = transfers.Where(t => _db.LoadTransferPackages.Any(p =>
+                p.LoadTransferId == t.LoadTransferId && (p.GrossWeight == weight || p.NetWeight == weight)));
 
         if (query.WorkTypeId is { } workTypeId)
             transfers = transfers.Where(t => t.WorkType == workTypeId);
@@ -250,8 +435,14 @@ public sealed class LoadTransferService : ILoadTransferService
                 SenderId = _db.Accounts.Where(a => a.Id == t.SenderId)
                     .Select(a => new NamedRefDto { Id = a.Id, Name = a.Name })
                     .FirstOrDefault(),
+                ReceiverId = _db.Accounts.Where(a => a.Id == t.ReceiverId)
+                    .Select(a => new NamedRefDto { Id = a.Id, Name = a.Name })
+                    .FirstOrDefault(),
                 AssignedUser = _db.Users.Where(u => u.Id == t.UsercodeWithNotification)
                     .Select(u => new NamedRefDto { Id = u.Id, Name = u.Name + " " + u.Surname })
+                    .FirstOrDefault(),
+                WorkType = _db.WorkTypes.Where(w => w.Id == t.WorkType)
+                    .Select(w => new NamedRefDto { Id = w.Id, Name = w.Name, Code = w.Code, SiberId = w.SiberId })
                     .FirstOrDefault(),
             });
 
@@ -267,6 +458,14 @@ public sealed class LoadTransferService : ILoadTransferService
 
         if (t is null)
             return null;
+
+        // Detay da filtrelenir: liste gizlese bile id ile doğrudan istenebilirdi.
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+        if (!visibility.Allows(t.SiberCompanyId))
+            return null;
+
+        // Eşleme tablosu yerel id'yi metin olarak tutuyor.
+        var transferIdText = t.Id.ToString();
 
         var originalLoadId = t.LoadNumberWorkType is null
             ? (long?)null
@@ -361,10 +560,45 @@ public sealed class LoadTransferService : ILoadTransferService
             SecondCustomerRepresentative = await UserRefAsync(t.SecondCustomerRepresentativeName, cancellationToken),
 
             OriginalLoadId = originalLoadId,
-            LoadFile = originalLoadId is null
-                ? []
-                : await _db.LoadFiles.AsNoTracking()
-                    .Where(f => f.LoadId == (int)originalLoadId.Value)
+
+            // Sefer bağı expedition_load_mappings üzerinden; eşleme sütunu yerel
+            // sayısal id'yi METİN olarak tutuyor (bkz. ExpeditionLoadMappingService).
+            Expeditions = await (
+                from m in _db.ExpeditionLoadMappings.AsNoTracking()
+                where m.LoadTransferId == transferIdText
+                join e in _db.Expeditions.AsNoTracking()
+                    on m.ExpeditionId equals e.Id.ToString()
+                select new LinkedExpeditionDto
+                {
+                    Id = e.Id,
+                    ExpeditionNumber = e.ExpeditionNumber,
+                    UploadUnload = m.UploadUnload,
+                    Date = m.Date,
+                    PlateNumber = _db.Cars.Where(c => c.Id == e.RomorkId)
+                        .Select(c => c.PlateNumber).FirstOrDefault(),
+                })
+                .Distinct()
+                .ToListAsync(cancellationToken),
+
+            // Siber arşivi: yükün Siber kimliğiyle (skn_yuk.yukid) bağlanır.
+            // Bağlantı yapılandırılmamışsa boş liste döner, ekran bozulmaz.
+            SiberArchive = (await _archive.ListByModuleAsync(t.LoadTransferId ?? string.Empty, cancellationToken))
+                .Select(a => new SiberArchiveFileDto
+                {
+                    Id = a.ArsivId,
+                    Name = a.Ad,
+                    Description = a.Aciklama,
+                    CreatedAt = a.KayitGirisTarih,
+                    CreatedBy = a.KayitGiren,
+                    PersonalData = a.KisiselVeri,
+                    RestrictedGroups = string.IsNullOrWhiteSpace(a.YetkiliGruplar) ? null : a.YetkiliGruplar,
+                })
+                .ToList(),
+
+            // Dosyalar teklife VEYA doğrudan yüke bağlı olabilir (teklifsiz yükler).
+            LoadFile = await _db.LoadFiles.AsNoTracking()
+                    .Where(f => (originalLoadId != null && f.LoadId == (int)originalLoadId) ||
+                                f.LoadTransferId == t.Id)
                     .Select(f => new LoadFileDto
                     {
                         Id = f.Id, LoadId = f.LoadId, File = f.File,
@@ -409,7 +643,7 @@ public sealed class LoadTransferService : ILoadTransferService
                     NetPrice = i.NetPrice, TotalPrice = i.TotalPrice, Quantity = i.Quantity,
                     Description = i.Description, Status = i.Status,
                     ItemId = _db.FinancialItems.Where(f => f.Id == i.ItemId)
-                        .Select(f => new NamedRefDto { Id = f.Id, Name = f.Name })
+                        .Select(f => new FinancialItemRefDto { Id = f.Id, Name = f.Name, Type = f.Type ?? 0 })
                         .FirstOrDefault(),
                     AccountId = _db.Accounts.Where(a => a.Id == i.AccountId)
                         .Select(a => new NamedRefDto { Id = a.Id, Name = a.Name })
@@ -482,17 +716,34 @@ public sealed class LoadTransferService : ILoadTransferService
                 .FirstOrDefaultAsync(cancellationToken);
 
     /// <summary>
-    /// <c>LoadTransfer.DepartureCountryId</c>/<c>TargetCountryId</c> Load'un
-    /// aksine <c>string?</c> (dönüşüm sırasında Guid'in <c>.ToString()</c>'u
-    /// yazılıyor — bkz. LoadTransferWriteService.ConvertOfferAsync).
+    /// <c>LoadTransfer.DepartureCountryId</c>/<c>TargetCountryId</c> Load'un aksine
+    /// <c>string?</c> — dönüşüm anında Guid'in <c>.ToString()</c>'u yazılır (bkz.
+    /// LoadTransferWriteService.ConvertOfferAsync), AMA BULUNAN GERÇEK BUG: olsold'un
+    /// kendi <c>update()</c> akışı (LoadTransferController.php satır 719-720)
+    /// Siber'in <c>_yuklemeulke</c>/<c>_bosaltmaulke</c> sütununa GUID DEĞİL, ÜLKE
+    /// ADINI yazıyordu (<c>$load_transfer->departureCountryId->name</c>) — ve gerçek
+    /// Siber'de bu kural neredeyse tüm satırlarda geçerli (canlıda doğrulandı: 11046
+    /// satırın yalnızca 411'i GUID, 10631'i düz ülke adı). Salt GUID araması bu
+    /// yüzden Kalkış/Varış Ülkesi'ni satırların %96'sında boş gösteriyordu. Burada da
+    /// aynı iki biçim (GUID ÖNCE, olmazsa isim) desteklenir.
     /// </summary>
     private async Task<CountryDto?> CountryRefAsync(string? countryId, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParse(countryId, out var id))
+        if (string.IsNullOrWhiteSpace(countryId))
             return null;
 
+        if (Guid.TryParse(countryId, out var id))
+        {
+            var byId = await _db.Countries.AsNoTracking()
+                .Where(c => c.Id == id)
+                .Select(c => new CountryDto { Id = c.Id, Name = c.Name })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (byId is not null)
+                return byId;
+        }
+
         return await _db.Countries.AsNoTracking()
-            .Where(c => c.Id == id)
+            .Where(c => c.Name != null && EF.Functions.ILike(c.Name, countryId))
             .Select(c => new CountryDto { Id = c.Id, Name = c.Name })
             .FirstOrDefaultAsync(cancellationToken);
     }
