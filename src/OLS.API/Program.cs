@@ -64,8 +64,12 @@ builder.Services.AddBusiness(builder.Configuration);
 
 builder.Services.AddScoped<ITranslator, JsonTranslator>();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
+// Denetim kaydı bağlamı. HTTP isteği yoksa (arka plan senkronu) UserId null
+// döner ve interceptor hiçbir şey yazmaz — bkz. HttpAuditContext.
+builder.Services.AddScoped<OLS.DataAccess.Auditing.IAuditContext, OLS.API.Services.HttpAuditContext>();
 builder.Services.AddSingleton<FileStorage>();
 builder.Services.AddSingleton<IFileStorage>(sp => sp.GetRequiredService<FileStorage>());
+builder.Services.AddHostedService<SiberSyncBackgroundService>();
 
 // --------------------------------------------------------------------------
 // Kimlik doğrulama: olsold Laravel Passport (OAuth2) kullanıyordu.
@@ -230,10 +234,12 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<OLS.DataAccess.Context.OlsDbContext>();
     var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher>();
+    var defaultUserPassword = scope.ServiceProvider.GetRequiredService<IDefaultUserPassword>();
+    var roleService = scope.ServiceProvider.GetRequiredService<OLS.Business.Services.Roles.IRoleService>();
     var seedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
     await db.Database.MigrateAsync();
     await OLS.Business.Seed.DbSeeder.SeedAsync(
-        db, passwordHasher, app.Configuration, app.Environment, seedLogger);
+        db, passwordHasher, defaultUserPassword, roleService, app.Configuration, app.Environment, seedLogger);
 }
 
 app.UseAuthentication();

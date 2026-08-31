@@ -23,14 +23,24 @@ public static class DependencyInjection
             ?? throw new InvalidOperationException(
                 "ConnectionStrings:Postgres tanımlı değil.");
 
-        services.AddDbContext<OlsDbContext>(options =>
-            options.UseNpgsql(postgres));
+        // Denetim kaydı interceptor'ı: yazma yolunu tek noktadan yakalar
+        // (bkz. AuditSaveChangesInterceptor). Kullanıcı bağlamı yoksa (arka plan
+        // senkronu) hiçbir şey yazmaz.
+        services.AddScoped<Auditing.AuditSaveChangesInterceptor>();
+
+        services.AddDbContext<OlsDbContext>((provider, options) =>
+            options
+                .UseNpgsql(postgres)
+                .AddInterceptors(provider.GetRequiredService<Auditing.AuditSaveChangesInterceptor>()));
 
         // Siber bağlantısı isteğe bağlı: tanımlı değilse uygulama ayağa kalkar,
         // ancak Siber'e dokunan uçlar çağrıldığında anlamlı 503 döner.
         services.AddSingleton<ISiberConnectionFactory>(_ =>
             new SiberConnectionFactory(configuration.GetConnectionString("Siber")));
 
+        services.AddScoped<ISiberArchiveRepository, SiberArchiveRepository>();
+        services.AddSingleton<ISiberArchiveFileReader, SiberArchiveFileReader>();
+        services.AddScoped<ISiberArchiveWriter, SiberArchiveWriter>();
         services.AddScoped<ISiberAccountRepository, SiberAccountRepository>();
         services.AddScoped<ISiberCarRepository, SiberCarRepository>();
         services.AddScoped<ISiberExpeditionRepository, SiberExpeditionRepository>();

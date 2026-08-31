@@ -11,6 +11,7 @@ using OLS.Business.Services.Invoices;
 using OLS.Business.Services.Loads;
 using OLS.Business.Services.LoadTransfers;
 using OLS.Business.Services.Lookups;
+using OLS.Business.Services.Reporting;
 using OLS.Business.Services.Roles;
 using OLS.Business.Services.TransferData;
 using OLS.Business.Services.TransferSiber;
@@ -73,6 +74,7 @@ public static class DependencyInjection
         services.AddScoped<ILoadTransferWriteService, LoadTransferWriteService>();
         services.AddScoped<ILoadTransferUpdateService, LoadTransferUpdateService>();
         services.AddScoped<ILoadTransferInvoiceItemService, LoadTransferInvoiceItemService>();
+        services.AddScoped<ILoadTransferDocumentService, LoadTransferDocumentService>();
 
         services.AddScoped<ITransferSiberService, TransferSiberService>();
         services.AddScoped<ILoadReleaseService, LoadReleaseService>();
@@ -93,14 +95,22 @@ public static class DependencyInjection
         services.AddScoped<IContactFormService, ContactFormService>();
 
         services.AddScoped<IDashboardService, DashboardService>();
+        services.AddScoped<IReportingService, ReportingService>();
 
         services.AddScoped<ISiberImportService, SiberImportService>();
+        services.AddScoped<ISiberSyncService, SiberSyncService>();
 
         // 23 referans/tanım modülü (27'den EinvoicePrefix hariç) tek generic kayıtla karşılanır.
         services.AddScoped(typeof(ILookupService<>), typeof(LookupService<>));
 
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IPasswordHasher, BcryptPasswordHasher>();
+        services.AddScoped<IDefaultUserPassword, DefaultUserPassword>();
+        services.AddScoped<Services.Roles.IRoleService, Services.Roles.RoleService>();
+        services.AddScoped<Services.Auditing.IAuditLogService, Services.Auditing.AuditLogService>();
+        services.AddScoped<Services.Authorization.ICompanyScope, Services.Authorization.CompanyScope>();
+        services.AddScoped<Services.LoadTransfers.IDirectLoadService, Services.LoadTransfers.DirectLoadService>();
+        services.AddScoped<Services.Loads.ILoadArchivePublisher, Services.Loads.LoadArchivePublisher>();
         services.AddScoped<ITokenService, JwtTokenService>();
 
         return services;
