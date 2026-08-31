@@ -13,6 +13,8 @@ import { VehiclesPage } from "@/pages/vehicles/VehiclesPage";
 import { UsersPage } from "@/pages/users/UsersPage";
 import { SupportPage } from "@/pages/support/SupportPage";
 import { ReportingPage } from "@/pages/reporting/ReportingPage";
+import { FinancePage } from "@/pages/finance/FinancePage";
+import { AccountingPage } from "@/pages/accounting/AccountingPage";
 import { AuditLogPage } from "@/pages/audit/AuditLogPage";
 import { ProfilePage } from "@/pages/ProfilePage";
 
@@ -35,6 +37,8 @@ export default function App() {
               <Route path="/kullanicilar" element={<UsersPage />} />
               <Route path="/destek-talepleri" element={<SupportPage />} />
               <Route path="/raporlama" element={<ReportingPage />} />
+              <Route path="/finans" element={<FinancePage />} />
+              <Route path="/muhasebe" element={<AccountingPage />} />
               <Route path="/denetim" element={<AuditLogPage />} />
               <Route path="/hesabim" element={<ProfilePage />} />
             </Route>

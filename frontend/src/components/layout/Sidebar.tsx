@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "motion/react";
 import { NavLink } from "react-router-dom";
-import { ChevronLeft, ChevronRight, LayoutDashboard, Users, FileText, Package, Truck, Receipt, Car, Shield, Headphones, Settings, LogOut, BarChart3, ShieldCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, LayoutDashboard, Users, FileText, Package, Truck, Receipt, Car, Shield, Headphones, Settings, LogOut, BarChart3, ShieldCheck, Wallet, BookOpen } from "lucide-react";
 import { clsx } from "clsx";
 import { useAuth } from "@/lib/auth";
 
@@ -18,6 +18,8 @@ export const NAV_ITEMS: NavItem[] = [
   { path: "/yukler", label: "Yükler", icon: Package, permissionSlug: "load_management" },
   { path: "/seferler", label: "Seferler", icon: Truck, permissionSlug: "expedition_management" },
   { path: "/faturalar", label: "Faturalar", icon: Receipt, permissionSlug: "invoice_management" },
+  { path: "/finans", label: "Finans", icon: Wallet, permissionSlug: "finance_management" },
+  { path: "/muhasebe", label: "Muhasebe", icon: BookOpen, permissionSlug: "accounting_management" },
   { path: "/araclar", label: "Araçlar", icon: Car, permissionSlug: "car_management" },
   { path: "/kullanicilar", label: "Kullanıcılar", icon: Shield, permissionSlug: "user_management" },
   { path: "/destek-talepleri", label: "Destek Talepleri", icon: Headphones, permissionSlug: "support_request_management" },
