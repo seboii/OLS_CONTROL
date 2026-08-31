@@ -6,33 +6,31 @@ import { FormField } from "@/components/ui/primitives";
 
 const PAGE_SIZE = 20;
 
-export interface AccountOption {
+export interface LookupOption {
   id: number;
   name: string | null;
-  siber_id?: string | null;
-  // Yalnızca list/detay uçlarının AccountRefDto'sunda dolu gelir (bkz. LoadDtos.cs).
-  country_id?: { id: string; name: string | null } | null;
 }
 
 /**
- * Cari seçici: müşteri/gönderici/alıcı/acente gibi Account referanslı alanlar
- * için ortak bileşen. Ayrı bir pencere açmadan, doğrudan yazarak arayan
- * satır-içi bileşen (combobox) — öneriler input'un altında listelenir, ok
- * tuşlarıyla gezilebilir, Enter vurgulanan öneriyi doğrudan seçer.
+ * AccountPicker/FinancialItemPicker ile aynı satır-içi arama (combobox) davranışı,
+ * herhangi bir generic lookup uç noktası (LookupControllerBase — /api/v1/<kaynak>
+ * ?search=&per_page=&page=) için. Ürün Tipi/Kap Tipi gibi tanım tabloları
+ * Siber'in tam referans-veri senkronundan sonra yüzlerce satıra çıkabiliyor
+ * (ör. Kap Tipi 9→125, Ürün Tipi →223) — düz bir &lt;select&gt; ile aranamaz hâle
+ * geliyor, bu yüzden bu bileşen kullanılır.
  */
-export function AccountPicker({ label, value, onChange, required, error, accountType }: {
+export function LookupPicker({ label, endpoint, value, onChange, required, error }: {
   label: string;
-  value: AccountOption | null;
-  onChange: (v: AccountOption | null) => void;
+  endpoint: string;
+  value: LookupOption | null;
+  onChange: (v: LookupOption | null) => void;
   required?: boolean;
   error?: string;
-  /** olsold: SelectAjax fetchParams={account_type_id}. Örn. Acente=5, Navlun Ödeyen Firma=1. */
-  accountType?: number;
 }) {
   const [query, setQuery] = useState(value?.name ?? "");
   const [open, setOpen] = useState(false);
   const debouncedQuery = useDebouncedValue(query);
-  const [results, setResults] = useState<AccountOption[]>([]);
+  const [results, setResults] = useState<LookupOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
@@ -44,16 +42,12 @@ export function AccountPicker({ label, value, onChange, required, error, account
     setQuery(value?.name ?? "");
   }, [value?.id, value?.name]);
 
-  // Siber senkronundan sonra Cari tablosu yüzlerce/binlerce satır içerebiliyor —
-  // arama sonucu tek sayfada sığmayabilir. Sorgu değiştiğinde 1. sayfadan
-  // başlanır; devamı aşağı kaydırınca loadMore() ile eklenir.
   useEffect(() => {
     if (!open) return;
     setLoading(true);
     api
-      .get<DataMessage<Paginated<AccountOption>>>("/api/v1/account", {
+      .get<DataMessage<Paginated<LookupOption>>>(endpoint, {
         search: debouncedQuery || undefined,
-        account_type_id: accountType,
         per_page: PAGE_SIZE,
         page: 1,
       })
@@ -68,16 +62,15 @@ export function AccountPicker({ label, value, onChange, required, error, account
         setHasMore(false);
       })
       .finally(() => setLoading(false));
-  }, [open, debouncedQuery, accountType]);
+  }, [open, debouncedQuery, endpoint]);
 
   function loadMore() {
     if (loading || loadingMore || !hasMore) return;
     const nextPage = page + 1;
     setLoadingMore(true);
     api
-      .get<DataMessage<Paginated<AccountOption>>>("/api/v1/account", {
+      .get<DataMessage<Paginated<LookupOption>>>(endpoint, {
         search: debouncedQuery || undefined,
-        account_type_id: accountType,
         per_page: PAGE_SIZE,
         page: nextPage,
       })
@@ -106,7 +99,7 @@ export function AccountPicker({ label, value, onChange, required, error, account
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [value]);
 
-  function select(item: AccountOption) {
+  function select(item: LookupOption) {
     onChange(item);
     setQuery(item.name ?? "");
     setOpen(false);

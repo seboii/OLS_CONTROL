@@ -1,43 +1,66 @@
 import type { ReactNode } from "react";
-import { AlertCircle, Search } from "lucide-react";
+import { AlertCircle, Search, X } from "lucide-react";
 import { clsx } from "clsx";
 
 // ─────────────────────────────────────────────
 // BADGE — durum renkleri. Yeni durum adı eklerken buraya da ekleyin.
 // ─────────────────────────────────────────────
 const STATUS_STYLES: Record<string, string> = {
-  "aktif": "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-  "pasif": "bg-gray-100 text-gray-500 ring-1 ring-gray-200",
-  "beklemede": "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-  "onaylı": "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-  "olumlu": "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-  "reddedildi": "bg-red-50 text-red-600 ring-1 ring-red-200",
-  "olumsuz": "bg-red-50 text-red-600 ring-1 ring-red-200",
-  "taslak": "bg-gray-100 text-gray-500 ring-1 ring-gray-200",
-  "teklif": "bg-gray-100 text-gray-600 ring-1 ring-gray-200",
-  "sipariş": "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
-  "düzeltme talebi": "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-  "tamamlandı": "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
-  "yolda": "bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200",
-  "yükleniyor": "bg-violet-50 text-violet-700 ring-1 ring-violet-200",
-  "iptal": "bg-red-50 text-red-600 ring-1 ring-red-200",
-  "ödendi": "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-  "vadesi geçti": "bg-red-50 text-red-600 ring-1 ring-red-200",
-  "açık": "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-  "çözüldü": "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200",
-  "yüksek": "bg-red-50 text-red-600 ring-1 ring-red-200",
-  "orta": "bg-amber-50 text-amber-700 ring-1 ring-amber-200",
-  "düşük": "bg-gray-100 text-gray-500 ring-1 ring-gray-200",
+  "aktif": "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  "pasif": "bg-gray-100 text-gray-500 ring-gray-200",
+  "beklemede": "bg-amber-50 text-amber-700 ring-amber-200",
+  "onaylı": "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  "olumlu": "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  "reddedildi": "bg-red-50 text-red-600 ring-red-200",
+  "olumsuz": "bg-red-50 text-red-600 ring-red-200",
+  "taslak": "bg-gray-100 text-gray-500 ring-gray-200",
+  "teklif": "bg-gray-100 text-gray-600 ring-gray-200",
+  "sipariş": "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  "düzeltme talebi": "bg-amber-50 text-amber-700 ring-amber-200",
+  "tamamlandı": "bg-blue-50 text-blue-700 ring-blue-200",
+  "yolda": "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  "yükleniyor": "bg-violet-50 text-violet-700 ring-violet-200",
+  "iptal": "bg-red-50 text-red-600 ring-red-200",
+  "ödendi": "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  "vadesi geçti": "bg-red-50 text-red-600 ring-red-200",
+  "açık": "bg-amber-50 text-amber-700 ring-amber-200",
+  "çözüldü": "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  "yüksek": "bg-red-50 text-red-600 ring-red-200",
+  "orta": "bg-amber-50 text-amber-700 ring-amber-200",
+  "düşük": "bg-gray-100 text-gray-500 ring-gray-200",
+  // Yük/Sefer durum akışı (skn_yukdurum / skn_pozisyondurum) — "NN - AD" biçiminde gelir.
+  "boşaltıldı": "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  "boşaltmada": "bg-amber-50 text-amber-700 ring-amber-200",
+  "yurt dışı yolda": "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  "yurt i̇çi yolda": "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  "yükleme gümrüğünde": "bg-violet-50 text-violet-700 ring-violet-200",
+  "yüklendi": "bg-blue-50 text-blue-700 ring-blue-200",
+  "yükleme için yolda": "bg-blue-50 text-blue-700 ring-blue-200",
+  "kesinleşmiş": "bg-cyan-50 text-cyan-700 ring-cyan-200",
+  "çıkış yaptı": "bg-teal-50 text-teal-700 ring-teal-200",
+  "hazır": "bg-cyan-50 text-cyan-700 ring-cyan-200",
+  "sefere atanmış": "bg-blue-50 text-blue-700 ring-blue-200",
 };
 
+/** "90 - BOŞALTILDI" gibi kod önekli durum adlarından anahtar kelimeyi çıkarır.
+ *  DİKKAT: düz .toLowerCase() Türkçe "İ" (U+0130) harfini "i̇" (nokta birleşimli,
+ *  2 karakter) yapar - STATUS_STYLES anahtarlarıyla asla eşleşmez. toLocaleLowerCase("tr")
+ *  şart. */
+function statusKeyword(label: string): string {
+  const withoutCode = label.replace(/^\s*\d+\s*-\s*/, "").trim();
+  return (withoutCode || label).toLocaleLowerCase("tr");
+}
+
 export function Badge({ label }: { label: string }) {
+  const style = STATUS_STYLES[statusKeyword(label)] ?? STATUS_STYLES[label.toLocaleLowerCase("tr")] ?? "bg-gray-100 text-gray-600 ring-gray-200";
   return (
     <span
       className={clsx(
-        "inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium font-mono tracking-wide whitespace-nowrap",
-        STATUS_STYLES[label.toLowerCase()] ?? "bg-gray-100 text-gray-600 ring-1 ring-gray-200",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium tracking-wide whitespace-nowrap ring-1",
+        style,
       )}
     >
+      <span className="w-1.5 h-1.5 rounded-full bg-current opacity-60" />
       {label}
     </span>
   );
@@ -103,8 +126,17 @@ export function SearchInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-blue-400 w-60 transition-all"
+        className="pl-8 pr-8 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-blue-400 w-60 sm:w-[26rem] transition-all"
       />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition-colors"
+        >
+          <X size={13} />
+        </button>
+      )}
     </div>
   );
 }

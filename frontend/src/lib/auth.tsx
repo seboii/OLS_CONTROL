@@ -9,6 +9,13 @@ export interface AuthUser {
   phone: string | null;
   avatar: string | null;
   status: boolean;
+  /**
+   * Kullanıcının Siber karşılığı. Siber'den senkronlanan kullanıcılarda dolu,
+   * yalnızca uygulamada açılmış hesaplarda (kurulum admini gibi) NULL'dur.
+   * Teklif görevlilerinin nasıl doldurulacağı buna bakar — bkz. QuotesPage.
+   */
+  siber_code: string | null;
+  siber_name: string | null;
 }
 
 interface PermissionRow {

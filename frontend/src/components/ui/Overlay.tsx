@@ -31,13 +31,15 @@ export function Drawer({
     <AnimatePresence>
       {open && (
         <>
+          {/* Arka plana tıklamak artık kapatmıyor — çok alanlı formlarda (ör. Teklif)
+              yanlışlıkla sol tarafa tıklayıp girilen tüm bilgiyi kaybetme şikayeti
+              üzerine kaldırıldı. Kapatmak için X veya İptal düğmesi kullanılmalı. */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             className="fixed inset-0 bg-black/25 z-40 backdrop-blur-[1px]"
-            onClick={onClose}
           />
           <motion.div
             initial={{ x: "100%", opacity: 0.5 }}

@@ -69,6 +69,29 @@ function buildQuery(query?: RequestOptions["query"]): string {
   return qs ? `?${qs}` : "";
 }
 
+/**
+ * Kimlik doğrulamalı DOSYA indirme.
+ *
+ * Düz bir <a href> kullanılamıyor: uçlar Bearer jetonu istiyor ve tarayıcı onu
+ * bağlantıya eklemiyor — bağlantı 401 dönerdi. Bu yüzden dosya jetonla çekilip
+ * blob'a alınır ve blob URL'i açılır/indirilir.
+ */
+export async function downloadFile(path: string): Promise<{ blob: Blob; fileName?: string }> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(path, { headers });
+  if (!res.ok) throw new ApiError(res.status, null, "Dosya alınamadı");
+
+  // Sunucu dosya adını Content-Disposition ile bildiriyor.
+  const disposition = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
+  const fileName = match ? decodeURIComponent(match[1]) : undefined;
+
+  return { blob: await res.blob(), fileName };
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {};

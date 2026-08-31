@@ -6,33 +6,42 @@ import { FormField } from "@/components/ui/primitives";
 
 const PAGE_SIZE = 20;
 
-export interface AccountOption {
+export interface CarOption {
   id: number;
-  name: string | null;
-  siber_id?: string | null;
-  // Yalnızca list/detay uçlarının AccountRefDto'sunda dolu gelir (bkz. LoadDtos.cs).
-  country_id?: { id: string; name: string | null } | null;
+  plate_number: string | null;
+  car_type?: { id: number; name: string | null } | null;
+  romork_type?: { id: number; name: string | null } | null;
+}
+
+function displayPlate(c: CarOption): string {
+  return c.plate_number?.trim() || `#${c.id}`;
 }
 
 /**
- * Cari seçici: müşteri/gönderici/alıcı/acente gibi Account referanslı alanlar
- * için ortak bileşen. Ayrı bir pencere açmadan, doğrudan yazarak arayan
- * satır-içi bileşen (combobox) — öneriler input'un altında listelenir, ok
- * tuşlarıyla gezilebilir, Enter vurgulanan öneriyi doğrudan seçer.
+ * Araç seçici — PLAKADAN arar.
+ *
+ * Sefer formundaki "Araç (Plaka)" alanı eskiden düz bir metin kutusuydu ve
+ * kullanıcıdan aracın YEREL SAYISAL ID'sini yazmasını bekliyordu ("Araç ID"
+ * placeholder'ı). Ekranda plaka yerine bir sayı görünmesinin ve aracın elle
+ * seçilememesinin sebebi buydu; Siber'de bu alan eşlenmiş araçlardan seçiliyor.
+ *
+ * /api/v1/car ucu `search` parametresini plakada ILIKE ile uyguluyor
+ * (bkz. CarService: cars.WhereILike(c => c.PlateNumber, query.Search)), bu yüzden
+ * yazdıkça arama doğrudan plaka üzerinden çalışır. Araç tipi/römork cinsi ikincil
+ * satırda gösterilir: canlıda 21 plaka birden fazla araç kaydında tekrarlıyor,
+ * aynı plakadan iki sonuç çıktığında kullanıcının doğru olanı ayırt etmesi gerekir.
  */
-export function AccountPicker({ label, value, onChange, required, error, accountType }: {
+export function CarPicker({ label, value, onChange, required, error }: {
   label: string;
-  value: AccountOption | null;
-  onChange: (v: AccountOption | null) => void;
+  value: CarOption | null;
+  onChange: (v: CarOption | null) => void;
   required?: boolean;
   error?: string;
-  /** olsold: SelectAjax fetchParams={account_type_id}. Örn. Acente=5, Navlun Ödeyen Firma=1. */
-  accountType?: number;
 }) {
-  const [query, setQuery] = useState(value?.name ?? "");
+  const [query, setQuery] = useState(value ? displayPlate(value) : "");
   const [open, setOpen] = useState(false);
   const debouncedQuery = useDebouncedValue(query);
-  const [results, setResults] = useState<AccountOption[]>([]);
+  const [results, setResults] = useState<CarOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
@@ -41,19 +50,15 @@ export function AccountPicker({ label, value, onChange, required, error, account
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    setQuery(value?.name ?? "");
-  }, [value?.id, value?.name]);
+    setQuery(value ? displayPlate(value) : "");
+  }, [value?.id, value?.plate_number]);
 
-  // Siber senkronundan sonra Cari tablosu yüzlerce/binlerce satır içerebiliyor —
-  // arama sonucu tek sayfada sığmayabilir. Sorgu değiştiğinde 1. sayfadan
-  // başlanır; devamı aşağı kaydırınca loadMore() ile eklenir.
   useEffect(() => {
     if (!open) return;
     setLoading(true);
     api
-      .get<DataMessage<Paginated<AccountOption>>>("/api/v1/account", {
+      .get<DataMessage<Paginated<CarOption>>>("/api/v1/car", {
         search: debouncedQuery || undefined,
-        account_type_id: accountType,
         per_page: PAGE_SIZE,
         page: 1,
       })
@@ -68,16 +73,15 @@ export function AccountPicker({ label, value, onChange, required, error, account
         setHasMore(false);
       })
       .finally(() => setLoading(false));
-  }, [open, debouncedQuery, accountType]);
+  }, [open, debouncedQuery]);
 
   function loadMore() {
     if (loading || loadingMore || !hasMore) return;
     const nextPage = page + 1;
     setLoadingMore(true);
     api
-      .get<DataMessage<Paginated<AccountOption>>>("/api/v1/account", {
+      .get<DataMessage<Paginated<CarOption>>>("/api/v1/car", {
         search: debouncedQuery || undefined,
-        account_type_id: accountType,
         per_page: PAGE_SIZE,
         page: nextPage,
       })
@@ -99,16 +103,16 @@ export function AccountPicker({ label, value, onChange, required, error, account
     function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
-        setQuery(value?.name ?? "");
+        setQuery(value ? displayPlate(value) : "");
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [value]);
 
-  function select(item: AccountOption) {
+  function select(item: CarOption) {
     onChange(item);
-    setQuery(item.name ?? "");
+    setQuery(displayPlate(item));
     setOpen(false);
   }
 
@@ -125,7 +129,7 @@ export function AccountPicker({ label, value, onChange, required, error, account
       if (results[highlighted]) select(results[highlighted]);
     } else if (e.key === "Escape") {
       setOpen(false);
-      setQuery(value?.name ?? "");
+      setQuery(value ? displayPlate(value) : "");
     }
   }
 
@@ -142,7 +146,7 @@ export function AccountPicker({ label, value, onChange, required, error, account
           }}
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
-          placeholder="Yazarak ara..."
+          placeholder="Plaka yazarak ara..."
           className={clsx(
             "px-3 py-2 text-sm border rounded-md bg-white transition-all w-full",
             "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:border-blue-400",
@@ -160,20 +164,24 @@ export function AccountPicker({ label, value, onChange, required, error, account
               <p className="text-xs text-gray-400 text-center py-4">Sonuç bulunamadı.</p>
             ) : (
               <>
-                {results.map((r, i) => (
-                  <button
-                    key={r.id}
-                    type="button"
-                    onClick={() => select(r)}
-                    onMouseEnter={() => setHighlighted(i)}
-                    className={clsx(
-                      "w-full text-left px-3 py-2 text-sm transition-colors",
-                      i === highlighted ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-50",
-                    )}
-                  >
-                    {r.name ?? `#${r.id}`}
-                  </button>
-                ))}
+                {results.map((r, i) => {
+                  const detail = [r.car_type?.name, r.romork_type?.name].filter(Boolean).join(" · ");
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => select(r)}
+                      onMouseEnter={() => setHighlighted(i)}
+                      className={clsx(
+                        "w-full text-left px-3 py-2 text-sm transition-colors",
+                        i === highlighted ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-50",
+                      )}
+                    >
+                      <span className="font-medium">{displayPlate(r)}</span>
+                      {detail && <span className="block text-[11px] text-gray-400">{detail}</span>}
+                    </button>
+                  );
+                })}
                 {loadingMore && (
                   <p className="text-xs text-gray-400 text-center py-2">Daha fazla yükleniyor...</p>
                 )}

@@ -6,6 +6,9 @@ export interface NamedOption {
   name: string;
   // Yalnızca /api/v1/country gibi bazı uçlarda dolu gelir (bkz. Country entity).
   phone_code?: string | null;
+  // /api/v1/currency, /api/v1/work_type gibi uçlarda dolu gelir — lookup uçları
+  // ham entity döndürdüğü için sütun neyse o gelir (bkz. LookupService).
+  code?: string | null;
 }
 
 /**

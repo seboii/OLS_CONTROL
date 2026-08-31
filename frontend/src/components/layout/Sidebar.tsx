@@ -1,6 +1,6 @@
 import { motion, AnimatePresence } from "motion/react";
 import { NavLink } from "react-router-dom";
-import { ChevronLeft, ChevronRight, LayoutDashboard, Users, FileText, Package, Truck, Receipt, Car, Shield, Headphones, Settings, LogOut } from "lucide-react";
+import { ChevronLeft, ChevronRight, LayoutDashboard, Users, FileText, Package, Truck, Receipt, Car, Shield, Headphones, Settings, LogOut, BarChart3, ShieldCheck } from "lucide-react";
 import { clsx } from "clsx";
 import { useAuth } from "@/lib/auth";
 
@@ -21,6 +21,9 @@ export const NAV_ITEMS: NavItem[] = [
   { path: "/araclar", label: "Araçlar", icon: Car, permissionSlug: "car_management" },
   { path: "/kullanicilar", label: "Kullanıcılar", icon: Shield, permissionSlug: "user_management" },
   { path: "/destek-talepleri", label: "Destek Talepleri", icon: Headphones, permissionSlug: "support_request_management" },
+  { path: "/raporlama", label: "Raporlama", icon: BarChart3, permissionSlug: "report_management" },
+  // Denetim kaydı yalnızca Yönetim rolünde; menü zaten yetkiye göre filtreliyor.
+  { path: "/denetim", label: "Denetim Kaydı", icon: ShieldCheck, permissionSlug: "audit_log_management" },
 ];
 
 export const MODULE_LABELS: Record<string, string> = Object.fromEntries(

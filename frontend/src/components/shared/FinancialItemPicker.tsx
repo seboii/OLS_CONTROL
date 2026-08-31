@@ -6,33 +6,48 @@ import { FormField } from "@/components/ui/primitives";
 
 const PAGE_SIZE = 20;
 
-export interface AccountOption {
+export interface FinancialItemOption {
   id: number;
   name: string | null;
-  siber_id?: string | null;
-  // Yalnızca list/detay uçlarının AccountRefDto'sunda dolu gelir (bkz. LoadDtos.cs).
-  country_id?: { id: string; name: string | null } | null;
+  /** LookupService bit maskesi: 1=Alış/Gider, 2=Satış/Gelir, 3=ikisi de. */
+  type: number;
+  /**
+   * Bu kalem için varsayılan cari — Siber'deki kullanım geçmişinden türetilir
+   * (bkz. FinancialItem.DefaultAccountId). Yalnızca kalemin satırlarının ezici
+   * çoğunluğu tek firmaya aitse dolu gelir; dağınık kalemlerde null'dur.
+   */
+  default_account_id?: number | null;
+  default_account_name?: string | null;
+}
+
+function typeBadge(type: number) {
+  if (type === 3) return <span className="text-[10px] text-gray-400 shrink-0">Alış+Satış</span>;
+  if (type === 2) return <span className="text-[10px] text-red-500 shrink-0">Satış</span>;
+  return <span className="text-[10px] text-green-600 shrink-0">Alış</span>;
 }
 
 /**
- * Cari seçici: müşteri/gönderici/alıcı/acente gibi Account referanslı alanlar
- * için ortak bileşen. Ayrı bir pencere açmadan, doğrudan yazarak arayan
- * satır-içi bileşen (combobox) — öneriler input'un altında listelenir, ok
- * tuşlarıyla gezilebilir, Enter vurgulanan öneriyi doğrudan seçer.
+ * Mali kalem seçici: ayrı bir pencere açmadan, doğrudan yazarak arayan satır-içi
+ * bileşen (combobox). Yazıldıkça öneriler input'un altında listelenir; ok
+ * tuşlarıyla gezilebilir, Enter vurgulanan öneriyi doğrudan seçer, Escape veya
+ * dışarı tıklama listeyi kapatıp önceki seçime döner.
+ *
+ * Alış/Satış'a göre ÖNCEDEN filtrelenmez (kullanıcı isteği: "tüm kalemler
+ * olsun, alış satış ise otomatik belirlensin") — tüm kalemler aranabilir,
+ * hangi kalemin seçildiğine göre Alış/Satış çağıran taraftan (satırın kendi
+ * onChange'inde item.type okunarak) otomatik ayarlanır.
  */
-export function AccountPicker({ label, value, onChange, required, error, accountType }: {
+export function FinancialItemPicker({ label, value, onChange, required, error }: {
   label: string;
-  value: AccountOption | null;
-  onChange: (v: AccountOption | null) => void;
+  value: FinancialItemOption | null;
+  onChange: (v: FinancialItemOption | null) => void;
   required?: boolean;
   error?: string;
-  /** olsold: SelectAjax fetchParams={account_type_id}. Örn. Acente=5, Navlun Ödeyen Firma=1. */
-  accountType?: number;
 }) {
   const [query, setQuery] = useState(value?.name ?? "");
   const [open, setOpen] = useState(false);
   const debouncedQuery = useDebouncedValue(query);
-  const [results, setResults] = useState<AccountOption[]>([]);
+  const [results, setResults] = useState<FinancialItemOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(1);
@@ -40,20 +55,21 @@ export function AccountPicker({ label, value, onChange, required, error, account
   const [highlighted, setHighlighted] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Dışarıdan value değişirse (ör. form resetlenirse, satır Alış/Satış değiştirirse)
+  // metin kutusunu senkronla.
   useEffect(() => {
     setQuery(value?.name ?? "");
   }, [value?.id, value?.name]);
 
-  // Siber senkronundan sonra Cari tablosu yüzlerce/binlerce satır içerebiliyor —
-  // arama sonucu tek sayfada sığmayabilir. Sorgu değiştiğinde 1. sayfadan
-  // başlanır; devamı aşağı kaydırınca loadMore() ile eklenir.
+  // Siber senkronundan sonra bu tablo (ve Cari/Kullanıcı) yüzlerce/binlerce satır
+  // içerebiliyor — arama sonucu tek sayfada sığmayabilir. Sorgu değiştiğinde
+  // 1. sayfadan başlanır; devamı aşağı kaydırınca loadMore() ile eklenir.
   useEffect(() => {
     if (!open) return;
     setLoading(true);
     api
-      .get<DataMessage<Paginated<AccountOption>>>("/api/v1/account", {
+      .get<DataMessage<Paginated<FinancialItemOption>>>("/api/v1/financial_item", {
         search: debouncedQuery || undefined,
-        account_type_id: accountType,
         per_page: PAGE_SIZE,
         page: 1,
       })
@@ -68,16 +84,15 @@ export function AccountPicker({ label, value, onChange, required, error, account
         setHasMore(false);
       })
       .finally(() => setLoading(false));
-  }, [open, debouncedQuery, accountType]);
+  }, [open, debouncedQuery]);
 
   function loadMore() {
     if (loading || loadingMore || !hasMore) return;
     const nextPage = page + 1;
     setLoadingMore(true);
     api
-      .get<DataMessage<Paginated<AccountOption>>>("/api/v1/account", {
+      .get<DataMessage<Paginated<FinancialItemOption>>>("/api/v1/financial_item", {
         search: debouncedQuery || undefined,
-        account_type_id: accountType,
         per_page: PAGE_SIZE,
         page: nextPage,
       })
@@ -106,7 +121,7 @@ export function AccountPicker({ label, value, onChange, required, error, account
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [value]);
 
-  function select(item: AccountOption) {
+  function select(item: FinancialItemOption) {
     onChange(item);
     setQuery(item.name ?? "");
     setOpen(false);
@@ -167,11 +182,12 @@ export function AccountPicker({ label, value, onChange, required, error, account
                     onClick={() => select(r)}
                     onMouseEnter={() => setHighlighted(i)}
                     className={clsx(
-                      "w-full text-left px-3 py-2 text-sm transition-colors",
+                      "w-full flex items-center justify-between gap-2 text-left px-3 py-2 text-sm transition-colors",
                       i === highlighted ? "bg-blue-50 text-blue-700" : "text-gray-700 hover:bg-gray-50",
                     )}
                   >
-                    {r.name ?? `#${r.id}`}
+                    <span className="truncate">{r.name ?? `#${r.id}`}</span>
+                    {typeBadge(r.type)}
                   </button>
                 ))}
                 {loadingMore && (
