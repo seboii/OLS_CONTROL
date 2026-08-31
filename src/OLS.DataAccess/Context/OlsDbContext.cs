@@ -28,6 +28,8 @@ public partial class OlsDbContext : DbContext
 
     public virtual DbSet<AccountContactPerson> AccountContactPeople { get; set; }
 
+    public virtual DbSet<AccountingPlan> AccountingPlans { get; set; }
+
     public virtual DbSet<AccountType> AccountTypes { get; set; }
 
     public virtual DbSet<AccountTypeMapping> AccountTypeMappings { get; set; }
@@ -67,6 +69,16 @@ public partial class OlsDbContext : DbContext
     public virtual DbSet<ExpeditionStatus> ExpeditionStatuses { get; set; }
 
     public virtual DbSet<ExpeditionType> ExpeditionTypes { get; set; }
+
+    public virtual DbSet<FinanceInvoice> FinanceInvoices { get; set; }
+
+    public virtual DbSet<FinanceInvoiceLine> FinanceInvoiceLines { get; set; }
+
+    public virtual DbSet<FinancePayment> FinancePayments { get; set; }
+
+    public virtual DbSet<FinanceVoucher> FinanceVouchers { get; set; }
+
+    public virtual DbSet<FinanceVoucherLine> FinanceVoucherLines { get; set; }
 
     public virtual DbSet<FinancialItem> FinancialItems { get; set; }
 
@@ -886,6 +898,278 @@ public partial class OlsDbContext : DbContext
                 .HasForeignKey(d => d.RoleId)
                 .OnDelete(DeleteBehavior.Cascade)
                 .HasConstraintName("role_permissions_role_id_foreign");
+        });
+
+        // ------------------------------------------------------------------
+        // Muhasebe / finans — Siber sfy_* tablolarının yerel aynası.
+        //
+        // Tutarlar numeric(18,2): Siber'de tek cari bakiyesi milyarlı
+        // rakamlara çıkıyor, projedeki (10,2) ölçeği taşımaz. Kurlar (18,6).
+        //
+        // BAKİYE SAKLANMIYOR. Cari bakiye her sorguda fiş satırlarından
+        // toplanır; kolonda tutulan bakiye ilk kaçan kayıtta sessizce yanlışa
+        // düşer.
+        // ------------------------------------------------------------------
+        modelBuilder.Entity<AccountingPlan>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("accounting_plans_pkey");
+
+            entity.ToTable("accounting_plans");
+
+            // Hesap kodu TEKİL DEĞİL: Siber'de aynı kodun birden fazla satırı
+            // var (3.938 satır, eşleşmede 49.442/49.438 fazlası buradan).
+            entity.HasIndex(e => e.Code, "accounting_plans_code_index");
+            entity.HasIndex(e => e.SiberId, "accounting_plans_siber_id_unique").IsUnique();
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Code).HasMaxLength(64).HasColumnName("code");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.IsPassive).HasColumnName("is_passive");
+            entity.Property(e => e.Level).HasColumnName("level");
+            entity.Property(e => e.Name).HasMaxLength(191).HasColumnName("name");
+            entity.Property(e => e.Name2).HasMaxLength(191).HasColumnName("name2");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
+            entity.Property(e => e.SiberId).HasMaxLength(64).HasColumnName("siber_id");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("updated_at");
+        });
+
+        modelBuilder.Entity<FinanceInvoice>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("finance_invoices_pkey");
+
+            entity.ToTable("finance_invoices");
+
+            entity.HasIndex(e => e.SiberId, "finance_invoices_siber_id_unique").IsUnique();
+            entity.HasIndex(e => e.AccountId, "finance_invoices_account_id_index");
+            entity.HasIndex(e => e.DueDate, "finance_invoices_due_date_index");
+            entity.HasIndex(e => e.LoadTransferId, "finance_invoices_load_transfer_id_index");
+            entity.HasIndex(e => new { e.ModuleCode, e.ModuleId }, "finance_invoices_module_index");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            entity.Property(e => e.AccountName).HasMaxLength(255).HasColumnName("account_name");
+            entity.Property(e => e.Amount).HasPrecision(18, 2).HasColumnName("amount");
+            entity.Property(e => e.AmountTl).HasPrecision(18, 2).HasColumnName("amount_tl");
+            entity.Property(e => e.ApprovalDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("approval_date");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.CurrencyCode).HasMaxLength(8).HasColumnName("currency_code");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Direction).HasMaxLength(2).HasColumnName("direction");
+            entity.Property(e => e.DocumentNumber).HasMaxLength(64).HasColumnName("document_number");
+            entity.Property(e => e.DueDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("due_date");
+            entity.Property(e => e.ExchangeRate).HasPrecision(18, 6).HasColumnName("exchange_rate");
+            entity.Property(e => e.InvoiceDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("invoice_date");
+            entity.Property(e => e.InvoiceNumber).HasMaxLength(64).HasColumnName("invoice_number");
+            entity.Property(e => e.InvoiceSeries).HasMaxLength(32).HasColumnName("invoice_series");
+            entity.Property(e => e.IsApproved).HasColumnName("is_approved");
+            entity.Property(e => e.LoadTransferId).HasColumnName("load_transfer_id");
+            entity.Property(e => e.ModuleCode).HasMaxLength(16).HasColumnName("module_code");
+            entity.Property(e => e.ModuleId).HasMaxLength(64).HasColumnName("module_id");
+            entity.Property(e => e.SiberAccountId).HasMaxLength(64).HasColumnName("siber_account_id");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
+            entity.Property(e => e.SiberCreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_created_at");
+            entity.Property(e => e.SiberCreatedBy).HasMaxLength(128).HasColumnName("siber_created_by");
+            entity.Property(e => e.SiberId).HasMaxLength(64).HasColumnName("siber_id");
+            entity.Property(e => e.TaxAmount).HasPrecision(18, 2).HasColumnName("tax_amount");
+            entity.Property(e => e.TaxAmountTl).HasPrecision(18, 2).HasColumnName("tax_amount_tl");
+            entity.Property(e => e.TotalAmount).HasPrecision(18, 2).HasColumnName("total_amount");
+            entity.Property(e => e.TotalAmountTl).HasPrecision(18, 2).HasColumnName("total_amount_tl");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("updated_at");
+
+            // SetNull: Siber'den gelen fatura, carisi yerelde silinse bile
+            // muhasebe kaydı olarak durmalı.
+            entity.HasOne(d => d.Account).WithMany()
+                .HasForeignKey(d => d.AccountId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("finance_invoices_account_id_foreign");
+
+            entity.HasOne(d => d.LoadTransfer).WithMany()
+                .HasForeignKey(d => d.LoadTransferId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("finance_invoices_load_transfer_id_foreign");
+        });
+
+        modelBuilder.Entity<FinanceInvoiceLine>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("finance_invoice_lines_pkey");
+
+            entity.ToTable("finance_invoice_lines");
+
+            entity.HasIndex(e => e.SiberId, "finance_invoice_lines_siber_id_unique").IsUnique();
+            entity.HasIndex(e => e.FinanceInvoiceId, "finance_invoice_lines_invoice_id_index");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Amount).HasPrecision(18, 2).HasColumnName("amount");
+            entity.Property(e => e.AmountTl).HasPrecision(18, 2).HasColumnName("amount_tl");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.CurrencyCode).HasMaxLength(8).HasColumnName("currency_code");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.DocumentDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("document_date");
+            entity.Property(e => e.DocumentNumber).HasMaxLength(64).HasColumnName("document_number");
+            entity.Property(e => e.ExchangeRate).HasPrecision(18, 6).HasColumnName("exchange_rate");
+            entity.Property(e => e.FinanceInvoiceId).HasColumnName("finance_invoice_id");
+            entity.Property(e => e.FinancialItemId).HasMaxLength(64).HasColumnName("financial_item_id");
+            entity.Property(e => e.FinancialItemName).HasMaxLength(255).HasColumnName("financial_item_name");
+            entity.Property(e => e.Quantity).HasPrecision(18, 4).HasColumnName("quantity");
+            entity.Property(e => e.SiberId).HasMaxLength(64).HasColumnName("siber_id");
+            entity.Property(e => e.TaxAmount).HasPrecision(18, 2).HasColumnName("tax_amount");
+            entity.Property(e => e.TaxAmountTl).HasPrecision(18, 2).HasColumnName("tax_amount_tl");
+            entity.Property(e => e.TaxRate).HasPrecision(9, 4).HasColumnName("tax_rate");
+            entity.Property(e => e.UnitPrice).HasPrecision(18, 4).HasColumnName("unit_price");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("updated_at");
+
+            entity.HasOne(d => d.FinanceInvoice).WithMany(p => p.Lines)
+                .HasForeignKey(d => d.FinanceInvoiceId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("finance_invoice_lines_invoice_id_foreign");
+        });
+
+        modelBuilder.Entity<FinancePayment>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("finance_payments_pkey");
+
+            entity.ToTable("finance_payments");
+
+            entity.HasIndex(e => e.SiberId, "finance_payments_siber_id_unique").IsUnique();
+            entity.HasIndex(e => e.DebitAccountId, "finance_payments_debit_account_id_index");
+            entity.HasIndex(e => e.CreditAccountId, "finance_payments_credit_account_id_index");
+            entity.HasIndex(e => e.ReceiptDate, "finance_payments_receipt_date_index");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Amount).HasPrecision(18, 2).HasColumnName("amount");
+            entity.Property(e => e.AmountTl).HasPrecision(18, 2).HasColumnName("amount_tl");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.CreditAccountCode).HasMaxLength(64).HasColumnName("credit_account_code");
+            entity.Property(e => e.CreditAccountId).HasColumnName("credit_account_id");
+            entity.Property(e => e.CreditName).HasMaxLength(255).HasColumnName("credit_name");
+            entity.Property(e => e.CurrencyCode).HasMaxLength(8).HasColumnName("currency_code");
+            entity.Property(e => e.DebitAccountCode).HasMaxLength(64).HasColumnName("debit_account_code");
+            entity.Property(e => e.DebitAccountId).HasColumnName("debit_account_id");
+            entity.Property(e => e.DebitName).HasMaxLength(255).HasColumnName("debit_name");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.DueDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("due_date");
+            entity.Property(e => e.ExchangeRate).HasPrecision(18, 6).HasColumnName("exchange_rate");
+            entity.Property(e => e.ModuleCode).HasMaxLength(16).HasColumnName("module_code");
+            entity.Property(e => e.ModuleId).HasMaxLength(64).HasColumnName("module_id");
+            entity.Property(e => e.ReceiptDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("receipt_date");
+            entity.Property(e => e.ReceiptNumber).HasMaxLength(64).HasColumnName("receipt_number");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
+            entity.Property(e => e.SiberCreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_created_at");
+            entity.Property(e => e.SiberCreatedBy).HasMaxLength(128).HasColumnName("siber_created_by");
+            entity.Property(e => e.SiberCreditAccountId).HasMaxLength(64).HasColumnName("siber_credit_account_id");
+            entity.Property(e => e.SiberDebitAccountId).HasMaxLength(64).HasColumnName("siber_debit_account_id");
+            entity.Property(e => e.SiberId).HasMaxLength(64).HasColumnName("siber_id");
+            entity.Property(e => e.TransactionType).HasColumnName("transaction_type");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("updated_at");
+
+            entity.HasOne(d => d.DebitAccount).WithMany()
+                .HasForeignKey(d => d.DebitAccountId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("finance_payments_debit_account_id_foreign");
+
+            entity.HasOne(d => d.CreditAccount).WithMany()
+                .HasForeignKey(d => d.CreditAccountId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("finance_payments_credit_account_id_foreign");
+        });
+
+        modelBuilder.Entity<FinanceVoucher>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("finance_vouchers_pkey");
+
+            entity.ToTable("finance_vouchers");
+
+            entity.HasIndex(e => e.SiberId, "finance_vouchers_siber_id_unique").IsUnique();
+            entity.HasIndex(e => e.VoucherDate, "finance_vouchers_voucher_date_index");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.CurrencyCode).HasMaxLength(8).HasColumnName("currency_code");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.DocumentDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("document_date");
+            entity.Property(e => e.DocumentNumber).HasMaxLength(64).HasColumnName("document_number");
+            entity.Property(e => e.IsChecked).HasColumnName("is_checked");
+            entity.Property(e => e.JournalNumber).HasColumnName("journal_number");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
+            entity.Property(e => e.SiberCreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_created_at");
+            entity.Property(e => e.SiberCreatedBy).HasMaxLength(128).HasColumnName("siber_created_by");
+            entity.Property(e => e.SiberId).HasMaxLength(64).HasColumnName("siber_id");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("updated_at");
+            entity.Property(e => e.VoucherDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("voucher_date");
+            entity.Property(e => e.VoucherNumber).HasColumnName("voucher_number");
+            entity.Property(e => e.VoucherType).HasColumnName("voucher_type");
+        });
+
+        modelBuilder.Entity<FinanceVoucherLine>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("finance_voucher_lines_pkey");
+
+            entity.ToTable("finance_voucher_lines");
+
+            entity.HasIndex(e => e.SiberId, "finance_voucher_lines_siber_id_unique").IsUnique();
+            entity.HasIndex(e => e.FinanceVoucherId, "finance_voucher_lines_voucher_id_index");
+            entity.HasIndex(e => e.AccountCode, "finance_voucher_lines_account_code_index");
+            entity.HasIndex(e => e.SourceId, "finance_voucher_lines_source_id_index");
+            // Cari ekstre bu indeksten okunuyor: (cari, tarih) aralığı.
+            entity.HasIndex(e => new { e.AccountId, e.DocumentDate },
+                "finance_voucher_lines_account_date_index");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.AccountCode).HasMaxLength(64).HasColumnName("account_code");
+            entity.Property(e => e.AccountId).HasColumnName("account_id");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.Credit).HasPrecision(18, 2).HasColumnName("credit");
+            entity.Property(e => e.CreditFx).HasPrecision(18, 2).HasColumnName("credit_fx");
+            entity.Property(e => e.CurrencyCode).HasMaxLength(8).HasColumnName("currency_code");
+            entity.Property(e => e.Debit).HasPrecision(18, 2).HasColumnName("debit");
+            entity.Property(e => e.DebitFx).HasPrecision(18, 2).HasColumnName("debit_fx");
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.DocumentDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("document_date");
+            entity.Property(e => e.DocumentNumber).HasMaxLength(64).HasColumnName("document_number");
+            entity.Property(e => e.DueDate)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("due_date");
+            entity.Property(e => e.ExchangeRate).HasPrecision(18, 6).HasColumnName("exchange_rate");
+            entity.Property(e => e.FinanceVoucherId).HasColumnName("finance_voucher_id");
+            entity.Property(e => e.LineNumber).HasColumnName("line_number");
+            entity.Property(e => e.SiberAccountId).HasMaxLength(64).HasColumnName("siber_account_id");
+            entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
+            entity.Property(e => e.SiberId).HasMaxLength(64).HasColumnName("siber_id");
+            entity.Property(e => e.SourceId).HasMaxLength(64).HasColumnName("source_id");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("updated_at");
+
+            entity.HasOne(d => d.FinanceVoucher).WithMany(p => p.Lines)
+                .HasForeignKey(d => d.FinanceVoucherId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("finance_voucher_lines_voucher_id_foreign");
+
+            entity.HasOne(d => d.Account).WithMany()
+                .HasForeignKey(d => d.AccountId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("finance_voucher_lines_account_id_foreign");
         });
 
         modelBuilder.Entity<FinancialItem>(entity =>
