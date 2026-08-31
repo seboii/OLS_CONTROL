@@ -54,6 +54,16 @@ public sealed class SiberFirmaTemsilcisi
     public string? InsUser { get; init; }
     public int MusteriTemsilcisi { get; init; }
     public int SatisTemsilcisi { get; init; }
+
+    /// <summary>
+    /// sbr_firmatemsilci.operasyonyetkilisi — cari görevlisi senkronu
+    /// (SyncAccountRepresentativesAsync) rolü BU sütun ile satistemsilcisi'nden
+    /// okuyor. Kod eskiden bu sütunu hiç yazmıyordu.
+    /// </summary>
+    public int OperasyonYetkilisi { get; init; }
+
+    /// <summary>Kaydın ait olduğu kullanıcının Siber kodu (kod sütunu).</summary>
+    public string? Kod { get; init; }
 }
 
 public sealed class SiberAccountRepository : ISiberAccountRepository
@@ -145,9 +155,11 @@ public sealed class SiberAccountRepository : ISiberAccountRepository
 
         const string sql = """
             INSERT INTO sbr_firmatemsilci
-                (firmatemsilciid, firmaid, ad, instime, insuser, musteritemsilcisi, satistemsilcisi)
+                (firmatemsilciid, firmaid, ad, kod, instime, insuser,
+                 musteritemsilcisi, satistemsilcisi, operasyonyetkilisi)
             VALUES
-                (@FirmaTemsilciId, @FirmaId, @Ad, @InsTime, @InsUser, @MusteriTemsilcisi, @SatisTemsilcisi)
+                (@FirmaTemsilciId, @FirmaId, @Ad, @Kod, @InsTime, @InsUser,
+                 @MusteriTemsilcisi, @SatisTemsilcisi, @OperasyonYetkilisi)
             """;
 
         await connection.ExecuteAsync(sql, temsilci);

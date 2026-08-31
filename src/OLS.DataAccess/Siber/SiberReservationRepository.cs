@@ -17,17 +17,42 @@ public interface ISiberReservationRepository
     Task<Guid> GenerateYukKoliIdAsync(CancellationToken cancellationToken = default);
     Task<Guid> GenerateTarifeIdAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Sıradaki rezervasyon numarası (max + 1).</summary>
-    Task<int> NextRezervasyonNoAsync(CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Yeni rezervasyonu, numarasını (max + 1) atomik biçimde atayarak INSERT eder ve
+    /// atanan numarayı döner. Numara üretimiyle INSERT tek transaction+kilit altında
+    /// yapılır — bkz. metodun XML açıklaması.
+    /// </summary>
+    Task<int> InsertRezervasyonWithLockedNumberAsync(
+        SiberRezervasyonYaz rezervasyon, CancellationToken cancellationToken = default);
 
-    Task InsertRezervasyonAsync(SiberRezervasyonYaz rezervasyon, CancellationToken cancellationToken = default);
     Task UpdateRezervasyonAsync(SiberRezervasyonYaz rezervasyon, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Teklifi (rezervasyon) ve alt kayıtlarını Siber'den siler. Yük silinirken
+    /// teklif de silindiği için gerekli — bkz. LoadTransferWriteService.DeleteAsync.
+    /// </summary>
+    Task DeleteRezervasyonAsync(string rezervasyonId, CancellationToken cancellationToken = default);
 
     Task<bool> YukKoliExistsAsync(string yukKoliId, CancellationToken cancellationToken = default);
     Task InsertRezervasyonYukKoliAsync(SiberRezervasyonYukKoli koli, CancellationToken cancellationToken = default);
     Task UpdateRezervasyonYukKoliAsync(SiberRezervasyonYukKoli koli, CancellationToken cancellationToken = default);
 
     Task<bool> TarifeExistsAsync(string tarifeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Mali kalemin Siber'de gerçekten var olup olmadığı (<c>skn_kalem.kalemid</c>).
+    /// Aktarım öncesi kontrol için: yoksa INSERT, FK_skn_rezervasyontarife_skn_kalem
+    /// kısıtına takılıp işlenmemiş bir istisnaya ("beklenmeyen hata") dönüşüyordu.
+    /// </summary>
+    Task<bool> KalemExistsAsync(string kalemId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Siber'e gönderilecek bir yabancı anahtarın hedef tabloda GERÇEKTEN var olup
+    /// olmadığını söyler. Tablo/kolon adları çağıran koddaki SABİTLERDEN gelir
+    /// (kullanıcı girdisi değildir) — bkz. SiberReferenceCheck.
+    /// </summary>
+    Task<bool> ReferenceExistsAsync(
+        string table, string idColumn, string id, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Rezervasyonun Siber'deki koli satırları — <c>update_siber_id</c>
@@ -91,6 +116,12 @@ public sealed class SiberRezervasyonYaz
     public string? YuklemeUlkeId { get; init; }
     public string? BosaltmaUlkeId { get; init; }
     public int? CalismaSekli { get; init; }
+    /// <summary>
+    /// Teklifin "Olumlu"ya çekildiği gün (skn_rezervasyon.onaytarih).
+    /// Durum Olumlu değilken NULL yazılır.
+    /// </summary>
+    public DateTime? OnayTarih { get; init; }
+
     public DateTime InsTime { get; init; }
     public string? InsUser { get; init; }
 }
@@ -121,12 +152,21 @@ public sealed class SiberRezervasyonTarife
     public string RezervasyonId { get; init; } = string.Empty;
     public DateTime Tarih { get; init; }
     public decimal Miktar { get; init; }
-    public string? AlisDovizKod { get; init; }
-    public decimal AlisBirimTutar { get; init; }
-    public decimal AlisToplamTutar { get; init; }
     public string? KalemId { get; init; }
-    public string? AlisFirmaId { get; init; }
     public string? TasimaSekli { get; init; }
+
+    /// <summary>
+    /// Kalemin yönü: 1 = alış, 2 = satış. Siber'de tek tabloda İKİ AYRI sütun
+    /// grubu var (alis*/satis*) ve yalnızca yöne karşılık gelen grup doldurulur;
+    /// diğer grup 0/NULL bırakılır. Bkz. Siber Entegrasyon Raporu §5.1 adım 6.
+    /// </summary>
+    public int Buysell { get; init; }
+
+    /// <summary>Yön ne olursa olsun aynı: döviz kodu, birim tutar, toplam tutar, cari.</summary>
+    public string? DovizKod { get; init; }
+    public decimal BirimTutar { get; init; }
+    public decimal ToplamTutar { get; init; }
+    public string? FirmaId { get; init; }
 }
 
 public sealed class SiberReservationRepository : ISiberReservationRepository
@@ -149,22 +189,65 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
     public Task<Guid> GenerateTarifeIdAsync(CancellationToken cancellationToken = default) =>
         GenerateUniqueAsync("skn_rezervasyontarife", "rezervasyontarifeid", cancellationToken);
 
-    public async Task<int> NextRezervasyonNoAsync(CancellationToken cancellationToken = default)
-    {
-        using var connection = await _factory.CreateOpenAsync(cancellationToken);
-
-        var max = await connection.ExecuteScalarAsync<int?>(
-            "SELECT MAX(rezervasyonno) FROM skn_rezervasyon");
-
-        return (max ?? 0) + 1;
-    }
-
-    public async Task InsertRezervasyonAsync(
+    /// <summary>
+    /// olsold'da rezervasyon numarası kilitsiz <c>MAX(rezervasyonno) + 1</c> ile üretilir
+    /// (Siber Entegrasyon Raporu risk #3): aynı anda iki "Sibere Aktar" çağrısı aynı
+    /// numarayı okuyup ikisi de o numarayla INSERT deneyebilir. Burada numara üretimi
+    /// ve INSERT <c>sp_getapplock</c> ile serileştirilmiş TEK transaction içinde
+    /// yapılıyor — kilit adı sayacın kapsamıyla aynı: şirket + yıl
+    /// ("skn_rezervasyon_no_{sirketid}_{yil}", bkz. gövdedeki numara kuralı
+    /// açıklaması). <c>@LockOwner = 'Transaction'</c> kilidi COMMIT/ROLLBACK'te otomatik
+    /// bırakır; bu, farklı bağlantılardan (uygulamanın birden fazla örneği olsa dahi)
+    /// gelen eşzamanlı çağrıları da doğru sıraya sokar.
+    /// </summary>
+    public async Task<int> InsertRezervasyonWithLockedNumberAsync(
         SiberRezervasyonYaz r, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
         const string sql = """
+            SET XACT_ABORT ON;
+            BEGIN TRANSACTION;
+
+            -- Kilit sayacın kapsamıyla AYNI olmalı (şirket+yıl): sayaç artık
+            -- (sirketid, yil) bazında ilerlediği için genel bir kilit farklı
+            -- şirket/yılları gereksiz yere sıraya sokardı.
+            DECLARE @lockName NVARCHAR(100) =
+                'skn_rezervasyon_no_' + CAST(@SirketId AS NVARCHAR(64)) + '_' + CAST(@Yil AS NVARCHAR(10));
+
+            DECLARE @lockResult INT;
+            EXEC @lockResult = sp_getapplock
+                @Resource = @lockName, @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction', @LockTimeout = 15000;
+            IF @lockResult < 0
+            BEGIN
+                ROLLBACK TRANSACTION;
+                THROW 51000, 'Rezervasyon numarası kilidi alınamadı (zaman aşımı).', 1;
+            END;
+
+            -- Siber'in gerçek numara kuralı (18.937 kayıtta sıfır ihlalle doğrulandı):
+            --     rezervasyonno = (yil % 100) * 100000 + rezervasyonnoint
+            -- ve sayaç ŞİRKET + YIL bazında ilerler (benzersiz indeks de
+            -- (sirketid, yil, rezervasyonno) üçlüsünde).
+            --
+            -- ASIL BELİRLEYİCİ ALAN rezervasyonnoint'tir: skn_rezervasyon üzerindeki
+            -- [skn_rezervasyon_numaraupdate] tetikleyicisi, rezervasyonnoint her
+            -- yazıldığında rezervasyonno'yu dbo.sbr_yukseferno_olustur ile YENİDEN
+            -- ÜRETİR. Yani buradan gönderilen rezervasyonno'nun bir hükmü yok;
+            -- doğru olması gereken rezervasyonnoint'tir.
+            --
+            -- BULUNAN GERÇEK HATA: eskiden sayaç, genel MAX(rezervasyonno)+1'den
+            -- türetilip rezervasyonnoint = RIGHT(...,4) ile DÖRT haneye kırpılıyordu.
+            -- 2026 sayacı 5 haneye çıkınca (15568) son 4 hane alınıp 5568 yazıldı,
+            -- tetikleyici de numarayı 26|05568 = 2605568 olarak yeniden üretti —
+            -- hem yanlış numara, hem de o numara zaten var olduğu için
+            -- "duplicate key" hatası. Sayaç artık doğrudan rezervasyonnoint'ten,
+            -- şirket+yıl kapsamında hesaplanıyor.
+            DECLARE @nextNoInt INT = (
+                SELECT ISNULL(MAX(rezervasyonnoint), 0)
+                FROM skn_rezervasyon WHERE sirketid = @SirketId AND yil = @Yil) + 1;
+            DECLARE @nextNo INT = (@Yil % 100) * 100000 + @nextNoInt;
+
             INSERT INTO skn_rezervasyon
                 (rezervasyonid, sirketid, subeid, talimatgelissekli, rezervasyonno,
                  rezervasyonnoint, istenenromorkcins, isturu, yuklemetip, yukturkod,
@@ -172,18 +255,36 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
                  ontasimatarafimizdanyapilir, sontasimatarafimizdanyapilir, musteriid,
                  navlunfirmaid, gondericiid, aliciid, durumid, musteritemsilcisi,
                  satistemsilcisikod, departmanid, aciklama, yil, instime, insuser,
-                 yuklemeulkeid, bosaltmaulkeid, calismasekli)
+                 yuklemeulkeid, bosaltmaulkeid, calismasekli, onaytarih)
             VALUES
-                (@RezervasyonId, @SirketId, @SubeId, @TalimatGelisSekli, @RezervasyonNo,
-                 @RezervasyonNoInt, @IstenenRomorkCins, @IsTuru, @YuklemeTip, @YukTurKod,
+                (@RezervasyonId, @SirketId, @SubeId, @TalimatGelisSekli, @nextNo,
+                 @nextNoInt, @IstenenRomorkCins, @IsTuru, @YuklemeTip, @YukTurKod,
                  @PazarlamaBildirimTarih, @TalimatGelisTarih, @GecerlilikTarih, @OdemeSekliId,
                  @OnTasimaTarafimizdanYapilir, @SonTasimaTarafimizdanYapilir, @MusteriId,
                  @NavlunFirmaId, @GondericiId, @AliciId, @DurumId, @MusteriTemsilcisi,
                  @SatisTemsilcisiKod, @DepartmanId, @Aciklama, @Yil, @InsTime, @InsUser,
-                 @YuklemeUlkeId, @BosaltmaUlkeId, @CalismaSekli)
+                 @YuklemeUlkeId, @BosaltmaUlkeId, @CalismaSekli, @OnayTarih);
+
+            COMMIT TRANSACTION;
+
+            SELECT @nextNo;
             """;
 
-        await connection.ExecuteAsync(sql, Parameters(r));
+        return await connection.QuerySingleAsync<int>(sql, Parameters(r));
+    }
+
+    public async Task DeleteRezervasyonAsync(
+        string rezervasyonId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        // Önce alt kayıtlar (koli + tarife), sonra rezervasyonun kendisi —
+        // olsold LoadController.php satır 855-864 ile aynı sıra.
+        await connection.ExecuteAsync("""
+            DELETE FROM skn_rezervasyonyukkoli WHERE rezervasyonid = @id;
+            DELETE FROM skn_rezervasyontarife  WHERE rezervasyonid = @id;
+            DELETE FROM skn_rezervasyon        WHERE rezervasyonid = @id;
+            """, new { id = rezervasyonId });
     }
 
     public async Task UpdateRezervasyonAsync(
@@ -205,7 +306,7 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
                 musteritemsilcisi = @MusteriTemsilcisi, satistemsilcisikod = @SatisTemsilcisiKod,
                 departmanid = @DepartmanId, aciklama = @Aciklama, yil = @Yil,
                 yuklemeulkeid = @YuklemeUlkeId, bosaltmaulkeid = @BosaltmaUlkeId,
-                calismasekli = @CalismaSekli
+                calismasekli = @CalismaSekli, onaytarih = @OnayTarih
             WHERE rezervasyonid = @RezervasyonId
             """;
 
@@ -258,6 +359,28 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
         await connection.ExecuteAsync(sql, k);
     }
 
+    public async Task<bool> ReferenceExistsAsync(
+        string table, string idColumn, string id, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        var count = await connection.ExecuteScalarAsync<int>(
+            $"SELECT COUNT(1) FROM {table} WHERE {idColumn} = @id", new { id });
+
+        return count > 0;
+    }
+
+    public async Task<bool> KalemExistsAsync(
+        string kalemId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        var count = await connection.ExecuteScalarAsync<int>(
+            "SELECT COUNT(1) FROM skn_kalem WHERE kalemid = @id", new { id = kalemId });
+
+        return count > 0;
+    }
+
     public async Task<bool> TarifeExistsAsync(
         string tarifeId, CancellationToken cancellationToken = default)
     {
@@ -270,41 +393,78 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
         return count > 0;
     }
 
+    /// <summary>
+    /// Kalem SATIŞ ise (<c>buysell == 2</c>) satis* sütunları, aksi hâlde alis*
+    /// sütunları doldurulur; karşı grup 0/NULL bırakılır. Siber Entegrasyon
+    /// Raporu §5.1 adım 6. Daha önce yön dikkate alınmıyor, her kalem alış
+    /// sütunlarına yazılıyordu — satış kalemleri Siber'de alış görünüyordu.
+    /// KDV sütunları olsold'daki gibi sabit 0.
+    /// </summary>
     public async Task InsertRezervasyonTarifeAsync(
         SiberRezervasyonTarife t, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
-        // satistoplamtutar / kdvoran / aliskdvoran olsold'da sabit 0.
-        const string sql = """
-            INSERT INTO skn_rezervasyontarife
-                (rezervasyontarifeid, rezervasyonid, tarih, miktar, alisdovizkod,
-                 alisbirimtutar, alistoplamtutar, satistoplamtutar, kalemid, alisfirmaid,
-                 tasimasekli, kdvoran, aliskdvoran)
-            VALUES
-                (@RezervasyonTarifeId, @RezervasyonId, @Tarih, @Miktar, @AlisDovizKod,
-                 @AlisBirimTutar, @AlisToplamTutar, 0, @KalemId, @AlisFirmaId,
-                 @TasimaSekli, 0, 0)
-            """;
+        var sql = IsSale(t)
+            ? """
+              INSERT INTO skn_rezervasyontarife
+                  (rezervasyontarifeid, rezervasyonid, tarih, miktar, satisdovizkod,
+                   satisbirimtutar, satistoplamtutar, alistoplamtutar, kalemid, satisfirmaid,
+                   tasimasekli, kdvoran, aliskdvoran)
+              VALUES
+                  (@RezervasyonTarifeId, @RezervasyonId, @Tarih, @Miktar, @DovizKod,
+                   @BirimTutar, @ToplamTutar, 0, @KalemId, @FirmaId,
+                   @TasimaSekli, 0, 0)
+              """
+            : """
+              INSERT INTO skn_rezervasyontarife
+                  (rezervasyontarifeid, rezervasyonid, tarih, miktar, alisdovizkod,
+                   alisbirimtutar, alistoplamtutar, satistoplamtutar, kalemid, alisfirmaid,
+                   tasimasekli, kdvoran, aliskdvoran)
+              VALUES
+                  (@RezervasyonTarifeId, @RezervasyonId, @Tarih, @Miktar, @DovizKod,
+                   @BirimTutar, @ToplamTutar, 0, @KalemId, @FirmaId,
+                   @TasimaSekli, 0, 0)
+              """;
 
         await connection.ExecuteAsync(sql, t);
     }
 
+    /// <summary>
+    /// Yön değişmiş olabileceği için (kullanıcı kalemi Alış'tan Satış'a çevirdiyse)
+    /// güncellemede KARŞI grup da sıfırlanır — aksi hâlde Siber'de kalemin hem alış
+    /// hem satış tutarı dolu kalır.
+    /// </summary>
     public async Task UpdateRezervasyonTarifeAsync(
         SiberRezervasyonTarife t, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
-        const string sql = """
-            UPDATE skn_rezervasyontarife SET
-                tarih = @Tarih, miktar = @Miktar, alisdovizkod = @AlisDovizKod,
-                alisbirimtutar = @AlisBirimTutar, alistoplamtutar = @AlisToplamTutar,
-                kalemid = @KalemId, alisfirmaid = @AlisFirmaId, tasimasekli = @TasimaSekli
-            WHERE rezervasyontarifeid = @RezervasyonTarifeId
-            """;
+        var sql = IsSale(t)
+            ? """
+              UPDATE skn_rezervasyontarife SET
+                  tarih = @Tarih, miktar = @Miktar, satisdovizkod = @DovizKod,
+                  satisbirimtutar = @BirimTutar, satistoplamtutar = @ToplamTutar,
+                  satisfirmaid = @FirmaId,
+                  alisdovizkod = NULL, alisbirimtutar = 0, alistoplamtutar = 0, alisfirmaid = NULL,
+                  kalemid = @KalemId, tasimasekli = @TasimaSekli
+              WHERE rezervasyontarifeid = @RezervasyonTarifeId
+              """
+            : """
+              UPDATE skn_rezervasyontarife SET
+                  tarih = @Tarih, miktar = @Miktar, alisdovizkod = @DovizKod,
+                  alisbirimtutar = @BirimTutar, alistoplamtutar = @ToplamTutar,
+                  alisfirmaid = @FirmaId,
+                  satisdovizkod = NULL, satisbirimtutar = 0, satistoplamtutar = 0, satisfirmaid = NULL,
+                  kalemid = @KalemId, tasimasekli = @TasimaSekli
+              WHERE rezervasyontarifeid = @RezervasyonTarifeId
+              """;
 
         await connection.ExecuteAsync(sql, t);
     }
+
+    /// <summary>olsold buysell: 1 = alış, 2 = satış.</summary>
+    private static bool IsSale(SiberRezervasyonTarife t) => t.Buysell == 2;
 
     private static object Parameters(SiberRezervasyonYaz r) => new
     {
@@ -316,7 +476,7 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
         r.OnTasimaTarafimizdanYapilir, r.SonTasimaTarafimizdanYapilir, r.MusteriId,
         r.NavlunFirmaId, r.GondericiId, r.AliciId, r.DurumId, r.MusteriTemsilcisi,
         r.SatisTemsilcisiKod, r.DepartmanId, r.Aciklama, r.Yil, r.InsTime, r.InsUser,
-        r.YuklemeUlkeId, r.BosaltmaUlkeId, r.CalismaSekli,
+        r.YuklemeUlkeId, r.BosaltmaUlkeId, r.CalismaSekli, r.OnayTarih,
     };
 
     private async Task<Guid> GenerateUniqueAsync(
@@ -344,7 +504,8 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
 
         var rows = await connection.QueryAsync<SiberRezervasyonKoliSatir>(
             """
-            SELECT rezyukkoliid AS RezYukKoliId, kapadet AS KapAdet,
+            -- uniqueidentifier -> string? okuması CAST ister (bkz. SiberLoadRepository).
+            SELECT CAST(rezyukkoliid AS VARCHAR(64)) AS RezYukKoliId, kapadet AS KapAdet,
                    en AS En, boy AS Boy, yukseklik AS Yukseklik
             FROM skn_rezervasyonyukkoli
             WHERE rezervasyonid = @id
@@ -361,8 +522,8 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
 
         var rows = await connection.QueryAsync<SiberRezervasyonTarifeSatir>(
             """
-            SELECT rezervasyontarifeid AS RezervasyonTarifeId, miktar AS Miktar,
-                   kalemid AS KalemId, tasimasekli AS TasimaSekli
+            SELECT CAST(rezervasyontarifeid AS VARCHAR(64)) AS RezervasyonTarifeId, miktar AS Miktar,
+                   CAST(kalemid AS VARCHAR(64)) AS KalemId, tasimasekli AS TasimaSekli
             FROM skn_rezervasyontarife
             WHERE rezervasyonid = @id
             """,

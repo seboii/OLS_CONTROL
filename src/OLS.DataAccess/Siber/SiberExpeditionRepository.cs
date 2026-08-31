@@ -32,13 +32,38 @@ public interface ISiberExpeditionRepository
     Task<Guid> GenerateSeferIdAsync(CancellationToken cancellationToken = default);
 
     Task<int> NextSiranoAsync(string seferId, CancellationToken cancellationToken = default);
-    Task<int> NextSeferNoAsync(string year, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Sefer numarasını ÜRETİR ve skn_sefer satırını TEK, KİLİTLİ işlemde ekler.
+    ///
+    /// Eski hâli iki ayrı adımdı (NextSeferNoAsync + InsertSeferAsync) ve numarayı
+    /// <c>MAX(seferno) WHERE yil = @yil</c> ile buluyordu — yani YALNIZCA yıla göre.
+    /// Canlıda doğrulandı: seferno sayacı (yıl, ARAÇ SAHİBİ) çiftine göre ayrı
+    /// ilerliyor. 2026'da kiralık (KR) 1→516, özmal (OZ) 0→91. Yıl bazlı MAX her
+    /// durumda 516 döndüğü için ÖZMAL bir araçla açılan sefer 92 yerine 517
+    /// numarasını alıyor, sefer numarası 26OZ0092.. yerine 26OZ0517.. çıkıyor ve
+    /// özmal sayacı kalıcı olarak bozuluyordu. Kiralıkta tesadüfen doğru
+    /// çalıştığı için fark edilmemişti.
+    ///
+    /// Ayrıca kilitsiz MAX+1 iki eşzamanlı sefer açılışında aynı numarayı
+    /// üretebiliyordu (rezervasyon ve yük numarasında düzeltilen aynı yarış
+    /// durumu); numara üretimi ve INSERT artık sp_getapplock ile serileştirilmiş
+    /// tek transaction içinde.
+    /// </summary>
+    Task<int> InsertSeferWithLockedNumberAsync(
+        SiberSefer sefer, CancellationToken cancellationToken = default);
 
-    Task InsertSeferAsync(SiberSefer sefer, CancellationToken cancellationToken = default);
+
     Task InsertPozisyonAsync(SiberPozisyon pozisyon, CancellationToken cancellationToken = default);
 
     /// <summary>Eklenen pozisyonun Siber tarafından üretilen sefer numarasını okur.</summary>
     Task<string?> ReadPozisyonSeferNoAsync(string pozisyonId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Seferi (pozisyon) ve bağlı yük eşlemelerini Siber'den siler. Yalnızca yerelden
+    /// silmek yetmiyordu: periyodik senkron kaydı bir sonraki turda skn_pozisyon'dan
+    /// geri getiriyordu (bkz. LoadTransferWriteService.DeleteAsync'teki aynı not).
+    /// </summary>
+    Task DeletePozisyonAsync(string pozisyonId, CancellationToken cancellationToken = default);
 
     Task UpdatePozisyonAsync(
         string pozisyonId, int? durumId, string? romorkId, CancellationToken cancellationToken = default);
@@ -140,31 +165,46 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
         return (max ?? 0) + 1;
     }
 
-    public async Task<int> NextSeferNoAsync(string year, CancellationToken cancellationToken = default)
-    {
-        using var connection = await _factory.CreateOpenAsync(cancellationToken);
-
-        var max = await connection.ExecuteScalarAsync<int?>(
-            "SELECT MAX(seferno) FROM skn_sefer WHERE yil = @yil", new { yil = year });
-
-        return (max ?? 0) + 1;
-    }
-
-    public async Task InsertSeferAsync(SiberSefer sefer, CancellationToken cancellationToken = default)
+    public async Task<int> InsertSeferWithLockedNumberAsync(
+        SiberSefer sefer, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
         const string sql = """
+            SET XACT_ABORT ON;
+            BEGIN TRANSACTION;
+
+            DECLARE @lockResult INT;
+            EXEC @lockResult = sp_getapplock
+                @Resource = @LockResource, @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction', @LockTimeout = 15000;
+            IF @lockResult < 0
+            BEGIN
+                ROLLBACK TRANSACTION;
+                THROW 51000, 'Sefer numarası kilidi alınamadı (zaman aşımı).', 1;
+            END;
+
+            -- Sayaç (yıl, araç sahibi) çiftine göre ayrı ilerler; bkz. arayüz açıklaması.
+            DECLARE @nextNo INT = (
+                SELECT ISNULL(MAX(seferno), 0)
+                FROM skn_sefer
+                WHERE yil = @Yil AND aracsahip = @AracSahip) + 1;
+
             INSERT INTO skn_sefer
                 (seferid, sirketid, subeid, aracsahip, seferno, cikistarih, donustarih, yil, yici)
             VALUES
-                (@SeferId, @SirketId, @SubeId, @AracSahip, @SeferNo, @CikisTarih, @DonusTarih, @Yil, 0)
+                (@SeferId, @SirketId, @SubeId, @AracSahip, @nextNo, @CikisTarih, @DonusTarih, @Yil, 0);
+
+            COMMIT TRANSACTION;
+
+            SELECT @nextNo;
             """;
 
-        await connection.ExecuteAsync(sql, new
+        return await connection.QuerySingleAsync<int>(sql, new
         {
-            sefer.SeferId, SirketId, SubeId, sefer.AracSahip, sefer.SeferNo,
+            sefer.SeferId, SirketId, SubeId, sefer.AracSahip,
             sefer.CikisTarih, sefer.DonusTarih, sefer.Yil,
+            LockResource = $"skn_sefer_no:{sefer.Yil}:{sefer.AracSahip}",
         });
     }
 
@@ -202,6 +242,18 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
         return await connection.ExecuteScalarAsync<string?>(
             "SELECT TOP 1 seferno FROM skn_pozisyon WHERE pozisyonid = @id",
             new { id = pozisyonId });
+    }
+
+    public async Task DeletePozisyonAsync(
+        string pozisyonId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        // Önce sefere bağlı yük eşlemeleri, sonra pozisyonun kendisi.
+        await connection.ExecuteAsync("""
+            DELETE FROM skn_yukaktarma WHERE pozisyonid = @id;
+            DELETE FROM skn_pozisyon   WHERE pozisyonid = @id;
+            """, new { id = pozisyonId });
     }
 
     public async Task UpdatePozisyonAsync(

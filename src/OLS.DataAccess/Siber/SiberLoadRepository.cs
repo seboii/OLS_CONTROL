@@ -17,10 +17,6 @@ public interface ISiberLoadRepository
     Task<SiberRezervasyon?> FindRezervasyonAsync(
         string rezervasyonId, CancellationToken cancellationToken = default);
 
-    /// <summary>Aynı yıl ve iş türü için sıradaki yük numarası (max + 1).</summary>
-    Task<int> NextYukNoAsync(
-        string? isTuru, string year, CancellationToken cancellationToken = default);
-
     Task<Guid> GenerateYukIdAsync(CancellationToken cancellationToken = default);
     Task<Guid> GenerateYukKoliIdAsync(CancellationToken cancellationToken = default);
     Task<Guid> GenerateModulKalemIdAsync(CancellationToken cancellationToken = default);
@@ -29,10 +25,31 @@ public interface ISiberLoadRepository
     Task<SiberModulKayit?> FindModulKayitAsync(
         string loadNumberWorkType, CancellationToken cancellationToken = default);
 
-    Task InsertYukAsync(SiberYuk yuk, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Yük numarasını (aynı yıl+iş türü için max + 1) atomik biçimde atayarak
+    /// <c>skn_yuk</c> INSERT'ini yapar, atanan numarayı ve biçimlendirilmiş
+    /// (<c>yy00000EK</c>) hâlini döner. Numara üretimiyle INSERT tek transaction+kilit
+    /// altında yapılır — bkz. metodun XML açıklaması.
+    /// </summary>
+    Task<SiberYukNumberResult> InsertYukWithLockedNumberAsync(
+        SiberYuk yuk, string year, string additionalCode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Teklifi (rezervasyonu) yeni açılan yüke bağlar:
+    /// <c>UPDATE skn_rezervasyon SET yukid = ... WHERE rezervasyonid = ...</c>
+    ///
+    /// Siber'in kendi ekranları teklifin yükünü BU sütundan bulur; yazılmazsa
+    /// <c>skn_yuk</c>'ta satır oluşsa bile teklif Siber tarafında "yüksüz" görünür
+    /// ve yük numarası teklif üzerinde görünmez. Bkz. Siber Entegrasyon Raporu
+    /// §6.2 adım 8.
+    /// </summary>
+    Task LinkRezervasyonToYukAsync(
+        string rezervasyonId, string yukId, CancellationToken cancellationToken = default);
     Task InsertYukKoliAsync(SiberYukKoli koli, CancellationToken cancellationToken = default);
     Task InsertModulKalemAsync(SiberModulKalem kalem, CancellationToken cancellationToken = default);
 
+    /// <summary>Yükü ve alt kayıtlarını Siber'den siler — bkz. uygulamadaki açıklama.</summary>
+    Task DeleteYukAsync(string yukId, CancellationToken cancellationToken = default);
     Task DeleteYukKoliAsync(string yukKoliId, CancellationToken cancellationToken = default);
     Task DeleteModulKalemAsync(string modulKalemId, CancellationToken cancellationToken = default);
 
@@ -45,12 +62,29 @@ public interface ISiberLoadRepository
 
     Task UpdateYukKoliAsync(SiberYukKoli koli, CancellationToken cancellationToken = default);
     Task UpdateModulKalemAsync(SiberModulKalem kalem, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Yük evrak takibi (<c>skn_yukevrak</c>) — gerçek dosya DEĞİL, fiziksel evrak
+    /// çeklisti (tür + orijinal/kopya adedi + teslim bilgisi). Gerçek Siber'de
+    /// doğrulandı: <c>evrakid</c> hiçbir tabloya referans vermiyor (rastgele
+    /// üretiliyor), asıl tür kimliği <c>sirano</c> (bkz. EvrakTuru.Code).
+    /// </summary>
+    Task<Guid> GenerateYukEvrakIdAsync(CancellationToken cancellationToken = default);
+    Task InsertYukEvrakAsync(SiberYukEvrak evrak, CancellationToken cancellationToken = default);
+    Task UpdateYukEvrakAsync(SiberYukEvrak evrak, CancellationToken cancellationToken = default);
+    Task DeleteYukEvrakAsync(string yukEvrakId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>skn_rezervasyon'un doğrulamada kullanılan alanları.</summary>
 public sealed class SiberRezervasyon
 {
     public string? RezervasyonId { get; init; }
+
+    /// <summary>
+    /// Teklifin DONUSTUGU yuk. Dolu ise teklif zaten yuke cevrilmistir — mukerrer
+    /// yuk acilmasini engellemek icin ConvertOfferAsync bunu kontrol eder.
+    /// </summary>
+    public string? YukId { get; init; }
     public string? IstenenRomorkCins { get; init; }
     public string? IsTuru { get; init; }
     public string? MusteriId { get; init; }
@@ -76,9 +110,38 @@ public sealed class SiberModulKayit
     public string? ModulKod { get; init; }
 }
 
+/// <summary>
+/// <see cref="ISiberLoadRepository.InsertYukWithLockedNumberAsync"/> çıktısı: atanan
+/// sayısal yük numarası ve biçimlendirilmiş (<c>yy00000EK</c>) hâli — ikincisi hem
+/// <c>skn_yuk.yuknoisturu</c>'ya hem yerel <c>LoadTransfer.LoadNumberWorkType</c>/
+/// <c>Load.LoadNumber</c>'a yazılır.
+/// </summary>
+public sealed class SiberYukNumberResult
+{
+    public int YukNo { get; init; }
+    public string LoadNumberWorkType { get; init; } = string.Empty;
+}
+
 public sealed class SiberYuk
 {
     public string YukId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Yükü DOĞURAN teklif (skn_rezervasyon.rezervasyonid) — TERS bağ.
+    ///
+    /// BULUNAN GERÇEK BOŞLUK: dönüşümde yalnızca ileri yön yazılıyordu
+    /// (skn_rezervasyon.yukid, bkz. LinkRezervasyonToYukAsync). Siber'in
+    /// rezervasyon ekranı bağlı yükü BU sütundan okuduğu için, bizim açtığımız
+    /// yükler teklifin üzerinde görünmüyordu. Canlıda doğrulandı: Siber'in kendi
+    /// yüklerinin 3673'ünde bu alan dolu, bizimkilerde NULL'dı.
+    /// </summary>
+    public string? RezervasyonId { get; init; }
+
+    /// <summary>
+    /// Yükün yazılacağı Siber şirketi. Boş bırakılırsa OLS
+    /// (bkz. SiberLoadRepository.DefaultSirketId).
+    /// </summary>
+    public string? SirketId { get; init; }
 
     /// <summary>
     /// Yük durumu. Ekleme sırasında sabit 1 yazılır (yeni yük "sipariş"),
@@ -111,6 +174,27 @@ public sealed class SiberYuk
     public string? BosaltmaUlke { get; init; }
     public int? CalismaSekli { get; init; }
     public DateTime KayitGirisTarih { get; init; }
+
+    /// <summary>
+    /// BULUNAN GERÇEK BOŞLUK: bu 6 alan Genel Bilgiler'de düzenlenebilir ve yerelde
+    /// doğru kaydediliyordu, ama Siber'e HİÇ gönderilmiyordu — kaynakta
+    /// (LoadTransferController.php update(), satır 726-731) hepsi canlı/aktif
+    /// yazılıyor, hiçbiri yorum satırı değil. Yalnızca UPDATE'te kullanılır
+    /// (ekleme/dönüşüm sırasında olsold da bunları göndermiyor).
+    /// </summary>
+    public string? TeslimSekil { get; init; }
+    public int? OnTasimaTarafimizdanYapilir { get; init; }
+    public int? SonTasimaTarafimizdanYapilir { get; init; }
+
+    /// <summary>
+    /// Kaynakta AYNI kaynak alan (<c>request_arrival_date</c>) hem
+    /// <see cref="TalimatGelisTarihi"/>'ye (talimatgelistarihi) HEM buna
+    /// (istenenvaristarihi) yazılıyor — iki farklı Siber sütununa yinelenen
+    /// yazma, kaynakta da böyle (satır 713 ve 729).
+    /// </summary>
+    public DateTime? IstenenVarisTarihi { get; init; }
+    public DateTime? HazirOlmaTarih { get; init; }
+    public DateTime? MusteridenAlinisTarih { get; init; }
 }
 
 public sealed class SiberYukKoli
@@ -150,9 +234,37 @@ public sealed class SiberModulKalem
     public string? KayitGiren { get; init; }
 }
 
+/// <summary>
+/// skn_yukevrak: fiziksel evrak çeklisti (gerçek dosya değil — bkz. sirano/evrakad
+/// için 10 sabit tür: 1=Navlun Faturası, 2=Invoice, 3=Konşimento, 4=CMR,
+/// 5=Mal Faturası, 6=ATR-1, 7=Packing List, 8=Sağlık Sertifikası, 9=Çeki Listesi,
+/// 10=Menşei Şehadetnamesi).
+/// </summary>
+public sealed class SiberYukEvrak
+{
+    public string YukEvrakId { get; init; } = string.Empty;
+    public string YukId { get; init; } = string.Empty;
+    public int Sirano { get; init; }
+    public string? EvrakAd { get; init; }
+    public string? EvrakNo { get; init; }
+    public DateTime? Tarih { get; init; }
+    public int? OrjinalAdet { get; init; }
+    public int? KopyaAdet { get; init; }
+    public string? TeslimAlan { get; init; }
+    public DateTime? TeslimTarih { get; init; }
+    public string? Aciklama { get; init; }
+}
+
 public sealed class SiberLoadRepository : ISiberLoadRepository
 {
-    private const string SirketId = "BA4888B1-A2B0-4142-B273-92481D932EAD";
+    /// <summary>
+    /// Varsayılan şirket: OLS DIŞ TİCARET. Siber'de iki şirket var (sbr_sirket) ve
+    /// teklif akışından doğan yükler her zaman OLS'e yazılıyor. Teklifsiz yük açan
+    /// Avrora kullanıcısı için <see cref="SiberYuk.SirketId"/> ile değiştirilebilir —
+    /// aksi hâlde Avrora'nın açtığı yük OLS'e düşer ve görünürlük ayrımı daha
+    /// doğduğu anda bozulurdu.
+    /// </summary>
+    public const string DefaultSirketId = "BA4888B1-A2B0-4142-B273-92481D932EAD";
     private const string SubeId = "69588E44-731B-46E5-83A4-A338816E2300";
 
     /// <summary>olsold'da sabit çarpanlar: ücret ağırlığı ve hacim hesabı için.</summary>
@@ -173,31 +285,32 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
 
         return await connection.QueryFirstOrDefaultAsync<SiberRezervasyon>(
             """
-            SELECT rezervasyonid AS RezervasyonId, istenenromorkcins AS IstenenRomorkCins,
-                   isturu AS IsTuru, musteriid AS MusteriId, gondericiid AS GondericiId,
-                   aliciid AS AliciId, odemesekliid AS OdemeSekliId, durumid AS DurumId,
-                   departmanid AS DepartmanId, talimatgelissekli AS TalimatGelisSekli,
+            -- DİKKAT: uniqueidentifier kolonlar C# tarafında string? olarak okunuyor;
+            -- Dapper Guid→string dönüşümünü yapamaz ("Object must implement
+            -- IConvertible") ve satır materialize edilemez. Bu yüzden GUID kolonların
+            -- HEPSİ açıkça VARCHAR'a CAST edilir — projede yerleşik kural (bkz.
+            -- SiberSyncService'teki aynı desen).
+            SELECT CAST(rezervasyonid AS VARCHAR(64)) AS RezervasyonId,
+                   istenenromorkcins AS IstenenRomorkCins,
+                   isturu AS IsTuru,
+                   CAST(musteriid AS VARCHAR(64)) AS MusteriId,
+                   CAST(gondericiid AS VARCHAR(64)) AS GondericiId,
+                   CAST(aliciid AS VARCHAR(64)) AS AliciId,
+                   CAST(odemesekliid AS VARCHAR(64)) AS OdemeSekliId,
+                   CAST(durumid AS VARCHAR(64)) AS DurumId,
+                   CAST(departmanid AS VARCHAR(64)) AS DepartmanId,
+                   talimatgelissekli AS TalimatGelisSekli,
                    yuklemetip AS YuklemeTip, yukturkod AS YukTurKod,
-                   navlunfirmaid AS NavlunFirmaId, yuklemeulkeid AS YuklemeUlkeId,
-                   bosaltmaulkeid AS BosaltmaUlkeId,
+                   CAST(navlunfirmaid AS VARCHAR(64)) AS NavlunFirmaId,
+                   CAST(yuklemeulkeid AS VARCHAR(64)) AS YuklemeUlkeId,
+                   CAST(bosaltmaulkeid AS VARCHAR(64)) AS BosaltmaUlkeId,
                    ontasimatarafimizdanyapilir AS OnTasimaTarafimizdanYapilir,
                    sontasimatarafimizdanyapilir AS SonTasimaTarafimizdanYapilir,
-                   calismasekli AS CalismaSekli
+                   calismasekli AS CalismaSekli,
+                   CAST(yukid AS VARCHAR(64)) AS YukId
             FROM skn_rezervasyon WHERE rezervasyonid = @id
             """,
             new { id = rezervasyonId });
-    }
-
-    public async Task<int> NextYukNoAsync(
-        string? isTuru, string year, CancellationToken cancellationToken = default)
-    {
-        using var connection = await _factory.CreateOpenAsync(cancellationToken);
-
-        var max = await connection.ExecuteScalarAsync<int?>(
-            "SELECT MAX(yukno) FROM skn_yuk WHERE isturu = @isturu AND yil = @yil",
-            new { isturu = isTuru, yil = year });
-
-        return (max ?? 0) + 1;
     }
 
     public Task<Guid> GenerateYukIdAsync(CancellationToken cancellationToken = default) =>
@@ -209,23 +322,59 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
     public Task<Guid> GenerateModulKalemIdAsync(CancellationToken cancellationToken = default) =>
         GenerateUniqueAsync("sfy_modulkalem", "modulkalemid", cancellationToken);
 
+    public Task<Guid> GenerateYukEvrakIdAsync(CancellationToken cancellationToken = default) =>
+        GenerateUniqueAsync("skn_yukevrak", "evrakid", cancellationToken);
+
     public async Task<SiberModulKayit?> FindModulKayitAsync(
         string loadNumberWorkType, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
         return await connection.QueryFirstOrDefaultAsync<SiberModulKayit>(
-            "SELECT TOP 1 modulid AS ModulId, modulkod AS ModulKod FROM sfy_modulkayit WHERE ad = @ad",
+            // modulid uniqueidentifier — string? olarak okunduğu için CAST şart
+            // (bkz. FindRezervasyonAsync'teki aynı gerekçe).
+            "SELECT TOP 1 CAST(modulid AS VARCHAR(64)) AS ModulId, modulkod AS ModulKod FROM sfy_modulkayit WHERE ad = @ad",
             new { ad = loadNumberWorkType });
     }
 
-    public async Task InsertYukAsync(SiberYuk yuk, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// olsold'da yük numarası kilitsiz <c>MAX(yukno) + 1</c> ile üretilir, üstelik AYNI
+    /// sorgu ikinci kez (sayısal ve biçimlendirilmiş numara için ayrı ayrı) çalıştırılır
+    /// (Siber Entegrasyon Raporu §6.1, risk #3): aynı iş türü+yıl için iki eşzamanlı
+    /// "Yüke Dönüştür" çağrısı aynı numarayı alabilir, hatta TEK çağrı içinde iki sorgu
+    /// arasına başka bir kayıt girerse sayısal/biçimlendirilmiş numara birbirinden
+    /// sapabilir. Burada numara üretimi (tek sorgu, iki değer de aynı okumadan türetilir)
+    /// ve INSERT <c>sp_getapplock</c> ile serileştirilmiş TEK transaction içinde yapılır.
+    /// Kilit adı iş türü+yıla göre kapsamlı (<c>skn_yuk_no:{isturu}:{yil}</c>) — farklı iş
+    /// türü/yıl kombinasyonları birbirini bloklamaz, sayaç zaten ayrı. <c>@LockOwner =
+    /// 'Transaction'</c> kilidi COMMIT/ROLLBACK'te otomatik bırakır; farklı bağlantılardan
+    /// (uygulamanın birden fazla örneği olsa dahi) gelen eşzamanlı çağrıları da
+    /// serileştirir.
+    /// </summary>
+    public async Task<SiberYukNumberResult> InsertYukWithLockedNumberAsync(
+        SiberYuk yuk, string year, string additionalCode, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
         // Sabit değerler (durumid=1, kamyonda/kuyrukta/cmr/fcr=0, araç yüksekliği,
         // lademetre ve hacim çarpanları, kıtalar) olsold'dan birebir taşındı.
         const string sql = """
+            SET XACT_ABORT ON;
+            BEGIN TRANSACTION;
+
+            DECLARE @lockResult INT;
+            EXEC @lockResult = sp_getapplock
+                @Resource = @LockResource, @LockMode = 'Exclusive',
+                @LockOwner = 'Transaction', @LockTimeout = 15000;
+            IF @lockResult < 0
+            BEGIN
+                ROLLBACK TRANSACTION;
+                THROW 51000, 'Yük numarası kilidi alınamadı (zaman aşımı).', 1;
+            END;
+
+            DECLARE @nextNo INT = (SELECT ISNULL(MAX(yukno), 0) FROM skn_yuk WHERE isturu = @IsTuru AND yil = @Yil) + 1;
+            DECLARE @loadNumberWorkType NVARCHAR(32) = @Yil + RIGHT('00000' + CAST(@nextNo AS VARCHAR(10)), 5) + @AdditionalCode;
+
             INSERT INTO skn_yuk
                 (yukid, sirketid, subeid, yukno, isturu, bagliyukno, durumid, yuklemetip,
                  firmaid, gondericiid, aliciid, odemesekliid, kamyonda, kuyrukta,
@@ -235,31 +384,49 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                  kayitgiristarih, bagliyuknoisturu, toplamkap, kayitgiren, yil,
                  talimatgelistarihi, lademetrecarpan, hacimcarpan, aracyuksekligi,
                  yukturkod, _yuklemeulke, _bosaltmaulke, _yuklemekita, _bosaltmakita,
-                 bildirimyapankullanicikod, satistemsilcisikod, calismasekli)
+                 bildirimyapankullanicikod, satistemsilcisikod, calismasekli,
+                 rezervasyonid)
             VALUES
-                (@YukId, @SirketId, @SubeId, @YukNo, @IsTuru, @YukNo, 1, @YuklemeTip,
+                (@YukId, @SirketId, @SubeId, @nextNo, @IsTuru, @nextNo, 1, @YuklemeTip,
                  @FirmaId, @GondericiId, @AliciId, @OdemeSekliId, 0, 0,
                  0, 0, @TalimatGelisSekli, @IstenenRomorkCins,
                  @ToplamAgirlik, @ToplamHacim, @ToplamLademetre, @UcretAgirlik,
-                 @MusteriTemsilcisiAd, @DepartmanId, @DepartmanId, @YukNoIsTuru,
-                 @KayitGirisTarih, @YukNoIsTuru, @ToplamKap, @KayitGiren, @Yil,
+                 @MusteriTemsilcisiAd, @DepartmanId, @DepartmanId, @loadNumberWorkType,
+                 @KayitGirisTarih, @loadNumberWorkType, @ToplamKap, @KayitGiren, @Yil,
                  @TalimatGelisTarihi, @LademeterMultiplier, @VolumeMultiplier, @CarHeight,
                  @YukTurKod, @YuklemeUlke, @BosaltmaUlke, 'ASYA', 'ASYA',
-                 @KayitGiren, @KayitGiren, @CalismaSekli)
+                 @KayitGiren, @KayitGiren, @CalismaSekli,
+                 @RezervasyonId);
+
+            COMMIT TRANSACTION;
+
+            SELECT @nextNo AS YukNo, @loadNumberWorkType AS LoadNumberWorkType;
             """;
 
-        await connection.ExecuteAsync(sql, new
+        return await connection.QuerySingleAsync<SiberYukNumberResult>(sql, new
         {
-            yuk.YukId, SirketId, SubeId, yuk.YukNo, yuk.IsTuru, yuk.YuklemeTip,
-            yuk.FirmaId, yuk.GondericiId, yuk.AliciId, yuk.OdemeSekliId,
+            yuk.YukId, SirketId = yuk.SirketId ?? DefaultSirketId, SubeId,
+            yuk.IsTuru, Yil = year, AdditionalCode = additionalCode,
+            LockResource = $"skn_yuk_no:{yuk.IsTuru}:{year}",
+            yuk.YuklemeTip, yuk.FirmaId, yuk.GondericiId, yuk.AliciId, yuk.OdemeSekliId,
             yuk.TalimatGelisSekli, yuk.IstenenRomorkCins, yuk.ToplamAgirlik,
             yuk.ToplamHacim, yuk.ToplamLademetre, yuk.UcretAgirlik,
-            yuk.MusteriTemsilcisiAd, yuk.DepartmanId, yuk.YukNoIsTuru,
-            yuk.KayitGirisTarih, yuk.ToplamKap, yuk.KayitGiren, yuk.Yil,
+            yuk.MusteriTemsilcisiAd, yuk.DepartmanId,
+            yuk.KayitGirisTarih, yuk.ToplamKap, yuk.KayitGiren,
             yuk.TalimatGelisTarihi, LademeterMultiplier, VolumeMultiplier,
             CarHeight = DefaultCarHeight, yuk.YukTurKod, yuk.YuklemeUlke,
-            yuk.BosaltmaUlke, yuk.CalismaSekli,
+            yuk.BosaltmaUlke, yuk.CalismaSekli, yuk.RezervasyonId,
         });
+    }
+
+    public async Task LinkRezervasyonToYukAsync(
+        string rezervasyonId, string yukId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        await connection.ExecuteAsync(
+            "UPDATE skn_rezervasyon SET yukid = @yukId WHERE rezervasyonid = @rezervasyonId",
+            new { yukId, rezervasyonId });
     }
 
     public async Task InsertYukKoliAsync(
@@ -303,6 +470,23 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
         });
     }
 
+    public async Task InsertYukEvrakAsync(
+        SiberYukEvrak evrak, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        const string sql = """
+            INSERT INTO skn_yukevrak
+                (evrakid, yukid, sirano, evrakad, evrakno, tarih, orjinaladet, kopyaadet,
+                 teslimalan, teslimtarih, aciklama)
+            VALUES
+                (@YukEvrakId, @YukId, @Sirano, @EvrakAd, @EvrakNo, @Tarih, @OrjinalAdet,
+                 @KopyaAdet, @TeslimAlan, @TeslimTarih, @Aciklama)
+            """;
+
+        await connection.ExecuteAsync(sql, evrak);
+    }
+
     public async Task UpdateYukAsync(SiberYuk yuk, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
@@ -330,7 +514,13 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                 _yuklemeulke       = @YuklemeUlke,
                 _bosaltmaulke      = @BosaltmaUlke,
                 calismasekli       = @CalismaSekli,
-                aracyuksekligi     = @CarHeight
+                aracyuksekligi     = @CarHeight,
+                teslimsekil                  = @TeslimSekil,
+                ontasimatarafimizdanyapilir  = @OnTasimaTarafimizdanYapilir,
+                sontasimatarafimizdanyapilir = @SonTasimaTarafimizdanYapilir,
+                istenenvaristarihi           = @IstenenVarisTarihi,
+                hazirolmatarih                = @HazirOlmaTarih,
+                musteridenalinistarih        = @MusteridenAlinisTarih
             WHERE yukid = @YukId
             """;
 
@@ -342,6 +532,8 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             yuk.ToplamKap, yuk.MusteriTemsilcisiAd, yuk.DepartmanId,
             yuk.TalimatGelisTarihi, yuk.YuklemeUlke, yuk.BosaltmaUlke, yuk.CalismaSekli,
             CarHeight = DefaultCarHeight,
+            yuk.TeslimSekil, yuk.OnTasimaTarafimizdanYapilir, yuk.SonTasimaTarafimizdanYapilir,
+            yuk.IstenenVarisTarihi, yuk.HazirOlmaTarih, yuk.MusteridenAlinisTarih,
         });
     }
 
@@ -394,6 +586,60 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
         });
     }
 
+    public async Task UpdateYukEvrakAsync(
+        SiberYukEvrak evrak, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        const string sql = """
+            UPDATE skn_yukevrak SET
+                sirano      = @Sirano,
+                evrakad     = @EvrakAd,
+                evrakno     = @EvrakNo,
+                tarih       = @Tarih,
+                orjinaladet = @OrjinalAdet,
+                kopyaadet   = @KopyaAdet,
+                teslimalan  = @TeslimAlan,
+                teslimtarih = @TeslimTarih,
+                aciklama    = @Aciklama
+            WHERE evrakid = @YukEvrakId
+            """;
+
+        await connection.ExecuteAsync(sql, evrak);
+    }
+
+    /// <summary>
+    /// Yükü Siber'den tamamen siler: önce alt kayıtlar (koli + mali kalem +
+    /// evrak + sefer eşlemesi), sonra skn_yuk satırı.
+    ///
+    /// Siber'den de silmek ŞART: yalnızca yerelden silinirse periyodik senkron
+    /// (SyncLoadTransfersAsync) bir sonraki turda satırı Siber'den geri getirir —
+    /// yani yerel silme kalıcı olmaz. Ayrıca teklifin skn_rezervasyon.yukid
+    /// bağlantısı da temizlenir, aksi hâlde teklif silinmiş bir yüke işaret eder.
+    /// </summary>
+    public async Task DeleteYukAsync(string yukId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        await connection.ExecuteAsync("""
+            -- Mali kalemler (gelir/gider) ÖNCE silinmeli: skn_yuk üzerindeki Siber
+            -- tetikleyicisi, bağlı sfy_modulkalem satırı kaldıysa silmeyi reddediyor
+            -- ("Bu Yüke Ait Bekleyen Gelir/Gider kayıtları bulunmaktadır"). Bağlantı
+            -- dolaylı: sfy_modulkalem -> sfy_modulkayit(ad = yük numarası).
+            DELETE mk
+            FROM sfy_modulkalem mk
+            JOIN sfy_modulkayit mky ON mky.modulid = mk.modulid
+            JOIN skn_yuk y ON LTRIM(RTRIM(mky.ad)) = LTRIM(RTRIM(y.yuknoisturu))
+            WHERE y.yukid = @id AND LTRIM(RTRIM(mky.yer)) = 'YUK';
+
+            DELETE FROM skn_yukkoli   WHERE yukid = @id;
+            DELETE FROM skn_yukevrak  WHERE yukid = @id;
+            DELETE FROM skn_yukaktarma WHERE yukid = @id;
+            UPDATE skn_rezervasyon SET yukid = NULL WHERE yukid = @id;
+            DELETE FROM skn_yuk       WHERE yukid = @id;
+            """, new { id = yukId });
+    }
+
     public async Task DeleteYukKoliAsync(
         string yukKoliId, CancellationToken cancellationToken = default)
     {
@@ -410,6 +656,15 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
 
         await connection.ExecuteAsync(
             "DELETE FROM sfy_modulkalem WHERE modulkalemid = @id", new { id = modulKalemId });
+    }
+
+    public async Task DeleteYukEvrakAsync(
+        string yukEvrakId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        await connection.ExecuteAsync(
+            "DELETE FROM skn_yukevrak WHERE evrakid = @id", new { id = yukEvrakId });
     }
 
     private async Task<Guid> GenerateUniqueAsync(
