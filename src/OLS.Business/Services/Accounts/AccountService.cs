@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.DataAccess.Context;
@@ -16,6 +17,20 @@ public interface IAccountService
     Task<AccountSaveResult> CreateAsync(AccountWriteModel model, CancellationToken cancellationToken = default);
     Task<AccountSaveResult> UpdateAsync(AccountWriteModel model, CancellationToken cancellationToken = default);
     Task DeleteAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Cariye bağlı görevliler — teklif formunda müşteri seçilince Görevliler
+    /// sekmesini önceden doldurmak için (bkz. AccountRepresentative).
+    /// </summary>
+    Task<AccountRepresentativesDto> RepresentativesAsync(
+        long accountId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Cariye bağlı varsayılan görevliler.</summary>
+public sealed class AccountRepresentativesDto
+{
+    [JsonPropertyName("operation_officer")] public MappedUserDto? OperationOfficer { get; init; }
+    [JsonPropertyName("sales_reps")] public IReadOnlyList<MappedUserDto> SalesReps { get; init; } = [];
 }
 
 public sealed record AccountListQuery(
@@ -24,7 +39,11 @@ public sealed record AccountListQuery(
     long? AccountTypeId,
     int? PerPage,
     int Page,
-    string Path);
+    string Path,
+    Guid? CountryId = null,
+    long? TaxOfficeId = null,
+    int? AssignedUserId = null,
+    string? IndividualPersonal = null);
 
 /// <summary>Kaydetme sonucu. Ad/e-posta çakışması olsold'da 500 + alan hatası dönüyordu.</summary>
 public sealed record AccountSaveResult(AccountDetailDto? Account, string? DuplicateField)
@@ -66,6 +85,9 @@ public sealed record ContactPersonInput(string? Name, string? Email);
 public sealed class AccountService : IAccountService
 {
     private readonly OlsDbContext _db;
+    /// <summary>account_representatives.user_type: 1 = Operasyon Yetkilisi, 2 = Satış Temsilcisi.</summary>
+    private const int SalesRepresentativeType = 2;
+
     private readonly ISiberAccountRepository _siber;
     private readonly IClock _clock;
 
@@ -101,7 +123,7 @@ public sealed class AccountService : IAccountService
     {
         var isSuperAdmin = await IsSuperAdminAsync(query.UserId, cancellationToken);
 
-        var accounts = _db.Accounts.AsNoTracking();
+        var accounts = _db.Accounts.AsNoTracking().Where(a => a.IsActive);
 
         // Süper admin değilse yalnızca kendisine atanmış cariler görünür.
         if (!isSuperAdmin)
@@ -124,23 +146,46 @@ public sealed class AccountService : IAccountService
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var pattern = $"%{query.Search}%";
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish
+            // (en_US.utf8 yerelinde ILIKE "taşıma" gibi aramaları sessizce hiç eşleştirmiyordu).
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
 
             // olsold: name / phone / email + ilişkili ülke ve telefon ülkesi adı.
             // (Süper admin dalında 'address' aranmıyordu, diğerinde aranıyordu —
             //  bu tutarsızlık kaynakta var; burada her iki dalda da aynı davranıyoruz.)
             var countryIds = _db.Countries
-                .Where(c => EF.Functions.ILike(c.Name!, pattern))
+                .Where(c => EF.Functions.Like(c.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
                 .Select(c => (Guid?)c.Id);
 
             accounts = accounts.Where(a =>
-                EF.Functions.ILike(a.Name!, pattern) ||
-                EF.Functions.ILike(a.Phone!, pattern) ||
-                EF.Functions.ILike(a.Email!, pattern) ||
-                EF.Functions.ILike(a.Address!, pattern) ||
+                EF.Functions.Like(a.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(a.Phone!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(a.Email!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(a.Address!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
                 countryIds.Contains(a.CountryId) ||
                 countryIds.Contains(a.PhoneCountryId));
         }
+
+        if (query.CountryId is { } countryId)
+            accounts = accounts.Where(a => a.CountryId == countryId);
+
+        if (query.TaxOfficeId is { } taxOfficeId)
+        {
+            var taxOfficeIdText = taxOfficeId.ToString();
+            accounts = accounts.Where(a => a.TaxOffice == taxOfficeIdText);
+        }
+
+        if (query.AssignedUserId is { } assignedUserId)
+        {
+            var accountIdsForUser = _db.UserAccountMappings
+                .Where(m => m.UserId == assignedUserId)
+                .Select(m => (long)m.AccountId);
+
+            accounts = accounts.Where(a => accountIdsForUser.Contains(a.Id));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.IndividualPersonal))
+            accounts = accounts.Where(a => a.IndividualPersonal == query.IndividualPersonal);
 
         var ordered = accounts.OrderBy(a => a.Name);
 
@@ -245,12 +290,19 @@ public sealed class AccountService : IAccountService
 
         var (alici, satici) = await WriteChildRowsAsync(account, model, cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
-
-        // PostgreSQL commit edildikten SONRA Siber'e yazıyoruz. İki veritabanı
-        // arasında dağıtık işlem yok; Siber yazımı başarısız olursa cari yerelde
-        // kalır ve senkron dışı olur. olsold da aynı riski taşıyordu.
+        // SIRA ÖNEMLİ — ÖNCE SİBER, SONRA YEREL COMMIT.
+        //
+        // Eskiden tam tersiydi ve yorumda "Siber yazımı başarısız olursa cari
+        // yerelde kalır" diye kabul edilmişti. Bunun bedeli somut: cari yerelde
+        // Siber'de KARŞILIĞI OLMAYAN bir siber_id ile duruyor ve o cari bir
+        // teklifte müşteri seçilince Siber'e yazma FK hatasıyla patlıyor
+        // ("beklenmeyen hata"). Aynı ders yük tarafında da alınmıştı
+        // (bkz. LoadTransferWriteService.DeleteAsync). Siber önce yazılırsa
+        // hata durumunda yerel taraf tamamen geri alınır ve tutarsız kayıt
+        // hiç oluşmaz.
         await SyncToSiberAsync(account, model, alici, satici, isNew: true, cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         // olsold: save() yanıtı 'Invoice' ilişkisini hiç yüklemiyordu.
         var detail = await BuildDetailAsync(account, includeInvoices: false, cancellationToken);
@@ -309,13 +361,23 @@ public sealed class AccountService : IAccountService
         var oldUsers = _db.UserAccountMappings.Where(m => m.AccountId == (int)id);
         _db.UserAccountMappings.RemoveRange(oldUsers);
 
+        // Temsilci satırları da aynı sil-yeniden-yaz desenine dahil; aksi hâlde
+        // görevliden çıkarılan kişi teklif formunda görünmeye devam ederdi.
+        // Siber'den senkronlanmış satırlara (siber_id dolu) DOKUNULMAZ: onların
+        // sahibi Siber, burada silinirse bir sonraki senkron zaten geri getirir
+        // ve bu arada müşteri temsilcisiz görünürdü.
+        var oldReps = _db.AccountRepresentatives
+            .Where(r => r.AccountId == (int)id && r.SiberId == null);
+        _db.AccountRepresentatives.RemoveRange(oldReps);
+
         await _db.SaveChangesAsync(cancellationToken);
 
         var (alici, satici) = await WriteChildRowsAsync(account, model, cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
-
+        // Create ile aynı gerekçe: önce Siber, sonra yerel commit.
         await SyncToSiberAsync(account, model, alici, satici, isNew: false, cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         // olsold: update() yanıtı da 'Invoice' ilişkisini yüklemiyordu.
         var detail = await BuildDetailAsync(account, includeInvoices: false, cancellationToken);
@@ -328,6 +390,37 @@ public sealed class AccountService : IAccountService
     /// (muhtemelen Siber'deki geçmiş hareketler FK ile bağlı olduğu için),
     /// bu yüzden burada da Siber'e dokunmuyoruz.
     /// </summary>
+    /// <summary>
+    /// Siber'den senkronlanan cari-görevli bağını okur (bkz.
+    /// SiberSyncService.SyncAccountRepresentativesAsync). Operasyon Yetkilisi tekil,
+    /// Satış Temsilcisi çoğul — teklif formundaki alanlarla aynı şekil.
+    /// </summary>
+    public async Task<AccountRepresentativesDto> RepresentativesAsync(
+        long accountId, CancellationToken cancellationToken = default)
+    {
+        var reps = await _db.AccountRepresentatives.AsNoTracking()
+            .Where(r => r.AccountId == (int)accountId)
+            .Join(_db.Users.AsNoTracking(), r => (long)r.UserId, u => u.Id, (r, u) => new { r.UserType, User = u })
+            .OrderBy(x => x.User.Name)
+            .ToListAsync(cancellationToken);
+
+        static MappedUserDto Map(dynamic x) => new()
+        {
+            Id = x.User.Id,
+            Name = x.User.Name ?? string.Empty,
+            Surname = x.User.Surname ?? string.Empty,
+            Email = x.User.Email ?? string.Empty,
+            Avatar = x.User.Avatar,
+            SiberCode = x.User.SiberCode,
+        };
+
+        return new AccountRepresentativesDto
+        {
+            OperationOfficer = reps.Where(x => x.UserType == 1).Select(x => Map(x)).FirstOrDefault(),
+            SalesReps = reps.Where(x => x.UserType == 2).Select(x => Map(x)).ToList(),
+        };
+    }
+
     public async Task DeleteAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default)
     {
         foreach (var id in ids)
@@ -342,6 +435,10 @@ public sealed class AccountService : IAccountService
                 _db.AccountTypeMappings.Where(m => m.AccountId == (int)id));
             _db.UserAccountMappings.RemoveRange(
                 _db.UserAccountMappings.Where(m => m.AccountId == (int)id));
+            // Temsilci bağları da silinmeli — aksi hâlde cari gittikten sonra
+            // account_representatives'ta hiçbir cariye ait olmayan satırlar kalır.
+            _db.AccountRepresentatives.RemoveRange(
+                _db.AccountRepresentatives.Where(r => r.AccountId == (int)id));
 
             _db.Accounts.Remove(account);
         }
@@ -389,6 +486,26 @@ public sealed class AccountService : IAccountService
             {
                 AccountId = (int)account.Id,
                 UserId = userId,
+                CreatedAt = _clock.Now,
+                UpdatedAt = _clock.Now,
+            });
+
+            // BULUNAN GERÇEK BOŞLUK: buraya kadar yalnızca user_account_mappings
+            // (görünürlük/yetki) yazılıyordu. Teklif formundaki "Satış Temsilcisi
+            // müşteriye bağlı olsun" kuralı ise account_representatives tablosunu
+            // okuyor — bu yüzden uygulamadan açılan bir carinin satış temsilcisi
+            // teklifte HİÇ görünmüyor, her seferinde operasyon yetkilisine
+            // düşülüyordu. Arayüzdeki sekme bu kişileri zaten "Satış Temsilcisi"
+            // diye topluyor, dolayısıyla user_type = 2.
+            //
+            // Siber'e de yazılıyor (bkz. SyncToSiberAsync) ama senkron turunu
+            // beklememek için yerel satır burada doğrudan açılır: kullanıcı cariyi
+            // kaydedip hemen teklif açtığında temsilci dolu gelsin.
+            _db.AccountRepresentatives.Add(new AccountRepresentative
+            {
+                AccountId = (int)account.Id,
+                UserId = userId,
+                UserType = SalesRepresentativeType,
                 CreatedAt = _clock.Now,
                 UpdatedAt = _clock.Now,
             });
@@ -457,10 +574,29 @@ public sealed class AccountService : IAccountService
                 FirmaTemsilciId = Guid.NewGuid().ToString(),
                 FirmaId = account.SiberId,
                 Ad = user.SiberName,
+                // kod sütunu ŞART: cari görevlisi senkronu kullanıcıyı önce KODLA
+                // eşliyor (ada göre eşleşme yalnızca yedek). Boş bırakılırsa satır
+                // yalnızca ad benzerliğine kalıyordu.
+                Kod = user.SiberCode,
                 InsTime = _clock.Now,
                 InsUser = user.SiberCode,
                 MusteriTemsilcisi = 1,
-                SatisTemsilcisi = 0,
+                // BULUNAN GERÇEK HATA: burası eskiden satistemsilcisi = 0 yazıyordu.
+                // Arayüzdeki sekme bu kişileri "Satış Temsilcisi" diye topluyor, ama
+                // Siber'e satış bayrağı KAPALI gidiyordu — ve cari görevlisi senkronu
+                // rolü tam da bu sütundan okuduğu için satır "rolsüz" sayılıp
+                // atlanıyordu. Sonuç: uygulamadan açılan/düzenlenen carinin
+                // account_representatives kaydı HİÇ oluşmuyor, dolayısıyla teklif
+                // formundaki "Satış Temsilcisi müşteriden gelsin" kuralı bu carilerde
+                // hiçbir zaman çalışmıyordu.
+                //
+                // Siber'in kendi verisi de bunu doğruluyor: 4375 firmatemsilci
+                // satırının 4375'inde satistemsilcisi = 1.
+                SatisTemsilcisi = 1,
+                // Arayüz yalnızca satış temsilcisi topluyor; olmayan bir operasyon
+                // yetkilisi uydurmuyoruz (Siber'de bu bayrak 3495/4375 satırda dolu,
+                // yani her zaman değil).
+                OperasyonYetkilisi = 0,
             }, cancellationToken);
         }
     }

@@ -81,6 +81,9 @@ public sealed record LoadWriteModel
     public int? AgentId { get; init; }
     public string? PayerCompany { get; init; }
     public string? Description { get; init; }
+
+    /// <summary>Teklif Olumsuz isaretlendiginde girilen gerekce (bkz. Load.RejectionReason).</summary>
+    public string? RejectionReason { get; init; }
     public Guid? DepartureCountryId { get; init; }
     public Guid? TransitCountryId { get; init; }
     public Guid? TargetCountryId { get; init; }
@@ -120,6 +123,38 @@ public sealed record UploadedFile(string FileName, string? MimeType, string? Ori
 
 public sealed class LoadWriteService : ILoadWriteService
 {
+    /// <summary>status_types tablosundaki "Olumsuz" satırı (bkz. DbSeeder / gerçek Siber).</summary>
+    private const int NegativeStatusTypeId = 1;
+
+    /// <summary>status_types tablosundaki "Olumlu" satırı.</summary>
+    private const int PositiveStatusTypeId = 5;
+
+    /// <summary>load_charge_people.user_type: 1 = Operasyon Yetkilisi, 2 = Satış Temsilcisi.</summary>
+    private const int OperationOfficerType = 1;
+    private const int SalesRepType = 2;
+
+    /// <summary>
+    /// Gerekçe YALNIZCA Olumsuz durumunda saklanır: kullanıcı önce Olumsuz seçip
+    /// gerekçe yazar, sonra fikir değiştirip Olumlu'ya çevirirse eski gerekçenin
+    /// kayıtta kalması raporlamayı yanıltırdı ("olumlu ama red gerekçesi var").
+    /// </summary>
+    private static string? NormalizeRejectionReason(LoadWriteModel model) =>
+        model.StatusTypeId == NegativeStatusTypeId
+            ? string.IsNullOrWhiteSpace(model.RejectionReason) ? null : model.RejectionReason.Trim()
+            : null;
+
+    /// <summary>
+    /// "Olumlu'ya çekilme tarihi". Teklif Olumlu'ya İLK geçtiğinde o günün tarihi
+    /// damgalanır ve sonraki kayıtlarda korunur — her kaydetmede bugüne çekilseydi
+    /// "kaç günde onaylandı" bilgisi kaybolurdu. Durum Olumlu'dan çıkarsa temizlenir
+    /// (aynı gerekçe <see cref="NormalizeRejectionReason"/>'da da geçerli: duruma
+    /// ait alanlar durum değişince kayıtta kalmamalı).
+    /// </summary>
+    private DateOnly? ResolveApprovalDate(LoadWriteModel model, DateOnly? existing) =>
+        model.StatusTypeId == PositiveStatusTypeId
+            ? existing ?? DateOnly.FromDateTime(_clock.Now)
+            : null;
+
     private readonly OlsDbContext _db;
     private readonly IClock _clock;
 
@@ -143,6 +178,7 @@ public sealed class LoadWriteService : ILoadWriteService
             PaymentTypeId = model.PaymentTypeId,
             StatusTypeId = model.StatusTypeId,
             OfferDate = model.OfferDate,
+            ApprovalDate = ResolveApprovalDate(model, null),
             OfferValidityDate = model.OfferValidityDate,
             MarketingNotificationDate = model.MarketingNotificationDate,
             LoadTransferTypeId = model.LoadTransferTypeId,
@@ -155,6 +191,7 @@ public sealed class LoadWriteService : ILoadWriteService
             AgentId = model.AgentId,
             PayerCompany = model.PayerCompany,
             Description = model.Description,
+            RejectionReason = NormalizeRejectionReason(model),
             DepartureCountryId = model.DepartureCountryId,
             TransitCountryId = model.TransitCountryId,
             TargetCountryId = model.TargetCountryId,
@@ -194,6 +231,7 @@ public sealed class LoadWriteService : ILoadWriteService
         load.WorkTypeId = model.WorkTypeId;
         load.LoadingTypeId = model.LoadingTypeId;
         load.PaymentTypeId = model.PaymentTypeId;
+        load.ApprovalDate = ResolveApprovalDate(model, load.ApprovalDate);
         load.StatusTypeId = model.StatusTypeId;
         load.OfferDate = model.OfferDate;
         load.OfferValidityDate = model.OfferValidityDate;
@@ -208,6 +246,7 @@ public sealed class LoadWriteService : ILoadWriteService
         load.AgentId = model.AgentId;
         load.PayerCompany = model.PayerCompany;
         load.Description = model.Description;
+        load.RejectionReason = NormalizeRejectionReason(model);
         load.DepartureCountryId = model.DepartureCountryId;
         load.TransitCountryId = model.TransitCountryId;
         load.TargetCountryId = model.TargetCountryId;
@@ -302,7 +341,7 @@ public sealed class LoadWriteService : ILoadWriteService
             });
         }
 
-        WriteChargePersons(load, model, now);
+        await WriteChargePersonsAsync(load, model, now, cancellationToken);
 
         foreach (var email in model.EmailTo)
             AddEmail(load, "to", email, now);
@@ -327,14 +366,24 @@ public sealed class LoadWriteService : ILoadWriteService
     }
 
     /// <summary>
-    /// Görevliler. olsold kuralı korunuyor:
-    ///   - Hiç görevli gelmezse mevcut kullanıcı her iki tip için (1 ve 2) eklenir.
-    ///   - Tek tip gelirse eksik tip için mevcut kullanıcı eklenir.
-    /// Fark: kaynak bu bloğu iki kez çalıştırıp kayıtları çiftliyordu.
+    /// Görevliler ARTIK ELLE SEÇİLMİYOR — ikisi de türetiliyor:
+    ///
+    ///   • Operasyon Yetkilisi (user_type=1) = kaydı açan/kaydeden kullanıcı.
+    ///   • Satış Temsilcisi   (user_type=2) = MÜŞTERİYE tanımlı satış temsilcileri
+    ///     (<c>account_representatives</c>, Siber'den senkronlanan bağ).
+    ///
+    /// Kural arayüzde değil BURADA uygulanıyor: alanlar salt-okunur gösterilse bile
+    /// istek elle çağrılabilir, tek doğruluk noktası sunucu tarafı olmalı. Bu yüzden
+    /// <c>model.ChargePersons</c> bilinçli olarak YOK SAYILIYOR.
+    ///
+    /// Müşteriye hiç satış temsilcisi tanımlı değilse mevcut kullanıcı yazılır:
+    /// Siber aktarımı <c>satistemsilcisikod</c> boş gelirse doğrulamada takılıyor,
+    /// alanı boş bırakmak teklifi aktarılamaz hâle getirirdi.
     /// </summary>
-    private void WriteChargePersons(Load load, LoadWriteModel model, DateTime now)
+    private async Task WriteChargePersonsAsync(
+        Load load, LoadWriteModel model, DateTime now, CancellationToken cancellationToken)
     {
-        void Add(int? userId, int? userType) =>
+        void Add(int? userId, int userType) =>
             _db.LoadChargePeople.Add(new LoadChargePerson
             {
                 LoadId = (int)load.Id,
@@ -344,26 +393,45 @@ public sealed class LoadWriteService : ILoadWriteService
                 UpdatedAt = now,
             });
 
-        if (model.ChargePersons.Count == 0)
+        // SİSTEM HESABI İSTİSNASI: giriş yapan kullanıcının Siber karşılığı yoksa
+        // (kurulumdaki admin hesabı gibi — canlıda siber_code'u NULL) Operasyon
+        // Yetkilisi olarak yazmak Siber'e boş musteritemsilcisi/insuser göndermek
+        // demek. Böyle bir durumda müşteriye tanımlı operasyon yetkilisine düşülür.
+        var currentUserHasSiberAccount = await _db.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == model.CurrentUserId
+                        && u.SiberCode != null && u.SiberCode != "", cancellationToken);
+
+        var operationOfficerId = (int)model.CurrentUserId;
+
+        if (!currentUserHasSiberAccount && model.CustomerId is { } operationCustomerId)
         {
-            Add((int)model.CurrentUserId, 1);
-            Add((int)model.CurrentUserId, 2);
+            var fromCustomer = await _db.AccountRepresentatives.AsNoTracking()
+                .Where(r => r.AccountId == operationCustomerId && r.UserType == OperationOfficerType)
+                .Select(r => (int?)r.UserId)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (fromCustomer is { } fallbackId)
+                operationOfficerId = fallbackId;
+        }
+
+        Add(operationOfficerId, OperationOfficerType);
+
+        var salesReps = model.CustomerId is { } customerId
+            ? await _db.AccountRepresentatives.AsNoTracking()
+                .Where(r => r.AccountId == customerId && r.UserType == SalesRepType)
+                .Select(r => r.UserId)
+                .Distinct()
+                .ToListAsync(cancellationToken)
+            : [];
+
+        if (salesReps.Count == 0)
+        {
+            Add(operationOfficerId, SalesRepType);
             return;
         }
 
-        var providedTypes = new List<int>();
-
-        foreach (var person in model.ChargePersons)
-        {
-            providedTypes.Add(person.UserType ?? 0);
-            Add(person.UserId, person.UserType);
-        }
-
-        if (providedTypes.Count == 1)
-        {
-            var missing = providedTypes.Contains(1) ? 2 : 1;
-            Add((int)model.CurrentUserId, missing);
-        }
+        foreach (var userId in salesReps)
+            Add(userId, SalesRepType);
     }
 
     private void AddEmail(Load load, string key, string email, DateTime now) =>

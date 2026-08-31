@@ -1,8 +1,10 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Accounts;
 using OLS.DataAccess.Context;
+using OLS.DataAccess.Siber;
 using OLS.DataAccess.Entities;
 
 namespace OLS.Business.Services.Loads;
@@ -15,8 +17,20 @@ public interface ILoadService
     /// <summary>Yük numarası oluşmuş kayıt silinemez (olsold kuralı).</summary>
     Task<LoadDeleteResult> DeleteAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Teklifi KOPYALAR. Yeni teklif taslak olarak açılır; Siber'e aktarılmaz.
+    /// </summary>
+    Task<long?> DuplicateAsync(long id, CancellationToken cancellationToken = default);
+
     /// <summary>Yük numarası oluşmuş kayıt güncellenemez (olsold kuralı).</summary>
     Task<LoadTimeOutUpdateStatus> UpdateTimeOutAsync(long id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Formdan gelen referans seçimlerinin (departman, ödeme tipi, cari...) YEREL
+    /// tabloda hâlâ var olduğunu doğrular. Alan adı → hata mesajı döner; boşsa sorun yok.
+    /// </summary>
+    Task<Dictionary<string, string[]>> ValidateReferencesAsync(
+        LoadReferenceIds ids, CancellationToken cancellationToken = default);
 }
 
 public enum LoadTimeOutUpdateStatus { NotFound, Locked, Success }
@@ -30,26 +44,71 @@ public sealed record LoadListQuery(
     DateOnly? DateTo,
     int? PerPage,
     int Page,
-    string Path);
+    string Path,
+    int? CustomerId = null,
+    int? SenderId = null,
+    int? ReceiverId = null,
+    int? AgentId = null,
+    int? AssignedUserId = null,
+    int? WorkTypeId = null,
+    /// <summary>
+    /// Taslak mantığı: Yük İçeriği veya Finans sekmesi eksik bırakılmış, henüz
+    /// Yük'e dönüşmemiş teklifler ("Taslaklar" menüsü — bkz. QuotesPage.tsx).
+    /// </summary>
+    bool DraftOnly = false);
 
 public sealed record LoadDeleteResult(bool Success, string? BlockedByLoadNumber);
+
+/// <summary>Kaydetmede doğrulanacak referans seçimleri — bkz. ILoadService.ValidateReferencesAsync.</summary>
+public sealed record LoadReferenceIds(
+    int? DepartmentId, int? PaymentTypeId, int? StatusTypeId, int? WorkTypeId,
+    int? LoadingTypeId, int? LoadTransferTypeId, int? InstructionId, int? RomorkTypeId,
+    int? CustomerId, int? SenderId, int? ReceiverId, int? AgentId, int? CompanyPayFreightId);
 
 public sealed class LoadService : ILoadService
 {
     private readonly OlsDbContext _db;
     private readonly IAccountService _accounts;
     private readonly IClock _clock;
+    private readonly ISiberReservationRepository _reservations;
 
-    public LoadService(OlsDbContext db, IAccountService accounts, IClock clock)
+    /// <summary>status_types: 4 = "Teklif" — kopya bu durumda başlar.</summary>
+    private const int OfferStatusTypeId = 4;
+
+    private readonly ISiberArchiveRepository _archive;
+    private readonly ICompanyScope _companyScope;
+    private readonly ICurrentUser _currentUser;
+
+    public LoadService(
+        OlsDbContext db, IAccountService accounts, IClock clock,
+        ISiberReservationRepository reservations, ISiberArchiveRepository archive,
+        ICompanyScope companyScope, ICurrentUser currentUser)
     {
         _db = db;
         _accounts = accounts;
         _clock = clock;
+        _reservations = reservations;
+        _archive = archive;
+        _companyScope = companyScope;
+        _currentUser = currentUser;
     }
 
     public async Task<object> ListAsync(LoadListQuery query, CancellationToken cancellationToken = default)
     {
         var loads = _db.Loads.AsNoTracking();
+
+        // ŞİRKET GÖRÜNÜRLÜĞÜ (AVRORA / OLS) — yük ve seferdeki ile aynı kural.
+        // Teklifler de kapsama alındı: yükler tekliften doğduğu için burası açık
+        // kalsaydı Avrora yükünün bilgisi teklif üzerinden sızardı.
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+
+        if (!visibility.SeesEverything)
+        {
+            loads = visibility.OnlyCompanyId is { } only
+                ? loads.Where(l => l.SiberCompanyId == only)
+                : loads.Where(l => l.SiberCompanyId == null ||
+                                   l.SiberCompanyId != visibility.ExcludeCompanyId);
+        }
 
         // Süper admin değilse: ya yüke görevli atanmış olmalı, ya da yükün
         // müşterisi kendisine atanmış carilerden biri olmalı.
@@ -70,6 +129,18 @@ public sealed class LoadService : ILoadService
 
         if (query.StatusTypeId is { } statusId)
             loads = loads.Where(l => l.StatusTypeId == statusId);
+
+        if (query.DraftOnly)
+        {
+            // Yalnızca oturum açan kullanıcının kendi görevlendirildiği teklifler —
+            // aksi hâlde Siber'den senkronlanmış (LoadChargePerson'sız) binlerce eski
+            // kayıt da "taslak" görünüp menüyü kullanılmaz hâle getiriyordu.
+            loads = loads.Where(l =>
+                l.LoadNumber == null &&
+                (!_db.LoadContents.Any(c => c.LoadId == l.Id) ||
+                 !_db.LoadFinancialItems.Any(f => f.LoadId == l.Id)) &&
+                _db.LoadChargePeople.Any(p => p.LoadId == l.Id && p.UserId == (int)query.UserId));
+        }
 
         // Zaman aşımı filtresi: teklif aşamasındaki (2,3,4,5) ve yük numarası
         // oluşmamış kayıtlardan bir haftadır güncellenmemiş olanlar.
@@ -96,30 +167,50 @@ public sealed class LoadService : ILoadService
             loads = loads.Where(l => l.CreatedAt < to);
         }
 
+        if (query.CustomerId is { } customerId)
+            loads = loads.Where(l => l.CustomerId == customerId);
+        if (query.SenderId is { } senderId)
+            loads = loads.Where(l => l.SenderId == senderId);
+        if (query.ReceiverId is { } receiverId)
+            loads = loads.Where(l => l.ReceiverId == receiverId);
+        if (query.AgentId is { } agentId)
+            loads = loads.Where(l => l.AgentId == agentId);
+        if (query.WorkTypeId is { } workTypeId)
+            loads = loads.Where(l => l.WorkTypeId == workTypeId);
+        if (query.AssignedUserId is { } assignedUserId)
+        {
+            var chargedIds = _db.LoadChargePeople
+                .Where(p => p.UserId == assignedUserId)
+                .Select(p => (long)(p.LoadId ?? 0));
+
+            loads = loads.Where(l => chargedIds.Contains(l.Id));
+        }
+
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var pattern = $"%{query.Search}%";
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
 
             // olsold aramayı yük numarası / rezervasyon no / tarihler ve ilişkili
             // iş tipi, yükleme tipi, müşteri/gönderici/alıcı/acente adları ile
             // onların ülke adları üzerinde yapıyordu.
             var matchingAccountIds = _db.Accounts
-                .Where(a => EF.Functions.ILike(a.Name!, pattern) ||
+                .Where(a => EF.Functions.Like(a.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
                             _db.Countries.Any(c => c.Id == a.CountryId &&
-                                                   EF.Functions.ILike(c.Name!, pattern)))
+                                                   EF.Functions.Like(c.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)))
                 .Select(a => a.Id);
 
             var matchingWorkTypeIds = _db.WorkTypes
-                .Where(w => EF.Functions.ILike(w.Name, pattern))
+                .Where(w => EF.Functions.Like(w.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
                 .Select(w => w.Id);
 
             var matchingLoadingTypeIds = _db.LoadingTypes
-                .Where(t => EF.Functions.ILike(t.Name!, pattern))
+                .Where(t => EF.Functions.Like(t.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
                 .Select(t => t.Id);
 
             loads = loads.Where(l =>
-                EF.Functions.ILike(l.LoadNumber!, pattern) ||
-                EF.Functions.ILike(l.ReservationNumber!, pattern) ||
+                EF.Functions.Like(l.LoadNumber!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(l.ReservationNumber!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
                 (l.WorkTypeId != null && matchingWorkTypeIds.Contains(l.WorkTypeId.Value)) ||
                 (l.LoadingTypeId != null && matchingLoadingTypeIds.Contains(l.LoadingTypeId.Value)) ||
                 (l.CustomerId != null && matchingAccountIds.Contains(l.CustomerId.Value)) ||
@@ -137,9 +228,11 @@ public sealed class LoadService : ILoadService
                 ReservationNumber = l.ReservationNumber,
                 LoadNumber = l.LoadNumber,
                 OfferDate = l.OfferDate,
+                ApprovalDate = l.ApprovalDate,
                 OfferValidityDate = l.OfferValidityDate,
                 MarketingNotificationDate = l.MarketingNotificationDate,
                 Description = l.Description,
+                RejectionReason = l.RejectionReason,
                 PayerCompany = l.PayerCompany,
                 FrontTransportationByUs = l.FrontTransportationByUs,
                 FinalTransportationByUs = l.FinalTransportationByUs,
@@ -207,15 +300,22 @@ public sealed class LoadService : ILoadService
         if (l is null)
             return null;
 
+        // Detay da filtrelenir — liste gizlese bile id ile doğrudan istenebilirdi.
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+        if (!visibility.Allows(l.SiberCompanyId))
+            return null;
+
         return new LoadDetailDto
         {
             Id = l.Id,
             ReservationNumber = l.ReservationNumber,
             LoadNumber = l.LoadNumber,
             OfferDate = l.OfferDate,
+            ApprovalDate = l.ApprovalDate,
             OfferValidityDate = l.OfferValidityDate,
             MarketingNotificationDate = l.MarketingNotificationDate,
             Description = l.Description,
+            RejectionReason = l.RejectionReason,
             PayerCompany = l.PayerCompany,
             FrontTransportationByUs = l.FrontTransportationByUs,
             FinalTransportationByUs = l.FinalTransportationByUs,
@@ -225,6 +325,19 @@ public sealed class LoadService : ILoadService
             MailId = l.MailId,
             CreatedAt = l.CreatedAt,
             UpdatedAt = l.UpdatedAt,
+
+            // Teklifin Siber kimliği rezervasyonid; arşiv bağı bunun üzerinden.
+            SiberArchive = (await _archive.ListByModuleAsync(l.SiberId ?? string.Empty, cancellationToken))
+                .Select(a => new LoadArchiveDto
+                {
+                    Id = a.ArsivId,
+                    Name = a.Ad,
+                    CreatedAt = a.KayitGirisTarih,
+                    CreatedBy = a.KayitGiren,
+                    PersonalData = a.KisiselVeri,
+                    RestrictedGroups = string.IsNullOrWhiteSpace(a.YetkiliGruplar) ? null : a.YetkiliGruplar,
+                })
+                .ToList(),
 
             WorkTypeId = await NamedAsync(_db.WorkTypes.Where(w => w.Id == l.WorkTypeId)
                 .Select(w => new NamedRefDto { Id = w.Id, Name = w.Name, Code = w.Code, SiberId = w.SiberId }), cancellationToken),
@@ -296,7 +409,10 @@ public sealed class LoadService : ILoadService
                 {
                     Id = f.Id, LoadId = f.LoadId, NetPrice = f.NetPrice, TaxPrice = f.TaxPrice,
                     TotalPrice = f.TotalPrice, Quantity = f.Quantity, Description = f.Description,
-                    Buysell = f.Buysell, Status = f.Status, Order = f.Order, Item = f.Item,
+                    Buysell = f.Buysell, Status = f.Status, Order = f.Order,
+                    Item = _db.FinancialItems.Where(fi => fi.Id == f.Item)
+                        .Select(fi => new FinancialItemRefDto { Id = fi.Id, Name = fi.Name, Type = fi.Type ?? 0 })
+                        .FirstOrDefault(),
                     Currency = _db.Currencies.Where(c => c.Id == f.Currency)
                         .Select(c => new CurrencyDto { Id = c.Id, Name = c.Name, Code = c.Code })
                         .FirstOrDefault(),
@@ -350,6 +466,157 @@ public sealed class LoadService : ILoadService
     /// ilk 3'ü zaten silinmiş oluyordu. Burada önce tüm liste kontrol edilir,
     /// engel varsa hiçbiri silinmez.
     /// </summary>
+    /// <summary>
+    /// Silinmiş/geçersiz bir referans seçimini KAYIT ANINDA yakalar.
+    ///
+    /// Neden gerekli: açılır listeler sayfa açılışında bir kez yükleniyor. Bir
+    /// referans satırı (ör. Siber'de karşılığı olmayan bir departman) sonradan
+    /// kaldırılırsa, açık duran sekmedeki liste onu göstermeye devam ediyor;
+    /// kullanıcı seçip kaydedince veritabanına ARTIK OLMAYAN bir id yazılıyordu.
+    /// Sonuç, aktarım aşamasında ortaya çıkan ve yanıltıcı olan "Departman boş
+    /// olamaz" hatasıydı — oysa alan boş değil, GEÇERSİZDİ.
+    /// </summary>
+    public async Task<Dictionary<string, string[]>> ValidateReferencesAsync(
+        LoadReferenceIds ids, CancellationToken cancellationToken = default)
+    {
+        var errors = new Dictionary<string, string[]>();
+        const string gone = "Seçilen kayıt artık tanımlı değil — lütfen listeden yeniden seçin.";
+
+        async Task CheckAsync<TEntity>(
+            DbSet<TEntity> set, int? id, string field, Func<TEntity, long> key) where TEntity : class
+        {
+            if (id is not { } value) return;
+            var exists = (await set.AsNoTracking().ToListAsync(cancellationToken)).Any(e => key(e) == value);
+            if (!exists) errors[field] = [gone];
+        }
+
+        await CheckAsync(_db.Departments, ids.DepartmentId, "department_id", e => e.Id);
+        await CheckAsync(_db.PaymentTypes, ids.PaymentTypeId, "payment_type_id", e => e.Id);
+        await CheckAsync(_db.StatusTypes, ids.StatusTypeId, "status_type_id", e => e.Id);
+        await CheckAsync(_db.WorkTypes, ids.WorkTypeId, "work_type_id", e => e.Id);
+        await CheckAsync(_db.LoadingTypes, ids.LoadingTypeId, "loading_type_id", e => e.Id);
+        await CheckAsync(_db.LoadTransferTypes, ids.LoadTransferTypeId, "load_transfer_type_id", e => e.Id);
+        await CheckAsync(_db.Instructions, ids.InstructionId, "instruction_id", e => e.Id);
+        await CheckAsync(_db.RomorkTypes, ids.RomorkTypeId, "romork_type_id", e => e.Id);
+        await CheckAsync(_db.Accounts, ids.CustomerId, "customer_id", e => e.Id);
+        await CheckAsync(_db.Accounts, ids.SenderId, "sender_id", e => e.Id);
+        await CheckAsync(_db.Accounts, ids.ReceiverId, "receiver_id", e => e.Id);
+        await CheckAsync(_db.Accounts, ids.AgentId, "agent_id", e => e.Id);
+        await CheckAsync(_db.Accounts, ids.CompanyPayFreightId, "company_pay_freight_id", e => e.Id);
+
+        return errors;
+    }
+
+    /// <summary>
+    /// Teklif kopyalama.
+    ///
+    /// NE KOPYALANIR: müşteri/gönderici/alıcı, iş ve yükleme tipi, ülkeler,
+    /// departman, açıklama, yük içeriği ve mali kalemler — yani teklifi yeniden
+    /// yazmak yerine üzerinde oynanacak her şey.
+    ///
+    /// NE KOPYALANMAZ (ve NEDEN): kopya YENİ ve Siber'e hiç gitmemiş bir taslaktır.
+    ///   • siber_id / rezervasyon numarası / transfer_to_siber: bunlar Siber'in
+    ///     ürettiği kimliklerdir. Kopyalansaydı iki yerel teklif AYNI Siber
+    ///     kaydını gösterir, ikisinden biri kaydedildiğinde diğerinin verisi
+    ///     ezilirdi.
+    ///   • load_number: yük numarası tek bir yüke aittir; kopyalamak "bu teklifin
+    ///     yükü zaten oluşturulmuş" durumunu yanlışlıkla taşırdı.
+    ///   • durum, onay tarihi, red gerekçesi: kopya baştan "Teklif" durumunda
+    ///     başlar; Olumlu/Olumsuz kararı ve tarihi devredilmez.
+    ///   • görevliler: kayıt sırasında zaten türetiliyor
+    ///     (bkz. LoadWriteService.WriteChargePersonsAsync), kopyalamak anlamsız.
+    /// </summary>
+    public async Task<long?> DuplicateAsync(long id, CancellationToken cancellationToken = default)
+    {
+        var source = await _db.Loads.AsNoTracking()
+            .FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
+
+        if (source is null)
+            return null;
+
+        var now = _clock.Now;
+        var today = DateOnly.FromDateTime(now);
+
+        var copy = new Load
+        {
+            WorkTypeId = source.WorkTypeId,
+            LoadingTypeId = source.LoadingTypeId,
+            PaymentTypeId = source.PaymentTypeId,
+            LoadTransferTypeId = source.LoadTransferTypeId,
+            InstructionId = source.InstructionId,
+            RomorkTypeId = source.RomorkTypeId,
+            CustomerId = source.CustomerId,
+            SenderId = source.SenderId,
+            ReceiverId = source.ReceiverId,
+            AgentId = source.AgentId,
+            CompanyPayFreightId = source.CompanyPayFreightId,
+            PayerCompany = source.PayerCompany,
+            Description = source.Description,
+            DepartureCountryId = source.DepartureCountryId,
+            TransitCountryId = source.TransitCountryId,
+            TargetCountryId = source.TargetCountryId,
+            DepartmentId = source.DepartmentId,
+            FrontTransportationByUs = source.FrontTransportationByUs,
+            FinalTransportationByUs = source.FinalTransportationByUs,
+            WayOfWorking = source.WayOfWorking,
+
+            // Yeni taslak: tarihler bugünden başlar, geçerlilik +7 gün
+            // (yeni teklif formunun varsayılanıyla aynı).
+            StatusTypeId = OfferStatusTypeId,
+            OfferDate = today,
+            MarketingNotificationDate = today,
+            OfferValidityDate = today.AddDays(7),
+
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        _db.Loads.Add(copy);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        foreach (var content in await _db.LoadContents.AsNoTracking()
+                     .Where(c => c.LoadId == source.Id).ToListAsync(cancellationToken))
+        {
+            _db.LoadContents.Add(new LoadContent
+            {
+                LoadId = copy.Id,
+                ProductTypeId = content.ProductTypeId,
+                CaseTypeId = content.CaseTypeId,
+                Quantity = content.Quantity,
+                GrossWeight = content.GrossWeight,
+                NetWeight = content.NetWeight,
+                Volume = content.Volume,
+                Lademeter = content.Lademeter,
+                Width = content.Width,
+                Height = content.Height,
+                Length = content.Length,
+                Stackable = content.Stackable,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+
+        foreach (var item in await _db.LoadFinancialItems.AsNoTracking()
+                     .Where(f => f.LoadId == source.Id).ToListAsync(cancellationToken))
+        {
+            _db.LoadFinancialItems.Add(new LoadFinancialItem
+            {
+                LoadId = copy.Id,
+                Item = item.Item,
+                Buysell = item.Buysell,
+                Currency = item.Currency,
+                NetPrice = item.NetPrice,
+                TotalPrice = item.TotalPrice,
+                Quantity = item.Quantity,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return copy.Id;
+    }
+
     public async Task<LoadDeleteResult> DeleteAsync(
         IReadOnlyList<long> ids, CancellationToken cancellationToken = default)
     {
@@ -372,6 +639,20 @@ public sealed class LoadService : ILoadService
             _db.LoadMovements.RemoveRange(_db.LoadMovements.Where(m => m.LoadId == load.Id));
             _db.LoadChargePeople.RemoveRange(_db.LoadChargePeople.Where(p => p.LoadId == (int)load.Id));
             _db.Loads.Remove(load);
+        }
+
+        // SİBER'DEN DE SİL — ve ÖNCE Siber, sonra yerel.
+        //
+        // Eskiden yalnızca yerel siliniyordu: Siber'e aktarılmış (siber_id dolu) bir
+        // teklif silindiğinde periyodik senkron onu bir sonraki turda Siber'den geri
+        // getiriyordu, yani silme kalıcı olmuyordu. Sıra da önemli — canlıda
+        // doğrulandı: yerel önce silinip Siber adımı hata verirse kayıt yerelde
+        // gider, Siber'de kalır ve senkron yeni bir id'yle geri yazar
+        // (bkz. LoadTransferWriteService.DeleteAsync'teki aynı not).
+        if (_reservations.IsConfigured)
+        {
+            foreach (var siberId in loads.Select(l => l.SiberId).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct())
+                await _reservations.DeleteRezervasyonAsync(siberId!, cancellationToken);
         }
 
         await _db.SaveChangesAsync(cancellationToken);

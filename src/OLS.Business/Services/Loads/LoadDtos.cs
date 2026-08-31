@@ -17,9 +17,13 @@ public sealed class LoadListItemDto
     [JsonPropertyName("reservation_number")] public string? ReservationNumber { get; init; }
     [JsonPropertyName("load_number")] public string? LoadNumber { get; init; }
     [JsonPropertyName("offer_date")] public DateOnly? OfferDate { get; init; }
+    /// <summary>Olumlu'ya çekilme günü — sunucu damgalar, arayüz salt-okunur gösterir.</summary>
+    [JsonPropertyName("approval_date")] public DateOnly? ApprovalDate { get; init; }
     [JsonPropertyName("offer_validity_date")] public DateOnly? OfferValidityDate { get; init; }
     [JsonPropertyName("marketing_notification_date")] public DateOnly? MarketingNotificationDate { get; init; }
     [JsonPropertyName("description")] public string? Description { get; init; }
+    /// <summary>Teklif Olumsuz ise gerekcesi — bkz. Load.RejectionReason.</summary>
+    [JsonPropertyName("rejection_reason")] public string? RejectionReason { get; init; }
     [JsonPropertyName("payer_company")] public string? PayerCompany { get; init; }
     [JsonPropertyName("front_transportation_by_us")] public int FrontTransportationByUs { get; init; }
     [JsonPropertyName("final_transportation_by_us")] public int FinalTransportationByUs { get; init; }
@@ -52,21 +56,41 @@ public sealed class LoadListItemDto
 }
 
 /// <summary>single() yanıtı: liste alanları + tüm alt kayıtlar ve ek ilişkiler.</summary>
+public sealed class LoadArchiveDto
+{
+    [JsonPropertyName("id")] public string Id { get; init; } = string.Empty;
+    [JsonPropertyName("name")] public string? Name { get; init; }
+    [JsonPropertyName("created_at")] public DateTime? CreatedAt { get; init; }
+    [JsonPropertyName("created_by")] public string? CreatedBy { get; init; }
+    [JsonPropertyName("personal_data")] public bool PersonalData { get; init; }
+    [JsonPropertyName("restricted_groups")] public string? RestrictedGroups { get; init; }
+}
+
 public sealed class LoadDetailDto
 {
     [JsonPropertyName("id")] public long Id { get; init; }
     [JsonPropertyName("reservation_number")] public string? ReservationNumber { get; init; }
     [JsonPropertyName("load_number")] public string? LoadNumber { get; init; }
     [JsonPropertyName("offer_date")] public DateOnly? OfferDate { get; init; }
+    /// <summary>Olumlu'ya çekilme günü — sunucu damgalar, arayüz salt-okunur gösterir.</summary>
+    [JsonPropertyName("approval_date")] public DateOnly? ApprovalDate { get; init; }
     [JsonPropertyName("offer_validity_date")] public DateOnly? OfferValidityDate { get; init; }
     [JsonPropertyName("marketing_notification_date")] public DateOnly? MarketingNotificationDate { get; init; }
     [JsonPropertyName("description")] public string? Description { get; init; }
+    /// <summary>Teklif Olumsuz ise gerekcesi — bkz. Load.RejectionReason.</summary>
+    [JsonPropertyName("rejection_reason")] public string? RejectionReason { get; init; }
     [JsonPropertyName("payer_company")] public string? PayerCompany { get; init; }
     [JsonPropertyName("front_transportation_by_us")] public int FrontTransportationByUs { get; init; }
     [JsonPropertyName("final_transportation_by_us")] public int FinalTransportationByUs { get; init; }
     [JsonPropertyName("way_of_working")] public int WayOfWorking { get; init; }
     [JsonPropertyName("transfer_to_siber")] public int TransferToSiber { get; init; }
     [JsonPropertyName("siber_id")] public string? SiberId { get; init; }
+
+    /// <summary>
+    /// Teklifin Siber arşivindeki evrakları (sbr_arsiv.modulid = rezervasyonid).
+    /// Yük ve seferdeki karşılıklarıyla aynı yapı.
+    /// </summary>
+    [JsonPropertyName("siber_archive")] public IReadOnlyList<LoadArchiveDto> SiberArchive { get; init; } = [];
     [JsonPropertyName("mail_id")] public string? MailId { get; init; }
     [JsonPropertyName("created_at")] public DateTime? CreatedAt { get; init; }
     [JsonPropertyName("updated_at")] public DateTime? UpdatedAt { get; init; }
@@ -121,6 +145,18 @@ public sealed class NamedRefDto
     [JsonPropertyName("name")] public string? Name { get; init; }
     [JsonPropertyName("code")] public string? Code { get; init; }
     [JsonPropertyName("siber_id")] public string? SiberId { get; init; }
+}
+
+/// <summary>
+/// financial_items referansı — NamedRefDto'ya ek olarak Type taşır (bit maskesi:
+/// 1=Alış/Gider, 2=Satış/Gelir, 3=ikisi de). Frontend Kalem seçildiğinde Alış/Satış
+/// alanını buradan otomatik belirliyor (bkz. FinancialItemPicker.tsx).
+/// </summary>
+public sealed class FinancialItemRefDto
+{
+    [JsonPropertyName("id")] public long Id { get; init; }
+    [JsonPropertyName("name")] public string? Name { get; init; }
+    [JsonPropertyName("type")] public int Type { get; init; }
 }
 
 /// <summary>
@@ -181,7 +217,7 @@ public sealed class LoadFinancialItemDto
     [JsonPropertyName("buysell")] public int? Buysell { get; init; }
     [JsonPropertyName("status")] public int? Status { get; init; }
     [JsonPropertyName("order")] public int? Order { get; init; }
-    [JsonPropertyName("item")] public int? Item { get; init; }
+    [JsonPropertyName("item")] public FinancialItemRefDto? Item { get; init; }
 
     /// <summary>currency sütunu currencies tablosuna FK; ilişki adı da "currency".</summary>
     [JsonPropertyName("currency")] public CurrencyDto? Currency { get; init; }

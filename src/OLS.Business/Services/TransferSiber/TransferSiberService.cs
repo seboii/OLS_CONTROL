@@ -38,6 +38,10 @@ public sealed record TransferSiberResult(
 
 public sealed class TransferSiberService : ITransferSiberService
 {
+    /// <summary>load_charge_people.user_type sözleşmesi (bkz. LoadChargePerson).</summary>
+    private const int OperationOfficerType = 1;
+    private const int SalesRepType = 2;
+
     private readonly OlsDbContext _db;
     private readonly ISiberReservationRepository _siber;
     private readonly IClock _clock;
@@ -72,6 +76,12 @@ public sealed class TransferSiberService : ITransferSiberService
         if (ValidateRequired(load, refs, hasContents, hasFinancialItems) is { } missing)
             return TransferSiberResult.Fail(missing);
 
+        if (await ValidateSiberReferencesAsync(load, refs, cancellationToken) is { } invalidRef)
+            return TransferSiberResult.Fail(invalidRef);
+
+        if (await ValidateFinancialItemsExistInSiberAsync(load, cancellationToken) is { } invalidItem)
+            return TransferSiberResult.Fail(invalidItem);
+
         var now = _clock.Now;
         var isUpdate = load.TransferToSiber == 1 && load.SiberId is not null;
 
@@ -79,11 +89,15 @@ public sealed class TransferSiberService : ITransferSiberService
             ? load.SiberId!
             : (await _siber.GenerateRezervasyonIdAsync(cancellationToken)).ToString();
 
+        // Güncellemede numara zaten var (değişmez); yeni aktarımda numara, INSERT ile
+        // AYNI transaction+kilit altında InsertRezervasyonWithLockedNumberAsync
+        // tarafından üretilir — burada yalnızca yer tutucu (0) geçilir. Bkz. metodun
+        // XML açıklaması (Siber Entegrasyon Raporu risk #3).
         var rezervasyonNo = isUpdate
             ? load.ReservationNumber is not null && int.TryParse(load.ReservationNumber, out var existing)
                 ? existing
                 : 0
-            : await _siber.NextRezervasyonNoAsync(cancellationToken);
+            : 0;
 
         var reservation = new SiberRezervasyonYaz
         {
@@ -113,23 +127,48 @@ public sealed class TransferSiberService : ITransferSiberService
             YuklemeUlkeId = load.DepartureCountryId?.ToString(),
             BosaltmaUlkeId = load.TargetCountryId?.ToString(),
             CalismaSekli = load.WayOfWorking,
+            // Olumlu'ya çekilme tarihi — yerelde loads.approval_date olarak
+            // damgalanır (bkz. LoadWriteService.ResolveApprovalDate), Siber'de
+            // onaytarih sütununa karşılık gelir.
+            OnayTarih = ToDateTime(load.ApprovalDate),
             InsTime = now,
             InsUser = refs.InsUserSiberCode,
         };
 
-        if (isUpdate)
-            await _siber.UpdateRezervasyonAsync(reservation, cancellationToken);
-        else
-            await _siber.InsertRezervasyonAsync(reservation, cancellationToken);
+        // PostgreSQL↔Siber arası gerçek dağıtık transaction (2PC) yok — iki farklı
+        // veritabanı motoru arasında pratikte kurulamaz. Bunun yerine YEREL taraf tek
+        // bir transaction'a alınır ve yalnızca TÜM Siber yazmaları bittikten SONRA
+        // commit edilir: herhangi bir adım (Siber çağrısı veya son SaveChanges) hata
+        // verirse yerel taraf TAMAMEN geri alınır. Sonuç: Siber'de en kötü ihtimalle
+        // yetim (hiçbir yerel kayda bağlı olmayan) satırlar kalabilir — zararsız,
+        // sonraki deneme yeni kimliklerle temiz başlar — ama yerel taraf ASLA var
+        // olmayan/eksik bir Siber kaydına işaret eden tutarsız bir duruma düşmez
+        // (önceki hâlde art arda birden fazla SaveChangesAsync çağrısı arada Siber
+        // I/O'su hata verirse bu garantiyi vermiyordu).
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            if (isUpdate)
+                await _siber.UpdateRezervasyonAsync(reservation, cancellationToken);
+            else
+                rezervasyonNo = await _siber.InsertRezervasyonWithLockedNumberAsync(reservation, cancellationToken);
 
-        await TransferContentsAsync(load, rezervasyonId, cancellationToken);
-        await TransferFinancialItemsAsync(load, rezervasyonId, now, cancellationToken);
+            await TransferContentsAsync(load, rezervasyonId, cancellationToken);
+            await TransferFinancialItemsAsync(load, rezervasyonId, now, cancellationToken);
 
-        load.TransferToSiber = 1;
-        load.SiberId = rezervasyonId;
-        load.ReservationNumber = rezervasyonNo.ToString();
-        load.UpdatedAt = now;
-        await _db.SaveChangesAsync(cancellationToken);
+            load.TransferToSiber = 1;
+            load.SiberId = rezervasyonId;
+            load.ReservationNumber = rezervasyonNo.ToString();
+            load.UpdatedAt = now;
+            await _db.SaveChangesAsync(cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         return TransferSiberResult.Ok(rezervasyonId, rezervasyonNo);
     }
@@ -188,8 +227,8 @@ public sealed class TransferSiberService : ITransferSiberService
 
             content.SiberId = koliId;
         }
-
-        await _db.SaveChangesAsync(cancellationToken);
+        // SaveChanges burada YAPILMAZ — TransferOfferAsync'in tek, dış transaction'lı
+        // final SaveChangesAsync'i tüm bu satırların siber_id damgalarını da kapsar.
     }
 
     /// <summary>Finansal kalemler → skn_rezervasyontarife.</summary>
@@ -232,11 +271,15 @@ public sealed class TransferSiberService : ITransferSiberService
                 RezervasyonId = rezervasyonId,
                 Tarih = now,
                 Miktar = item.Quantity ?? 0,
-                AlisDovizKod = currencyCode,
-                AlisBirimTutar = item.NetPrice ?? 0,
-                AlisToplamTutar = item.TotalPrice ?? 0,
+                // Yön: kalemin alış mı satış mı olduğu Siber'de HANGİ sütun grubunun
+                // dolacağını belirler (bkz. SiberRezervasyonTarife.Buysell). Yön boşsa
+                // olsold'daki varsayılan davranışa (alış) düşülür.
+                Buysell = item.Buysell ?? 1,
+                DovizKod = currencyCode,
+                BirimTutar = item.NetPrice ?? 0,
+                ToplamTutar = item.TotalPrice ?? 0,
                 KalemId = itemSiberId,
-                AlisFirmaId = accountSiberId,
+                FirmaId = accountSiberId,
                 TasimaSekli = transportCode,
             };
 
@@ -247,8 +290,7 @@ public sealed class TransferSiberService : ITransferSiberService
 
             item.SiberId = tarifeId;
         }
-
-        await _db.SaveChangesAsync(cancellationToken);
+        // SaveChanges burada YAPILMAZ — bkz. TransferContentsAsync'deki aynı not.
     }
 
     private sealed record OfferRefs(
@@ -267,12 +309,20 @@ public sealed class TransferSiberService : ITransferSiberService
     private async Task<OfferRefs> LoadReferencesAsync(
         DataAccess.Entities.Load load, long currentUserId, CancellationToken cancellationToken)
     {
+        // GÖREVLİ TİPİNE GÖRE eşleşir. Eskiden sıraya (ElementAt 0/1) güveniliyordu:
+        // yazma tarafı Operasyon'u ilk eklediği sürece çalışıyordu, ama satır sırası
+        // bir kez değişse (senkron, elle düzeltme, çoklu satış temsilcisi) iki alan
+        // sessizce yer değiştirirdi. user_type sözleşmesi açık: 1 = Operasyon
+        // Yetkilisi → musteritemsilcisi, 2 = Satış Temsilcisi → satistemsilcisikod.
         var chargePeople = await _db.LoadChargePeople.AsNoTracking()
             .Where(p => p.LoadId == (int)load.Id)
             .OrderBy(p => p.Id)
             .Join(_db.Users, p => p.UserId, u => (int)u.Id,
-                (p, u) => new { u.SiberName, u.SiberCode })
+                (p, u) => new { p.UserType, u.SiberName, u.SiberCode })
             .ToListAsync(cancellationToken);
+
+        var operationOfficer = chargePeople.FirstOrDefault(p => p.UserType == OperationOfficerType);
+        var salesRep = chargePeople.FirstOrDefault(p => p.UserType == SalesRepType);
 
         var insUserSiberCode = await _db.Users.AsNoTracking()
             .Where(u => u.Id == currentUserId)
@@ -292,10 +342,14 @@ public sealed class TransferSiberService : ITransferSiberService
             await CodeAsync(_db.Accounts.Where(a => a.Id == load.ReceiverId).Select(a => a.SiberId), cancellationToken),
             await CodeAsync(_db.StatusTypes.Where(s => s.Id == load.StatusTypeId).Select(s => s.SiberId), cancellationToken),
             await CodeAsync(_db.Departments.Where(d => d.Id == load.DepartmentId).Select(d => d.SiberId), cancellationToken),
-            chargePeople.ElementAtOrDefault(0)?.SiberName,
-            chargePeople.ElementAtOrDefault(0)?.SiberCode,
-            chargePeople.ElementAtOrDefault(1)?.SiberCode,
-            insUserSiberCode);
+            operationOfficer?.SiberName,
+            operationOfficer?.SiberCode,
+            salesRep?.SiberCode,
+            // insuser: işlemi yapan kullanıcı. Onun Siber karşılığı yoksa (sistem
+            // hesabı) alan boş kalmasın diye operasyon yetkilisinin koduna düşülür —
+            // Siber'in kendi kayıtlarında insuser 19023/19024 satırda dolu, boş
+            // bırakmak kaydı oradaki alışılmış hâlden ayırırdı.
+            insUserSiberCode ?? operationOfficer?.SiberCode);
     }
 
     private static async Task<string?> CodeAsync(
@@ -312,6 +366,86 @@ public sealed class TransferSiberService : ITransferSiberService
     /// kaynakta da fiilen hiç tetiklenmiyor (0, null/''e eşit değil) — burada da
     /// aynı şekilde atlanır (davranış birebir, ölü kod tekrar edilmedi).
     /// </summary>
+    /// <summary>
+    /// Siber'e gönderilecek TÜM yabancı anahtarları yazmadan önce doğrular.
+    ///
+    /// KÖK ÇÖZÜM: Yerel referans tabloları (departman, cari, ödeme şekli...) Siber'de
+    /// karşılığı olmayan değerler taşıyabiliyor — DbSeeder'dan kalan tohum kayıtları
+    /// ya da Siber'de sonradan silinmiş satırlar. Böyle bir değer gönderildiğinde
+    /// Siber'in FK kısıtı INSERT'i reddediyor ve bu, kullanıcıya "beklenmeyen hata"
+    /// olarak yansıyan işlenmemiş bir 500'e dönüşüyordu. Hata her seferinde farklı
+    /// bir kolonda çıktığı için tek tek keşfediliyordu (departmanid, kalemid, ...).
+    ///
+    /// Kontrol edilen kolonlar, Siber'in skn_rezervasyon üzerindeki GERÇEK FK
+    /// kısıtlarından alındı (sys.foreign_keys ile çıkarıldı): departmanid ve
+    /// musteriid. Diğerleri (gönderici/alıcı/navlun firma) bu tabloda FK ile
+    /// bağlı değil, ama yük aşamasında bağlı olduğu için onlar da kontrol edilir —
+    /// hatayı bir adım önce ve anlaşılır biçimde yakalamak için.
+    /// </summary>
+    private async Task<string?> ValidateSiberReferencesAsync(
+        DataAccess.Entities.Load load, OfferRefs refs, CancellationToken cancellationToken)
+    {
+        (string Label, string? Value, string Table, string Column)[] checks =
+        [
+            ("Departman", refs.DepartmentSiberId, "sbr_departman", "departmanid"),
+            ("Müşteri", refs.CustomerSiberId, "sbr_firma", "firmaid"),
+            ("Gönderici", refs.SenderSiberId, "sbr_firma", "firmaid"),
+            ("Alıcı", refs.ReceiverSiberId, "sbr_firma", "firmaid"),
+            ("Navlun Ödeyecek Firma", refs.CompanyPayFreightSiberId, "sbr_firma", "firmaid"),
+        ];
+
+        foreach (var (label, value, table, column) in checks)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                continue;
+
+            if (!await _siber.ReferenceExistsAsync(table, column, value, cancellationToken))
+                return $"\"{label}\" alanındaki kayıt Siber'de bulunamadı — " +
+                       "lütfen bu alanı Siber'de tanımlı bir değerle yeniden seçin.";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Teklifin mali kalemlerinin Siber'de GERÇEKTEN var olduğunu doğrular.
+    ///
+    /// BULUNAN GERÇEK HATA: yerel <c>financial_items</c> tablosunda DbSeeder'dan
+    /// gelen üç kayıt var (Navlun / Gümrükleme / Sigorta) ve bunların siber_id'si
+    /// GUID BİÇİMİNDE ama sahte ("bbbb0000-0000-0000-0000-00000000000X") — Siber'in
+    /// <c>skn_kalem</c> tablosunda karşılıkları yok. Böyle bir kalem seçilip
+    /// "Siber'e Aktar" denince INSERT, FK_skn_rezervasyontarife_skn_kalem kısıtına
+    /// takılıyor ve kullanıcıya "beklenmeyen hata" olarak yansıyan işlenmemiş bir
+    /// istisnaya dönüşüyordu. Artık önden kontrol edilip HANGİ kalemin geçersiz
+    /// olduğunu söyleyen anlaşılır bir mesaj dönüyor.
+    /// </summary>
+    private async Task<string?> ValidateFinancialItemsExistInSiberAsync(
+        DataAccess.Entities.Load load, CancellationToken cancellationToken)
+    {
+        var itemIds = await _db.LoadFinancialItems
+            .Where(f => f.LoadId == load.Id && f.Item != null)
+            .Select(f => f.Item!.Value).Distinct().ToListAsync(cancellationToken);
+
+        foreach (var itemId in itemIds)
+        {
+            var item = await _db.FinancialItems.AsNoTracking()
+                .Where(f => f.Id == itemId)
+                .Select(f => new { f.Name, f.SiberId }).FirstOrDefaultAsync(cancellationToken);
+
+            if (item is null)
+                continue;
+
+            if (string.IsNullOrWhiteSpace(item.SiberId) ||
+                !await _siber.KalemExistsAsync(item.SiberId, cancellationToken))
+            {
+                return $"\"{item.Name}\" mali kalemi Siber'de tanımlı değil — " +
+                       "Finans sekmesinden Siber'de var olan bir kalem seçin.";
+            }
+        }
+
+        return null;
+    }
+
     private static string? ValidateRequired(
         DataAccess.Entities.Load load, OfferRefs r, bool hasContents, bool hasFinancialItems)
     {
