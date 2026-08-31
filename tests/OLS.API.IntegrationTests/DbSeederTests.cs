@@ -80,6 +80,10 @@ public sealed class DbSeederTests
         var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var environment = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<OlsApiFactory>>();
+        var defaultPassword = scope.ServiceProvider
+            .GetRequiredService<OLS.Business.Services.Authentication.IDefaultUserPassword>();
+        var roleService = scope.ServiceProvider
+            .GetRequiredService<OLS.Business.Services.Roles.IRoleService>();
 
         async Task<int> AcenteAccountCountAsync()
         {
@@ -93,13 +97,56 @@ public sealed class DbSeederTests
                 .CountAsync();
         }
 
-        await OLS.Business.Seed.DbSeeder.SeedAsync(db, hasher, configuration, environment, logger);
+        await OLS.Business.Seed.DbSeeder.SeedAsync(db, hasher, defaultPassword, roleService, configuration, environment, logger);
         var countAfterFirstSeed = await AcenteAccountCountAsync();
 
-        await OLS.Business.Seed.DbSeeder.SeedAsync(db, hasher, configuration, environment, logger);
+        await OLS.Business.Seed.DbSeeder.SeedAsync(db, hasher, defaultPassword, roleService, configuration, environment, logger);
         var countAfterSecondSeed = await AcenteAccountCountAsync();
 
         countAfterSecondSeed.Should().Be(countAfterFirstSeed,
             "ikinci seed çağrısı ek bir Acente hesabı üretmemeli — DIĞER testlerin kendi hesapları etkilenmeden");
+    }
+
+    [Fact]
+    public async Task Seed_SifresizKullaniciyaVarsayilanSifreAtar_MevcutSifreyiEzmez()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OLS.DataAccess.Context.OlsDbContext>();
+        var hasher = scope.ServiceProvider.GetRequiredService<OLS.Business.Services.Authentication.IPasswordHasher>();
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var environment = scope.ServiceProvider.GetRequiredService<IHostEnvironment>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<OlsApiFactory>>();
+        var defaultPassword = scope.ServiceProvider
+            .GetRequiredService<OLS.Business.Services.Authentication.IDefaultUserPassword>();
+        var roleService = scope.ServiceProvider
+            .GetRequiredService<OLS.Business.Services.Roles.IRoleService>();
+
+        // Siber içe aktarımının ürettiği hâl: şifresiz kullanıcı.
+        var sifresiz = new OLS.DataAccess.Entities.User
+        {
+            Name = "Sifresiz", Surname = "Kullanici",
+            Email = $"sifresiz-{Guid.NewGuid():N}@ols.local", Status = true,
+        };
+        var mevcutHash = hasher.Hash("KendiSifresi!42");
+        var sifreli = new OLS.DataAccess.Entities.User
+        {
+            Name = "Sifreli", Surname = "Kullanici",
+            Email = $"sifreli-{Guid.NewGuid():N}@ols.local", Status = true,
+            Password = mevcutHash,
+        };
+        db.Users.AddRange(sifresiz, sifreli);
+        await db.SaveChangesAsync();
+
+        await OLS.Business.Seed.DbSeeder.SeedAsync(
+            db, hasher, defaultPassword, roleService, configuration, environment, logger);
+
+        sifresiz.Password.Should().NotBeNullOrEmpty("şifresiz kullanıcı giriş yapabilmeli");
+        hasher.Verify(
+            OLS.Business.Services.Authentication.DefaultUserPassword.DevelopmentDefault,
+            sifresiz.Password!)
+            .Should().BeTrue("varsayılan şifre atanmalı");
+
+        sifreli.Password.Should().Be(mevcutHash,
+            "seed mevcut şifreleri ezmemeli — ResetAllPasswords kapalıyken");
     }
 }

@@ -151,4 +151,47 @@ public sealed class AccountFormTests
         (await detail.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("data").GetProperty("discount").GetInt32().Should().Be(0);
     }
+
+    /// <summary>
+    /// Görevli sekmesinde seçilen kişi, teklif formunun okuduğu
+    /// <c>account_representatives</c> tablosuna SATIŞ TEMSİLCİSİ (user_type = 2)
+    /// olarak yazılmalı.
+    ///
+    /// Gerçek hata buydu: yalnızca user_account_mappings (görünürlük) yazılıyordu,
+    /// temsilci satırı hiç açılmıyordu. Sonuç, "Satış Temsilcisi müşteriye bağlı
+    /// olsun" kuralının uygulamadan açılan carilerde hiç çalışmaması ve her
+    /// teklifte operasyon yetkilisine düşülmesiydi.
+    /// </summary>
+    [Fact]
+    public async Task CreateAccount_GorevliSecilince_SatisTemsilcisiKaydiAcilir()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var meResponse = await admin.GetAsync("/api/v1/auth");
+        meResponse.EnsureSuccessStatusCode();
+        var userId = (await meResponse.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        var name = $"Temsilcili Cari {Guid.NewGuid():N}";
+        using var form = await TestAccountHelper.MinimalAccountFormAsync(admin, name);
+        form.Add(new StringContent("1"), "account_type_mapping[]");
+        form.Add(new StringContent(userId.ToString()), "account_charge_person[]");
+
+        var response = await admin.PostAsync("/api/v1/account", form);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var accountId = (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        var reps = await admin.GetAsync($"/api/v1/account/{accountId}/representatives");
+        reps.EnsureSuccessStatusCode();
+
+        var salesReps = (await reps.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("sales_reps").EnumerateArray()
+            .Select(r => r.GetProperty("id").GetInt64())
+            .ToArray();
+
+        salesReps.Should().Contain(userId,
+            "Görevli sekmesindeki kişi teklif formunda satış temsilcisi olarak görünmeli");
+    }
 }

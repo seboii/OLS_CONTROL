@@ -67,11 +67,13 @@ public sealed class LoadTransferTests
         var accountId = (await accountResponse.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("data").GetProperty("id").GetInt64();
 
+        // total_gross_weight/total_volume/total_lademeter artık istekten kabul
+        // edilmiyor — LoadTransferController.php satır 874-894'teki gibi paket
+        // satırlarından sunucu tarafında yeniden hesaplanıyor (bkz.
+        // LoadTransferUpdateService.RecomputeTotalsFromPackagesAsync).
         var updateResponse = await admin.PostAsJsonAsync($"/api/v1/load_transfer/{id}", new
         {
             customer_id = accountId,
-            total_gross_weight = 340.25m,
-            total_volume = 12.5m,
             packages = new[]
             {
                 new { quantity = 4, gross_weight = 85.0m, stackable = 1 },
@@ -84,7 +86,7 @@ public sealed class LoadTransferTests
         var detail = (await detailResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
 
         detail.GetProperty("customer_id").GetProperty("id").GetInt64().Should().Be(accountId);
-        detail.GetProperty("total_gross_weight").GetDecimal().Should().Be(340.25m);
+        detail.GetProperty("total_gross_weight").GetDecimal().Should().Be(85.0m);
 
         var packages = detail.GetProperty("load_transfer_package");
         packages.GetArrayLength().Should().Be(1);
@@ -274,5 +276,68 @@ public sealed class LoadTransferTests
         var afterDelete = (await (await admin.GetAsync($"/api/v1/load_transfer/{id}"))
             .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("load_transfer_package");
         afterDelete.GetArrayLength().Should().Be(0);
+    }
+
+    /// <summary>
+    /// Yük silinince FİNANS KALEMLERİ de silinmeli.
+    ///
+    /// Gerçek hata buydu: kalemler yüke insert_name = yük numarası metin
+    /// eşleşmesiyle bağlı ve silmede temizlenmiyordu. Yük numarası MAX(yukno)+1
+    /// ile üretildiği için silinen numara BİR SONRAKİ yüke yeniden veriliyor ve
+    /// yeni yük, ölü yükün kalemlerini miras alıyordu — kullanıcı hiç girmediği
+    /// "GÜMRÜKLEME GELİRİ" satırlarını görüyordu.
+    /// </summary>
+    [Fact]
+    public async Task DeleteLoadTransfer_FinansKalemleriniDeSiler()
+    {
+        var id = await SeedLoadTransferAsync();
+
+        string loadNumberWorkType;
+        string siberYukId;
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+            var transfer = await db.LoadTransfers.FindAsync(id);
+            loadNumberWorkType = transfer!.LoadNumberWorkType!;
+            siberYukId = transfer.LoadTransferId!;
+
+            db.LoadTransferInvoiceItems.Add(new LoadTransferInvoiceItem
+            {
+                InsertName = loadNumberWorkType,
+                Buysell = "1",
+                TotalPrice = 500m,
+                Status = "pending",
+                CreatedAt = DateTime.Now,
+                UpdatedAt = DateTime.Now,
+            });
+            db.LoadTransferPackages.Add(new LoadTransferPackage
+            {
+                LoadTransferId = transfer.LoadTransferId,
+                Quantity = 3,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var admin = await _factory.CreateAdminClientAsync();
+        var response = await admin.SendAsync(new HttpRequestMessage(
+            HttpMethod.Delete, "/api/v1/load_transfer")
+        {
+            Content = JsonContent.Create(new { deletion_id = new[] { id } }),
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+
+            db.LoadTransferInvoiceItems.Count(i => i.InsertName == loadNumberWorkType)
+                .Should().Be(0, "yük silinince finans kalemleri de gitmeli — aksi hâlde " +
+                                "yeniden kullanılan yük numarası ölü kalemleri miras alır");
+
+            db.LoadTransferPackages.Count(p => p.LoadTransferId == siberYukId)
+                .Should().Be(0, "koliler de yükle birlikte silinmeli");
+        }
     }
 }

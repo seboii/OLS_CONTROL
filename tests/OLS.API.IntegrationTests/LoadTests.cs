@@ -62,7 +62,11 @@ public sealed class LoadTests
             { new StringContent("1"), "load_financial_item[0][item]" },
             { new StringContent("1"), "load_financial_item[0][quantity]" },
             { new StringContent("1"), "load_financial_item[0][buysell]" },
+            { new StringContent("1"), "load_financial_item[0][transport_type_id]" },
+            { new StringContent("1"), "load_financial_item[0][order]" },
             { new StringContent("1.250,75"), "load_financial_item[0][net_price]" },
+            { new StringContent("1.250,75"), "load_financial_item[0][total_price]" },
+            { new StringContent("1"), "load_financial_item[0][currency]" },
             { new StringContent("Navlun bedeli"), "load_financial_item[0][description]" },
         };
 
@@ -101,13 +105,18 @@ public sealed class LoadTests
         // form-binding'ini farklı davranışa sokuyor (doğrudan doğrulandı) — bu yüzden
         // en az bir alan (zorunlu olmayan) gönderiliyor, gerçek bir "eksik form
         // gönderimi" senaryosunu yansıtıyor.
+        //
+        // load_content ARTIK zorunlu değil (taslak mantığı — bkz. LoadController.
+        // Validate XML açıklaması): boş içerikle de teklif kaydedilebilmeli, tam
+        // doğrulama Sibere Aktar adımında yapılıyor. Bu yüzden yalnızca gerçekten
+        // koşulsuz zorunlu kalan alanlar (customer_id) kontrol ediliyor.
         using var form = new MultipartFormDataContent { { new StringContent("test"), "description" } };
         var response = await admin.PostAsync("/api/v1/load", form);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         body.GetProperty("errors").GetProperty("customer_id").GetArrayLength().Should().BeGreaterThan(0);
-        body.GetProperty("errors").GetProperty("load_content").GetArrayLength().Should().BeGreaterThan(0);
+        body.GetProperty("errors").GetProperty("work_type_id").GetArrayLength().Should().BeGreaterThan(0);
     }
 
     /// <summary>
@@ -141,12 +150,22 @@ public sealed class LoadTests
     }
 
     /// <summary>
-    /// olsold <c>LoadSave</c>: <c>status_type_id == 5</c> ("Olumlu") ise güzergah/taraf/
-    /// römork/çalışma-şekli/talimat VE mali kalem bloğu zorunlu olur — hedefte bu koşullu
-    /// blok hiç uygulanmıyordu.
+    /// "Olumlu" teklif, Siber'e aktarılıp Yük'e dönüşecek tekliftir; bu yüzden
+    /// dönüşümün ihtiyaç duyduğu alanlar Kaydet aşamasında zorunludur. Liste,
+    /// Siber'in kendi rezervasyon ekranında KIRMIZI işaretli alanlardan alındı
+    /// (kullanıcının paylaştığı ekran görüntüleri).
+    ///
+    /// Bir ara sürümde bu blok taslak mantığı için kaldırılmıştı; kullanıcı isteğiyle
+    /// geri getirildi. "Henüz tamamlamadım" durumu artık KAYDETMEDEN, tarayıcıdaki
+    /// otomatik taslakla karşılanıyor (bkz. frontend lib/autodraft.ts) — yani eksik
+    /// bilgiyi "Olumlu" olarak veritabanına yazmaya gerek kalmadı.
+    ///
+    /// Acente ve Navlun Ödeyecek Firma Siber'de kırmızı OLMASINA rağmen bilinçli
+    /// olarak zorunlu DEĞİL: gerçek veride Olumlu tekliflerin yalnızca %0,3'ünde ve
+    /// %35'inde dolular, zorunlu tutmak mevcut iş akışını kilitlerdi.
     /// </summary>
     [Fact]
-    public async Task CreateLoad_WithPositiveStatusAndMissingConditionalFields_ReturnsAllConditionalErrors()
+    public async Task CreateLoad_WithPositiveStatusAndMissingConditionalFields_ReturnsFieldErrors()
     {
         using var admin = await _factory.CreateAdminClientAsync();
         var accountId = await CreateTestAccountAsync(admin, "Olumlu Durum Testi");
@@ -154,14 +173,20 @@ public sealed class LoadTests
         using var form = RequiredFieldsFormWithStatus(accountId, "5");
         var response = await admin.PostAsync("/api/v1/load", form);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            await response.Content.ReadAsStringAsync());
+
         var errors = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("errors");
         foreach (var field in new[]
         {
-            "departure_country_id", "target_country_id", "sender_id", "receiver_id",
-            "romork_type_id", "load_transfer_type_id", "way_of_working", "instruction_id", "load_financial_item",
+            "sender_id", "receiver_id", "departure_country_id", "target_country_id",
+            "instruction_id", "romork_type_id", "load_transfer_type_id", "way_of_working",
         })
-            errors.TryGetProperty(field, out _).Should().BeTrue($"'{field}' status_type_id=5 iken zorunlu");
+            errors.TryGetProperty(field, out _).Should().BeTrue($"Olumlu teklifte '{field}' zorunlu");
+
+        // Siber'de kirmizi ama bilincli olarak zorunlu DEGIL.
+        errors.TryGetProperty("agent_id", out _).Should().BeFalse();
+        errors.TryGetProperty("company_pay_freight_id", out _).Should().BeFalse();
     }
 
     /// <summary>
@@ -428,5 +453,65 @@ public sealed class LoadTests
         var afterAttempt = (await (await admin.GetAsync($"/api/v1/load/{loadId}"))
             .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data").GetProperty("load_content");
         afterAttempt.GetArrayLength().Should().Be(1, "kilitli bir Yük'ün alt satırı silinmemeli");
+    }
+
+    /// <summary>
+    /// Kopyalanan teklif YENİ bir taslak olmalı: Siber kimlikleri, numaralar,
+    /// durum ve onay bilgisi devredilmemeli.
+    ///
+    /// Bu alanların kopyalanması somut hasar verirdi — iki yerel teklif aynı
+    /// Siber kaydını gösterir, biri kaydedilince diğerinin verisi ezilirdi.
+    /// </summary>
+    [Fact]
+    public async Task DuplicateLoad_YeniTaslakUretir_SiberKimliginiTasimaz()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var accountId = await CreateTestAccountAsync(admin, "Kopya Test Cari");
+
+        var sourceId = await CreateLoadWithNumberAsync(
+            _factory, admin, accountId, $"KOPYA-{Guid.NewGuid():N}"[..20]);
+
+        // Kaynağa Siber'e aktarılmış bir teklifin izlerini koy.
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+            var source = await db.Loads.FirstAsync(l => l.Id == sourceId);
+            source.SiberId = Guid.NewGuid().ToString();
+            source.ReservationNumber = "2699999";
+            source.TransferToSiber = 1;
+            source.StatusTypeId = 5;                       // Olumlu
+            source.ApprovalDate = new DateOnly(2026, 1, 15);
+            source.RejectionReason = "eski gerekçe";
+            await db.SaveChangesAsync();
+        }
+
+        var response = await admin.PostAsJsonAsync($"/api/v1/load/{sourceId}/duplicate", new { });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var copyId = (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        copyId.Should().NotBe(sourceId);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+            var copy = await db.Loads.AsNoTracking().FirstAsync(l => l.Id == copyId);
+            var source = await db.Loads.AsNoTracking().FirstAsync(l => l.Id == sourceId);
+
+            copy.CustomerId.Should().Be(source.CustomerId, "içerik kopyalanmalı");
+
+            copy.SiberId.Should().BeNull("kopya Siber'e hiç gitmemiş olmalı");
+            copy.ReservationNumber.Should().BeNull();
+            copy.LoadNumber.Should().BeNull("yük numarası tek bir yüke aittir");
+            copy.TransferToSiber.Should().Be(0);
+            copy.StatusTypeId.Should().Be(4, "kopya 'Teklif' durumunda başlamalı");
+            copy.ApprovalDate.Should().BeNull();
+            copy.RejectionReason.Should().BeNull();
+
+            // Kaynak hiç değişmemeli.
+            source.SiberId.Should().NotBeNull();
+            source.StatusTypeId.Should().Be(5);
+        }
     }
 }
