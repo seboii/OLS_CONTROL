@@ -1,3 +1,4 @@
+using OLS.Business.Services.Finance;
 using OLS.Business.Services.TransferData;
 using OLS.DataAccess.Siber;
 
@@ -125,6 +126,13 @@ public sealed class SiberSyncBackgroundService : BackgroundService
         foreach (var (label, step, _) in Entities)
             await RunStepAsync(label, step, sync, cancellationToken);
 
+        // Muhasebe/finans YALNIZCA tam senkronda çekilir. Hızlı katman satır
+        // sayısı karşılaştırmasına dayanıyor; sfy_fisdetay 214.954 satır ve her
+        // hızlı turda saymak Siber'i gereksiz yorardı. Finans sorguları zaten
+        // 6 aylık pencereyle sınırlı (bkz. FinanceSyncService), bu yüzden tam
+        // turda çalışmak yeterince güncel kalıyor.
+        await RunFinanceSyncAsync(scope.ServiceProvider, cancellationToken);
+
         _lastFullSync = DateTime.UtcNow;
         await RefreshCountsAsync(sync, cancellationToken);
     }
@@ -170,6 +178,47 @@ public sealed class SiberSyncBackgroundService : BackgroundService
         // Az önce senkronlanan tabloların sayısını tazele — aksi hâlde bir sonraki
         // hızlı kontrol aynı değişikliği tekrar "yeni" sanıp gereksiz yeniden senkronlar.
         await RefreshCountsAsync(sync, cancellationToken);
+    }
+
+    /// <summary>
+    /// Muhasebe/finans senkronu. Sıra ÖNEMLİ: fişler ve faturalar carilere,
+    /// faturalar ayrıca yüke bağlanıyor — bu yüzden cari ve yük senkronundan
+    /// SONRA çalışır. Bir adımın hatası diğerlerini durdurmaz; her biri kendi
+    /// içinde loglanır.
+    /// </summary>
+    private async Task RunFinanceSyncAsync(
+        IServiceProvider provider, CancellationToken cancellationToken)
+    {
+        var finance = provider.GetRequiredService<IFinanceSyncService>();
+
+        var steps = new (string Label, Func<CancellationToken, Task<SiberImportSummary>> Step)[]
+        {
+            ("Hesap planı", ct => finance.SyncAccountingPlanAsync(ct)),
+            ("Muhasebe fişleri", ct => finance.SyncVouchersAsync(false, ct)),
+            ("Faturalar", ct => finance.SyncInvoicesAsync(false, ct)),
+            ("Tahsilat/ödeme", ct => finance.SyncPaymentsAsync(false, ct)),
+        };
+
+        foreach (var (label, step) in steps)
+        {
+            try
+            {
+                var summary = await step(cancellationToken);
+
+                if (summary.Created > 0 || summary.Updated > 0)
+                    _logger.LogInformation(
+                        "Finans senkronu — {Label}: {Created} yeni, {Updated} güncel. {Notes}",
+                        label, summary.Created, summary.Updated, string.Join(" ", summary.Notes));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Finans senkronu başarısız — {Label}.", label);
+            }
+        }
     }
 
     private async Task RefreshCountsAsync(ISiberSyncService sync, CancellationToken cancellationToken)
