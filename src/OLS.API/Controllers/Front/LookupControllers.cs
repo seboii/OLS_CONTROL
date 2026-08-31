@@ -71,6 +71,14 @@ public sealed class ItemTypeController(ILookupService<ItemType> s) : LookupContr
     protected override string PermissionSlug => "financial_item_type_management";
 }
 
+/// <summary>Evrak Takibi sekmesinin 10 sabit evrak türü (bkz. EvrakTuru).</summary>
+[Route("api/v1/evrak_turu")]
+public sealed class EvrakTuruController(ILookupService<EvrakTuru> s) : LookupControllerBase<EvrakTuru>(s)
+{
+    protected override string PermissionSlug => "transport_type_management";
+    protected override bool OrderAscending => true;
+}
+
 [Route("api/v1/financial_item")]
 public sealed class FinancialItemController(ILookupService<FinancialItem> s) : LookupControllerBase<FinancialItem>(s)
 {

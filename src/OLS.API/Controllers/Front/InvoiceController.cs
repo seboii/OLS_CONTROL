@@ -48,11 +48,17 @@ public sealed class InvoiceController : ApiControllerBase
         [FromQuery(Name = "created_by_integration")] bool? createdByIntegration,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
+        [FromQuery(Name = "account_id")] long? accountId = null,
+        [FromQuery(Name = "invoice_type_id")] long? invoiceTypeId = null,
+        [FromQuery(Name = "commercial_type")] int? commercialType = null,
+        [FromQuery(Name = "date_from")] DateOnly? dateFrom = null,
+        [FromQuery(Name = "date_to")] DateOnly? dateTo = null,
         CancellationToken cancellationToken = default)
     {
         var result = await _invoices.ListAsync(
             new InvoiceListQuery(search, boxType, invoiceStatusId, createdByIntegration,
-                perPage, page, CurrentPath),
+                perPage, page, CurrentPath,
+                accountId, invoiceTypeId, commercialType, dateFrom, dateTo),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");

@@ -30,7 +30,8 @@ public interface IContactFormService
     /// olarak gerçek arama eklendi (ad/soyad/e-posta/telefon/mesaj).
     /// </summary>
     Task<object> ListAsync(
-        string? search, int page, string path, CancellationToken cancellationToken = default);
+        string? search, int page, string path, bool? isRead = null, bool? isAnswered = null,
+        DateOnly? dateFrom = null, DateOnly? dateTo = null, CancellationToken cancellationToken = default);
 
     /// <summary>Görüntülendiğinde okundu olarak işaretler (kaynaktaki yan etki).</summary>
     Task<ContactFormDto?> ShowAsync(long id, CancellationToken cancellationToken = default);
@@ -78,20 +79,34 @@ public sealed class ContactFormService : IContactFormService
     }
 
     public async Task<object> ListAsync(
-        string? search, int page, string path, CancellationToken cancellationToken = default)
+        string? search, int page, string path, bool? isRead = null, bool? isAnswered = null,
+        DateOnly? dateFrom = null, DateOnly? dateTo = null, CancellationToken cancellationToken = default)
     {
         var query = _db.WebsiteContactForms.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var pattern = $"%{QueryableExtensions.EscapeLike(search)}%";
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
+            var pattern = $"%{QueryableExtensions.EscapeLike(QueryableExtensions.NormalizeTurkish(search))}%";
             query = query.Where(f =>
-                EF.Functions.ILike(f.FirstName, pattern) ||
-                EF.Functions.ILike(f.LastName, pattern) ||
-                EF.Functions.ILike(f.Email, pattern) ||
-                EF.Functions.ILike(f.Phone!, pattern) ||
-                EF.Functions.ILike(f.Message, pattern));
+                EF.Functions.Like(f.FirstName.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(f.LastName.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(f.Email.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(f.Phone!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(f.Message.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern));
         }
+
+        if (isRead is { } read)
+            query = query.Where(f => f.IsRead == read);
+
+        if (isAnswered is { } answered)
+            query = query.Where(f => f.IsAnswered == answered);
+
+        if (dateFrom is { } from)
+            query = query.Where(f => f.CreatedAt >= from.ToDateTime(TimeOnly.MinValue));
+
+        if (dateTo is { } to)
+            query = query.Where(f => f.CreatedAt < to.AddDays(1).ToDateTime(TimeOnly.MinValue));
 
         // Kaynak latest() → created_at DESC.
         var forms = query.OrderByDescending(f => f.CreatedAt).Select(Project());

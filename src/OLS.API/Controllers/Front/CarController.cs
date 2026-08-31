@@ -47,10 +47,18 @@ public sealed class CarController : ApiControllerBase
         [FromQuery] string? search,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
+        [FromQuery(Name = "car_type_id")] int? carTypeId = null,
+        [FromQuery(Name = "romork_type_id")] int? romorkTypeId = null,
+        [FromQuery(Name = "vehicle_owner_id")] int? vehicleOwnerId = null,
+        [FromQuery(Name = "vehicle_status_id")] int? vehicleStatusId = null,
+        [FromQuery(Name = "customer_id")] string? customerId = null,
         CancellationToken cancellationToken = default)
     {
         var result = await _cars.ListAsync(
-            new CarListQuery(search, perPage, page, CurrentPath), cancellationToken);
+            new CarListQuery(
+                search, perPage, page, CurrentPath,
+                carTypeId, romorkTypeId, vehicleOwnerId, vehicleStatusId, customerId),
+            cancellationToken);
 
         return Ok(result, "Kayıtlar");
     }

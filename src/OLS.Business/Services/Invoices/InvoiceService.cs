@@ -41,7 +41,9 @@ public interface IInvoiceService
 
 public sealed record InvoiceListQuery(
     string? Search, short? BoxType, long? InvoiceStatusId, bool? CreatedByIntegration,
-    int? PerPage, int Page, string Path);
+    int? PerPage, int Page, string Path,
+    long? AccountId = null, long? InvoiceTypeId = null, int? CommercialType = null,
+    DateOnly? DateFrom = null, DateOnly? DateTo = null);
 
 public sealed class InvoiceService : IInvoiceService
 {
@@ -71,10 +73,11 @@ public sealed class InvoiceService : IInvoiceService
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var pattern = $"%{query.Search}%";
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
             invoices = invoices.Where(i =>
-                (i.InvoiceId != null && EF.Functions.ILike(i.InvoiceId, pattern)) ||
-                EF.Functions.ILike(i.TargetTitle, pattern));
+                (i.InvoiceId != null && EF.Functions.Like(i.InvoiceId.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)) ||
+                EF.Functions.Like(i.TargetTitle.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern));
         }
 
         if (query.BoxType is { } boxType)
@@ -88,6 +91,21 @@ public sealed class InvoiceService : IInvoiceService
 
         if (query.CreatedByIntegration is { } byIntegration)
             invoices = invoices.Where(i => i.CreatedByIntegration == byIntegration);
+
+        if (query.AccountId is { } accountId)
+            invoices = invoices.Where(i => i.AccountId == accountId);
+
+        if (query.InvoiceTypeId is { } invoiceTypeId)
+            invoices = invoices.Where(i => i.InvoiceTypeId == invoiceTypeId);
+
+        if (query.CommercialType is { } commercialType)
+            invoices = invoices.Where(i => i.CommercialType == commercialType);
+
+        if (query.DateFrom is { } dateFrom)
+            invoices = invoices.Where(i => i.InvoiceCreateDate >= dateFrom.ToDateTime(TimeOnly.MinValue));
+
+        if (query.DateTo is { } dateTo)
+            invoices = invoices.Where(i => i.InvoiceCreateDate < dateTo.AddDays(1).ToDateTime(TimeOnly.MinValue));
 
         var projected = invoices
             .OrderByDescending(i => i.Id)

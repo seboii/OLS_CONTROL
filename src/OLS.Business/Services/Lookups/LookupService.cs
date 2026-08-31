@@ -53,19 +53,32 @@ public sealed class LookupService<TEntity> : ILookupService<TEntity> where TEnti
         var query = _db.Set<TEntity>().AsNoTracking();
 
         // olsold: where('name', 'ILIKE', '%…%')
+        // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
         if (!string.IsNullOrWhiteSpace(search) && LookupMap<TEntity>.HasName)
         {
-            var pattern = $"%{search}%";
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(search)}%";
             query = query.Where(e =>
-                EF.Functions.ILike(EF.Property<string>(e, LookupMap<TEntity>.NameProperty!), pattern));
+                EF.Functions.Like(
+                    EF.Property<string>(e, LookupMap<TEntity>.NameProperty!)
+                        .Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(),
+                    pattern));
         }
 
         // Yalnızca Type sütunu OLAN entity'lerde uygulanır (bugün yalnızca
         // FinancialItem) — olsold: SelectAjax fetchParams={type: buysell},
         // Alış/Satış'a göre farklı kalem listesi göstermek için.
+        //
+        // Siber'de kalemin çoğu (~%97) HEM Alış HEM Satış'ta kullanılabiliyor
+        // (skn_kalem.aktifgelir VE aktifgider aynı anda true) — bu yüzden tek bir
+        // değere eşitlik değil, bit maskesi kontrolü yapılır: Type=1 (Alış/Gider),
+        // Type=2 (Satış/Gelir), Type=3 (ikisi de) — bkz. siber-etl
+        // ImportFinancialItemsAsync. type=1 istekte Type∈{1,3}, type=2 istekte
+        // Type∈{2,3} eşleşir.
         if (type is not null && LookupMap<TEntity>.HasType)
         {
-            query = query.Where(e => EF.Property<int?>(e, LookupMap<TEntity>.TypeProperty!) == type);
+            var requestedType = type.Value;
+            query = query.Where(e =>
+                (EF.Property<int?>(e, LookupMap<TEntity>.TypeProperty!) & requestedType) == requestedType);
         }
 
         // Sıralama kaynak kodda modülden modüle değişiyor (çoğu id desc, bazıları asc).

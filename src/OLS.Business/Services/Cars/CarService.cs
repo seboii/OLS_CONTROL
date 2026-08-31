@@ -26,7 +26,10 @@ public interface ICarService
     Task DeleteAsync(IReadOnlyList<long> ids, CancellationToken cancellationToken = default);
 }
 
-public sealed record CarListQuery(string? Search, int? PerPage, int Page, string Path);
+public sealed record CarListQuery(
+    string? Search, int? PerPage, int Page, string Path,
+    int? CarTypeId = null, int? RomorkTypeId = null, int? VehicleOwnerId = null,
+    int? VehicleStatusId = null, string? CustomerId = null);
 
 /// <summary>
 /// <c>AccountSaveResult</c> ile aynı desen: <c>PlateNumberTaken=true</c> ise
@@ -104,8 +107,19 @@ public sealed class CarService : ICarService
     {
         var cars = _db.Cars.AsNoTracking();
 
-        if (!string.IsNullOrWhiteSpace(query.Search))
-            cars = cars.Where(c => EF.Functions.ILike(c.PlateNumber!, $"%{query.Search}%"));
+        cars = cars.WhereILike(c => c.PlateNumber, query.Search);
+
+        if (query.CarTypeId is { } carTypeId)
+            cars = cars.Where(c => c.CarType == carTypeId);
+        if (query.RomorkTypeId is { } romorkTypeId)
+            cars = cars.Where(c => c.RomorkType == romorkTypeId);
+        if (query.VehicleOwnerId is { } vehicleOwnerId)
+            cars = cars.Where(c => c.VehicleOwner == vehicleOwnerId);
+        if (query.VehicleStatusId is { } vehicleStatusId)
+            cars = cars.Where(c => c.VehicleStatus == vehicleStatusId);
+        // cars.customer_id yerel id değil, cari'nin Siber id'sini tutar — bkz. CarWriteModel.
+        if (!string.IsNullOrWhiteSpace(query.CustomerId))
+            cars = cars.Where(c => c.CustomerId == query.CustomerId);
 
         var projected = cars.OrderByDescending(c => c.Id).Select(Project());
 

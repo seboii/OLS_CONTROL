@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Data.SqlClient;
 using OLS.API.Filters;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
@@ -27,13 +28,16 @@ public sealed class TransferSiberController : ApiControllerBase
     private readonly ITransferSiberService _transfer;
     private readonly ILoadReleaseService _release;
     private readonly ICurrentUser _currentUser;
+    private readonly ILogger<TransferSiberController> _logger;
 
     public TransferSiberController(
-        ITransferSiberService transfer, ILoadReleaseService release, ICurrentUser currentUser)
+        ITransferSiberService transfer, ILoadReleaseService release,
+        ICurrentUser currentUser, ILogger<TransferSiberController> logger)
     {
         _transfer = transfer;
         _release = release;
         _currentUser = currentUser;
+        _logger = logger;
     }
 
     /// <summary>
@@ -87,6 +91,15 @@ public sealed class TransferSiberController : ApiControllerBase
         public long Id { get; set; }
     }
 
+    /// <summary>Siber hata metninin yalnızca ilk satırı — gerisi yığın/teknik detay.</summary>
+    private static string FirstLine(string message)
+    {
+        var idx = message.IndexOfAny(NewLineChars);
+        return (idx < 0 ? message : message[..idx]).Trim();
+    }
+
+    private static readonly char[] NewLineChars = ['\n', '\r'];
+
     [HttpPost]
     [RequiresPermission(PermissionAction.Update, "load_management")]
     public async Task<IActionResult> Transfer(
@@ -98,7 +111,28 @@ public sealed class TransferSiberController : ApiControllerBase
         if (_currentUser.Id is not { } userId)
             return Unauthorized(ApiResponse.Error(Translator.Get("Yetkisiz Erişim")));
 
-        var result = await _transfer.TransferOfferAsync(request.Id, userId, cancellationToken);
+        // SON SAVUNMA HATTI: ön doğrulamalardan kaçan bir Siber kısıtı (FK, tetikleyici,
+        // benzersiz indeks) INSERT sırasında patlarsa, kullanıcıya "beklenmeyen hata"
+        // diyen çıplak bir 500 dönüyordu. Artık Siber'in kendi mesajı, ne yapılacağını
+        // söyleyen bir cümleyle birlikte alan hatası olarak gösteriliyor.
+        TransferSiberResult result;
+        try
+        {
+            result = await _transfer.TransferOfferAsync(request.Id, userId, cancellationToken);
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "Teklif {LoadId} Siber'e aktarılamadı (SQL kısıtı).", request.Id);
+
+            return BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>
+            {
+                ["message"] =
+                [
+                    "Siber bu kaydı kabul etmedi. Formdaki seçimlerden biri Siber'de " +
+                    $"tanımlı olmayabilir. Siber'in bildirdiği sebep: {FirstLine(ex.Message)}",
+                ],
+            }));
+        }
 
         if (!result.IsSuccess)
             return BadRequest(ApiResponse.ValidationErrors(new Dictionary<string, string[]>

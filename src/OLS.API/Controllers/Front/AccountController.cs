@@ -34,6 +34,20 @@ public sealed class AccountController : ApiControllerBase
         _files = files;
     }
 
+    /// <summary>
+    /// <c>GET /api/v1/account/{id}/representatives</c> — cariye bağlı varsayılan
+    /// görevliler. Teklif formunda müşteri seçilince "Görevliler" sekmesi bununla
+    /// kendiliğinden dolar (kullanıcı isteği).
+    /// </summary>
+    [HttpGet("{id:long}/representatives")]
+    [RequiresPermission(PermissionAction.Read, "account_management")]
+    public async Task<IActionResult> Representatives(long id, CancellationToken cancellationToken)
+    {
+        var result = await _accounts.RepresentativesAsync(id, cancellationToken);
+
+        return Ok(result, "Kayıtlar");
+    }
+
     [HttpGet]
     [RequiresPermission(PermissionAction.Read, "account_management")]
     public async Task<IActionResult> All(
@@ -41,13 +55,19 @@ public sealed class AccountController : ApiControllerBase
         [FromQuery(Name = "account_type_id")] long? accountTypeId,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
+        [FromQuery(Name = "country_id")] Guid? countryId = null,
+        [FromQuery(Name = "tax_office_id")] long? taxOfficeId = null,
+        [FromQuery(Name = "assigned_user_id")] int? assignedUserId = null,
+        [FromQuery(Name = "individual_personal")] string? individualPersonal = null,
         CancellationToken cancellationToken = default)
     {
         if (_currentUser.Id is not { } userId)
             return Unauthorized(ApiResponse.Error(Translator.Get("Yetkisiz Erişim")));
 
         var result = await _accounts.ListAsync(
-            new AccountListQuery(userId, search, accountTypeId, perPage, page, CurrentPath),
+            new AccountListQuery(
+                userId, search, accountTypeId, perPage, page, CurrentPath,
+                countryId, taxOfficeId, assignedUserId, individualPersonal),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");
