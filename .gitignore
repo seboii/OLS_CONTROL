@@ -5,6 +5,7 @@ dist/
 *.user
 .vs/
 .env
+storage/backups/
 storage/app/public/*
 !storage/app/public/.gitkeep
 
