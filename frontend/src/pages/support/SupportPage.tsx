@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import { Headphones } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { clsx } from "clsx";
+import { Headphones, Filter, ChevronDown, X, CalendarDays, Phone, Mail } from "lucide-react";
 import { api, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
-import { DataTable, EmptyState, Pagination, type Column } from "@/components/ui/DataTable";
+import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer } from "@/components/ui/Overlay";
-import { Badge, Btn, SelectInput } from "@/components/ui/primitives";
+import { Badge, Btn, FormField, SelectInput, TextInput } from "@/components/ui/primitives";
 
 interface ContactForm {
   id: number;
@@ -27,7 +29,58 @@ interface Envelope<T> {
   message?: string;
 }
 
-const PER_PAGE = 10;
+const PER_PAGE = 24;
+
+function SupportCard({ row, index, onClick }: { row: ContactForm; index: number; onClick: () => void }) {
+  const date = row.created_at ? new Date(row.created_at).toLocaleDateString("tr-TR") : null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.03 }}
+      whileHover={{ y: -2 }}
+      onClick={onClick}
+      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-shadow cursor-pointer p-4 flex flex-col gap-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <Headphones size={16} />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-900 truncate">{row.first_name} {row.last_name}</p>
+            {date && (
+              <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                <CalendarDays size={10} />
+                {date}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <Badge label={row.is_read ? "Okundu" : "Okunmadı"} />
+          <Badge label={row.is_answered ? "Yanıtlandı" : "Yanıtlanmadı"} />
+        </div>
+      </div>
+
+      <div className="pt-2.5 border-t border-gray-100 space-y-1.5">
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500 min-w-0">
+          <Phone size={12} className="text-gray-400 shrink-0" />
+          <span className="truncate">{row.phone || "—"}</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500 min-w-0">
+          <Mail size={12} className="text-gray-400 shrink-0" />
+          <span className="truncate">{row.email || "—"}</span>
+        </div>
+      </div>
+
+      {row.message && (
+        <p className="text-xs text-gray-600 pt-2.5 border-t border-gray-100 line-clamp-2">{row.message}</p>
+      )}
+    </motion.div>
+  );
+}
 
 export function SupportPage() {
   const { can } = useAuth();
@@ -41,6 +94,17 @@ export function SupportPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
+  const [fIsRead, setFIsRead] = useState("");
+  const [fIsAnswered, setFIsAnswered] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const hasActiveAdvancedFilters = !!(fIsRead || fIsAnswered || dateFrom || dateTo);
+  const hasActiveFilters = !!(search || hasActiveAdvancedFilters);
+
+  function clearFilters() {
+    setSearch(""); setFIsRead(""); setFIsAnswered(""); setDateFrom(""); setDateTo(""); setPage(1);
+  }
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selected, setSelected] = useState<ContactForm | null>(null);
@@ -49,7 +113,14 @@ export function SupportPage() {
   function load() {
     setLoading(true);
     api
-      .get<Envelope<Paginated<ContactForm>>>("/api/website/contact/form", { search: debouncedSearch || undefined, page })
+      .get<Envelope<Paginated<ContactForm>>>("/api/website/contact/form", {
+        search: debouncedSearch || undefined,
+        is_read: fIsRead || undefined,
+        is_answered: fIsAnswered || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
+        page,
+      })
       .then((res) => {
         setRows(res.data.data);
         setTotal(res.data.total);
@@ -61,7 +132,7 @@ export function SupportPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page]);
+  }, [debouncedSearch, page, fIsRead, fIsAnswered, dateFrom, dateTo]);
 
   async function openDetail(row: ContactForm) {
     try {
@@ -92,32 +163,86 @@ export function SupportPage() {
     }
   }
 
-  const columns: Column<ContactForm>[] = [
-    {
-      key: "from",
-      header: "Kullanıcı",
-      render: (r) => <span className="font-medium text-gray-900">{r.first_name} {r.last_name}</span>,
-    },
-    { key: "created_at", header: "Tarih", render: (r) => <span className="font-mono text-[11px] text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleString("tr-TR") : "—"}</span> },
-    { key: "phone", header: "Telefon", render: (r) => <span className="font-mono text-xs text-gray-500">{r.phone ?? "—"}</span> },
-    { key: "email", header: "E-Posta", render: (r) => <span className="text-xs text-gray-500">{r.email}</span> },
-    { key: "is_read", header: "Okunma Durumu", render: (r) => <Badge label={r.is_read ? "Okundu" : "Okunmadı"} /> },
-    { key: "is_answered", header: "Yanıtlanma Durumu", render: (r) => <Badge label={r.is_answered ? "Yanıtlandı" : "Yanıtlanmadı"} /> },
-  ];
-
   if (!canRead) {
     return <EmptyState icon={Headphones} title="Yetkiniz yok" desc="Bu ekranı görüntülemek için gerekli yetkiye sahip değilsiniz." />;
   }
 
   return (
     <>
-      <ModulePage title="Destek Talepleri" search={search} onSearchChange={(v) => { setSearch(v); setPage(1); }} searchPlaceholder="Ad, e-posta...">
-        <div className="bg-white">
+      <ModulePage title="Destek Talepleri">
+        <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex-1 max-w-md">
+              <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: ad, e-posta, telefon, mesaj..." />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((s) => !s)}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                showAdvanced || hasActiveAdvancedFilters
+                  ? "text-blue-600 border-blue-200 bg-blue-50/50"
+                  : "text-gray-600 border-gray-200 hover:border-blue-200 hover:text-blue-600",
+              )}
+            >
+              <Filter size={13} />
+              Detaylı Arama
+              {hasActiveAdvancedFilters && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+              <ChevronDown size={13} className={clsx("transition-transform", showAdvanced && "rotate-180")} />
+            </button>
+            {hasActiveFilters && (
+              <button type="button" onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1 shrink-0">
+                <X size={12} />
+                Temizle
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence initial={false}>
+            {showAdvanced && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 mt-4 border-t border-gray-100">
+                  <FormField label="Okunma Durumu">
+                    <SelectInput value={fIsRead} onChange={(v) => { setFIsRead(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, { value: "true", label: "Okundu" }, { value: "false", label: "Okunmadı" }]} />
+                  </FormField>
+                  <FormField label="Yanıtlanma Durumu">
+                    <SelectInput value={fIsAnswered} onChange={(v) => { setFIsAnswered(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, { value: "true", label: "Yanıtlandı" }, { value: "false", label: "Yanıtlanmadı" }]} />
+                  </FormField>
+                  <FormField label="Başlangıç Tarihi">
+                    <TextInput type="date" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} />
+                  </FormField>
+                  <FormField label="Bitiş Tarihi">
+                    <TextInput type="date" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} />
+                  </FormField>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className="bg-gray-50/70 min-h-full">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={Headphones} title="Talep bulunamadı" desc="Henüz destek talebi gönderilmemiş." />
           ) : (
             <>
-              <DataTable data={rows} columns={columns} loading={loading} onRowClick={openDetail} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 h-[132px] animate-pulse">
+                        <div className="h-3 w-20 bg-gray-200 rounded mb-3" />
+                        <div className="h-3 w-32 bg-gray-200 rounded mb-2" />
+                        <div className="h-3 w-24 bg-gray-100 rounded" />
+                      </div>
+                    ))
+                  : rows.map((r, i) => (
+                      <SupportCard key={r.id} row={r} index={i} onClick={() => openDetail(r)} />
+                    ))}
+              </div>
               <Pagination page={page} total={total} perPage={PER_PAGE} onChange={setPage} />
             </>
           )}

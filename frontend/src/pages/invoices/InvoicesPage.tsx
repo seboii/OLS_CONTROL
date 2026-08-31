@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { Receipt, Plus, Trash2, Tag, CheckCircle, Pencil, PencilOff } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { clsx } from "clsx";
+import { Receipt, Plus, Trash2, Tag, CheckCircle, Pencil, PencilOff, Filter, ChevronDown, X, CalendarDays } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
-import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
+import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SearchInput, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
@@ -72,7 +74,7 @@ interface FooterRowState extends InvoiceFooterRow {
   editable_value: string;
 }
 
-const PER_PAGE = 8;
+const PER_PAGE = 24;
 // olsold: pages/invoices.vue 3 Tab — "Gelen Faturalar"/"Giden Faturalar" (gelen/
 // giden evrak yönü, Alış/Satış DEĞİL) ve "Onay Bekleyen Faturalar" (invoice-type=0
 // SABİT + invoice_status="Onay Bekliyor" filtresi bir arada — kaynak bunu ayrı bir
@@ -100,6 +102,80 @@ const COMMERCIAL_TYPE_META: Record<number, { name: string; dot: string }> = {
   4: { name: "E-Arşiv", dot: "bg-green-500" },
 };
 
+function InvoiceCard({
+  row, index, onClick, canDelete, onDelete,
+}: {
+  row: InvoiceItem; index: number; onClick: () => void; canDelete: boolean; onDelete: () => void;
+}) {
+  const meta = COMMERCIAL_TYPE_META[row.commercial_type];
+  const date = row.invoice_create_date ? new Date(row.invoice_create_date).toLocaleDateString("tr-TR") : null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.03 }}
+      whileHover={{ y: -2 }}
+      onClick={onClick}
+      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-shadow cursor-pointer p-4 flex flex-col gap-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <Receipt size={16} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-mono text-xs font-semibold text-blue-600 truncate">{row.invoice_id ?? `FAT-${row.id}`}</p>
+            {date && (
+              <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                <CalendarDays size={10} />
+                {date}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {row.invoice_status?.name && <Badge label={row.invoice_status.name} />}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="pt-3 border-t border-gray-100">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Firma</p>
+        <p className="text-sm font-semibold text-gray-900 truncate">{row.target_title || "—"}</p>
+        {row.target_identity_no && <p className="text-[11px] text-gray-500 mt-0.5 font-mono truncate">{row.target_identity_no}</p>}
+      </div>
+
+      <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-gray-100 min-w-0">
+        <span className="font-mono text-sm font-bold text-gray-900 truncate">
+          {(row.payable_amount ?? 0).toLocaleString("tr-TR", { minimumFractionDigits: 2 })} {row.document_currency_code ?? ""}
+        </span>
+        {meta && (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-gray-200 text-[11px] shrink-0">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${meta.dot}`} />
+            {meta.name}
+          </span>
+        )}
+      </div>
+
+      {row.invoice_execution_date && (
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500 pt-2.5 border-t border-gray-100">
+          <CalendarDays size={12} className="text-gray-400 shrink-0" />
+          <span>Vade: {new Date(row.invoice_execution_date).toLocaleDateString("tr-TR")}</span>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
 export function InvoicesPage() {
   const { can } = useAuth();
   const { addToast } = useToast();
@@ -114,6 +190,30 @@ export function InvoicesPage() {
   const [rows, setRows] = useState<InvoiceItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  const [fAccount, setFAccount] = useState<AccountOption | null>(null);
+  const [fInvoiceType, setFInvoiceType] = useState("");
+  const [fCommercialType, setFCommercialType] = useState("");
+  const [fInvoiceStatus, setFInvoiceStatus] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const hasActiveAdvancedFilters = !!(
+    boxType || fAccount || fInvoiceType || fCommercialType || fInvoiceStatus || dateFrom || dateTo
+  );
+  const hasActiveFilters = !!(search || hasActiveAdvancedFilters);
+
+  function clearFilters() {
+    setSearch("");
+    setBoxType("");
+    setFAccount(null);
+    setFInvoiceType("");
+    setFCommercialType("");
+    setFInvoiceStatus("");
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
+  }
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -139,7 +239,12 @@ export function InvoicesPage() {
       .get<DataMessage<Paginated<InvoiceItem>>>("/api/v1/invoice", {
         search: debouncedSearch || undefined,
         box_type: isPendingApprovalFilter ? "0" : boxType || undefined,
-        invoice_status_id: isPendingApprovalFilter ? pendingApprovalStatusId : undefined,
+        invoice_status_id: isPendingApprovalFilter ? pendingApprovalStatusId : fInvoiceStatus || undefined,
+        account_id: fAccount?.id || undefined,
+        invoice_type_id: fInvoiceType || undefined,
+        commercial_type: fCommercialType || undefined,
+        date_from: dateFrom || undefined,
+        date_to: dateTo || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -154,7 +259,10 @@ export function InvoicesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, boxType, page, pendingApprovalStatusId]);
+  }, [
+    debouncedSearch, boxType, page, pendingApprovalStatusId,
+    fAccount, fInvoiceType, fCommercialType, fInvoiceStatus, dateFrom, dateTo,
+  ]);
 
   function openNew() {
     setForm({ box_type: "1", commercial_type: "0", invoice_type_id: "", invoice_create_date: "", invoice_execution_date: "", message: "" });
@@ -170,6 +278,9 @@ export function InvoicesPage() {
       addToast("Lütfen tüm alanları doldurunuz.", "error");
       return;
     }
+    // Buton disabled={saving} render'a kadar DOM'a yansımıyor — hızlı çift
+    // tıklama/tekrar tetiklemeye karşı erken çıkış.
+    if (saving) return;
 
     setSaving(true);
     setErrors({});
@@ -414,60 +525,103 @@ export function InvoicesPage() {
     }
   }
 
-  // olsold: InvoiceTable.vue — 8 sütun, bu sırayla (Fatura Numarası frozen).
-  // Bu portta sabitleme (frozen) DataTable'ın hiçbir modülde desteklemediği
-  // bir özellik olduğundan atlandı (overflow-x-auto ile aynı tutarlı davranış).
-  const columns: Column<InvoiceItem>[] = [
-    { key: "invoice_id", header: "Fatura Numarası", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">{r.invoice_id ?? "—"}</span> },
-    {
-      key: "commercial_type",
-      header: "Senaryo Tipi",
-      render: (r) => {
-        const meta = COMMERCIAL_TYPE_META[r.commercial_type];
-        return meta ? (
-          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full border border-gray-200 text-[11px] w-fit">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${meta.dot}`} />
-            {meta.name}
-          </span>
-        ) : "—";
-      },
-    },
-    { key: "invoice_status", header: "Fatura Durumu", render: (r) => (r.invoice_status?.name ? <Badge label={r.invoice_status.name} /> : "—") },
-    { key: "target_title", header: "Firma Adı", sortable: true, render: (r) => <span className="font-semibold">{r.target_title || "—"}</span> },
-    { key: "target_identity_no", header: "Vergi Kimlik No", render: (r) => <span className="font-mono text-xs text-gray-500">{r.target_identity_no || "—"}</span> },
-    { key: "payable_amount", header: "Fatura Tutarı (TRY)", render: (r) => <span className="font-mono text-xs font-bold">{r.payable_amount != null ? r.payable_amount.toLocaleString("tr-TR", { minimumFractionDigits: 2 }) : "0,00"} {r.document_currency_code ?? ""}</span> },
-    { key: "invoice_create_date", header: "Fatura Oluşturulma Tarihi", render: (r) => <span className="font-mono text-xs">{r.invoice_create_date ? new Date(r.invoice_create_date).toLocaleString("tr-TR") : "—"}</span> },
-    { key: "invoice_execution_date", header: "Fatura Gerçekleşme Tarihi", render: (r) => <span className="font-mono text-xs">{r.invoice_execution_date ? new Date(r.invoice_execution_date).toLocaleString("tr-TR") : "—"}</span> },
-  ];
-
   return (
     <>
       <ModulePage
         title="Faturalar"
-        search={search}
-        onSearchChange={(v) => { setSearch(v); setPage(1); }}
-        searchPlaceholder="Müşteri, referans..."
-        filters={
-          <SelectInput
-            value={boxType}
-            onChange={(v) => { setBoxType(v); setPage(1); }}
-            options={BOX_TABS.map((b) => ({ value: b.value, label: b.label }))}
-          />
-        }
         action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Fatura</Btn> : undefined}
       >
-        <div className="bg-white">
+        <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex-1 max-w-md">
+              <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: müşteri, referans..." />
+            </div>
+            <div className="w-48 shrink-0">
+              <SelectInput
+                value={boxType}
+                onChange={(v) => { setBoxType(v); setPage(1); }}
+                options={BOX_TABS.map((b) => ({ value: b.value, label: b.label }))}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((s) => !s)}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                showAdvanced || hasActiveAdvancedFilters
+                  ? "text-blue-600 border-blue-200 bg-blue-50/50"
+                  : "text-gray-600 border-gray-200 hover:border-blue-200 hover:text-blue-600",
+              )}
+            >
+              <Filter size={13} />
+              Detaylı Arama
+              {hasActiveAdvancedFilters && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+              <ChevronDown size={13} className={clsx("transition-transform", showAdvanced && "rotate-180")} />
+            </button>
+            {hasActiveFilters && (
+              <button type="button" onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1 shrink-0">
+                <X size={12} />
+                Temizle
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence initial={false}>
+            {showAdvanced && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 pt-4 mt-4 border-t border-gray-100">
+                  <AccountPicker label="Müşteri" value={fAccount} onChange={(v) => { setFAccount(v); setPage(1); }} />
+                  <FormField label="Fatura Tipi">
+                    <SelectInput value={fInvoiceType} onChange={(v) => { setFInvoiceType(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...invoiceTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
+                  </FormField>
+                  <FormField label="Fatura Türü">
+                    <SelectInput value={fCommercialType} onChange={(v) => { setFCommercialType(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, { value: "0", label: "Temel Fatura" }, { value: "1", label: "Ticari Fatura" }, { value: "4", label: "E-Arşiv" }]} />
+                  </FormField>
+                  <FormField label="Fatura Durumu">
+                    <SelectInput value={fInvoiceStatus} onChange={(v) => { setFInvoiceStatus(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...invoiceStatuses.map((t) => ({ value: String(t.id), label: t.name }))]} />
+                  </FormField>
+                  <FormField label="Başlangıç Tarihi">
+                    <TextInput type="date" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} />
+                  </FormField>
+                  <FormField label="Bitiş Tarihi">
+                    <TextInput type="date" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} />
+                  </FormField>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className="bg-gray-50/70 min-h-full">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={Receipt} title="Fatura bulunamadı" desc="Arama kriterlerine uygun fatura bulunamadı." />
           ) : (
             <>
-              <DataTable
-                data={rows}
-                columns={columns}
-                loading={loading}
-                onRowClick={(r) => openDetail(r.id)}
-                actions={canDelete ? (r) => <RowActions onDelete={() => handleDelete(r.id)} /> : undefined}
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 h-[132px] animate-pulse">
+                        <div className="h-3 w-20 bg-gray-200 rounded mb-3" />
+                        <div className="h-3 w-32 bg-gray-200 rounded mb-2" />
+                        <div className="h-3 w-24 bg-gray-100 rounded" />
+                      </div>
+                    ))
+                  : rows.map((r, i) => (
+                      <InvoiceCard
+                        key={r.id}
+                        row={r}
+                        index={i}
+                        onClick={() => openDetail(r.id)}
+                        canDelete={canDelete}
+                        onDelete={() => handleDelete(r.id)}
+                      />
+                    ))}
+              </div>
               <Pagination page={page} total={total} perPage={PER_PAGE} onChange={setPage} />
             </>
           )}
@@ -667,6 +821,7 @@ export function InvoicesPage() {
               label={pickerBuysell === "1" ? "Tedarikçiler" : "Müşteriler"}
               value={pickerAccount}
               onChange={setPickerAccount}
+              accountType={pickerBuysell === "1" ? 2 : 1}
             />
           </div>
           <div className="mt-3 max-h-80 overflow-y-auto space-y-1">

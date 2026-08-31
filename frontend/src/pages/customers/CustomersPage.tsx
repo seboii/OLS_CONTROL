@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, Users, Upload } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { clsx } from "clsx";
+import { Plus, Trash2, Users, Upload, Filter, ChevronDown, X, Phone, Mail } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
-import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
+import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer } from "@/components/ui/Overlay";
 import { Btn, FormField, TextInput, SelectInput, Tabs } from "@/components/ui/primitives";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
@@ -63,7 +65,77 @@ interface AccountDetail extends AccountListItem {
   invoice: AccountInvoiceRow[];
 }
 
-const PER_PAGE = 10;
+const PER_PAGE = 24;
+
+function AccountCard({
+  row, index, onClick, canDelete, onDelete,
+}: {
+  row: AccountListItem; index: number; onClick: () => void; canDelete: boolean; onDelete: () => void;
+}) {
+  const types = row.account_type_mapping_id.filter((m) => m.account_type_id?.name);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.03 }}
+      whileHover={{ y: -2 }}
+      onClick={onClick}
+      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-shadow cursor-pointer p-4 flex flex-col gap-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="bg-gray-100 w-9 h-9 rounded-lg overflow-hidden shrink-0 border border-gray-200 flex items-center justify-center">
+            {row.avatar ? (
+              <img src={`/storage/${row.avatar}`} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-sm text-gray-400">{row.name?.charAt(0).toUpperCase()}</span>
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-gray-900 truncate">{row.name}</p>
+            {row.country_id?.name && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{row.country_id.name}</p>}
+          </div>
+        </div>
+        {canDelete && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-1 pt-3 border-t border-gray-100">
+        {types.length === 0 ? (
+          <span className="text-[11px] text-gray-400">Hesap türü atanmadı</span>
+        ) : (
+          types.map((m) => (
+            <span key={m.id} className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+              {m.account_type_id!.name}
+            </span>
+          ))
+        )}
+      </div>
+
+      <div className="pt-2.5 border-t border-gray-100 space-y-1.5">
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500 min-w-0">
+          <Phone size={12} className="text-gray-400 shrink-0" />
+          <span className="truncate">
+            {row.phone ? `${row.phone_country_id?.phone_code ? `+${row.phone_country_id.phone_code} ` : ""}${row.phone}` : "—"}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500 min-w-0">
+          <Mail size={12} className="text-gray-400 shrink-0" />
+          <span className="truncate">{row.email || "—"}</span>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
 // olsold: AccountFormDrawer.vue TabList — "Genel Bilgiler"/"İletişim Bilgileri"/
 // "Görevli"/"Faturalar" (son ikisi bu güncellemede eklendi; önceden hiç yoktu).
 const TABS = ["Genel Bilgiler", "İletişim Bilgileri", "Görevli", "Faturalar"];
@@ -96,6 +168,23 @@ export function CustomersPage() {
   const [rows, setRows] = useState<AccountListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  const [fCountryId, setFCountryId] = useState("");
+  const [fTaxOfficeId, setFTaxOfficeId] = useState("");
+  const [fAssignedUser, setFAssignedUser] = useState<UserOption | null>(null);
+  const [fIndividualPersonal, setFIndividualPersonal] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const hasActiveAdvancedFilters = !!(fCountryId || fTaxOfficeId || fAssignedUser || fIndividualPersonal);
+  const hasActiveFilters = !!(search || hasActiveAdvancedFilters);
+
+  function clearFilters() {
+    setSearch("");
+    setFCountryId("");
+    setFTaxOfficeId("");
+    setFAssignedUser(null);
+    setFIndividualPersonal("");
+    setPage(1);
+  }
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -151,6 +240,10 @@ export function CustomersPage() {
       .get<DataMessage<Paginated<AccountListItem>>>("/api/v1/account", {
         search: debouncedSearch || undefined,
         account_type_id: activeTypeId ?? undefined,
+        country_id: fCountryId || undefined,
+        tax_office_id: fTaxOfficeId || undefined,
+        assigned_user_id: fAssignedUser?.id || undefined,
+        individual_personal: fIndividualPersonal || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -165,7 +258,7 @@ export function CustomersPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page, listTab]);
+  }, [debouncedSearch, page, listTab, fCountryId, fTaxOfficeId, fAssignedUser, fIndividualPersonal]);
 
   function resetForm() {
     setForm({
@@ -242,6 +335,10 @@ export function CustomersPage() {
       .get<DataMessage<Paginated<AccountListItem>>>("/api/v1/account", {
         search: debouncedSearch || undefined,
         account_type_id: activeTypeId ?? undefined,
+        country_id: fCountryId || undefined,
+        tax_office_id: fTaxOfficeId || undefined,
+        assigned_user_id: fAssignedUser?.id || undefined,
+        individual_personal: fIndividualPersonal || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -274,6 +371,9 @@ export function CustomersPage() {
       setTab(TABS[0]);
       return;
     }
+    // Buton disabled={saving} render'a kadar DOM'a yansımıyor — hızlı çift
+    // tıklama/tekrar tetiklemeye karşı erken çıkış.
+    if (saving) return;
 
     setSaving(true);
     setErrors({});
@@ -330,55 +430,65 @@ export function CustomersPage() {
     }
   }
 
-  // olsold: AccountTable.vue — yalnızca 3 sütun (Adı: avatar+isim+ülke alt yazısı,
-  // Telefon: ülke koduyla, E-Posta). Kod/Tip/Vergi Dairesi sütunları kaynakta yok.
-  const columns: Column<AccountListItem>[] = [
-    {
-      key: "name",
-      header: "Adı",
-      sortable: true,
-      render: (r) => (
-        <div className="flex items-center gap-3">
-          <div className="bg-gray-100 w-10 h-10 rounded-lg overflow-hidden shrink-0 border border-gray-200 flex items-center justify-center">
-            {r.avatar ? (
-              <img src={`/storage/${r.avatar}`} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-lg text-gray-400">{r.name?.charAt(0).toUpperCase()}</span>
-            )}
-          </div>
-          <div>
-            <div className="font-medium">{r.name}</div>
-            {r.country_id?.name && <div className="text-xs text-gray-500">{r.country_id.name}</div>}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: "phone",
-      header: "Telefon",
-      render: (r) =>
-        r.phone && r.phone.length > 2 ? (
-          <span className="text-nowrap">
-            {r.phone_country_id?.phone_code ? `+${r.phone_country_id.phone_code} ` : ""}
-            {r.phone}
-          </span>
-        ) : null,
-    },
-    { key: "email", header: "E-Posta", render: (r) => r.email },
-  ];
-
   return (
     <>
       <ModulePage
         title="Müşteriler"
-        search={search}
-        onSearchChange={(v) => {
-          setSearch(v);
-          setPage(1);
-        }}
-        searchPlaceholder="Ad, telefon, e-posta, ülke..."
         action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Müşteri</Btn> : undefined}
       >
+        <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex-1 max-w-md">
+              <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: ad, telefon, e-posta, ülke..." />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((s) => !s)}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                showAdvanced || hasActiveAdvancedFilters
+                  ? "text-blue-600 border-blue-200 bg-blue-50/50"
+                  : "text-gray-600 border-gray-200 hover:border-blue-200 hover:text-blue-600",
+              )}
+            >
+              <Filter size={13} />
+              Detaylı Arama
+              {hasActiveAdvancedFilters && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+              <ChevronDown size={13} className={clsx("transition-transform", showAdvanced && "rotate-180")} />
+            </button>
+            {hasActiveFilters && (
+              <button type="button" onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1 shrink-0">
+                <X size={12} />
+                Temizle
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence initial={false}>
+            {showAdvanced && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 mt-4 border-t border-gray-100">
+                  <FormField label="Ülke">
+                    <SelectInput value={fCountryId} onChange={(v) => { setFCountryId(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...countries.map((c) => ({ value: String(c.id), label: c.name }))]} />
+                  </FormField>
+                  <FormField label="Vergi Dairesi">
+                    <SelectInput value={fTaxOfficeId} onChange={(v) => { setFTaxOfficeId(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...taxOffices.map((t) => ({ value: String(t.id), label: t.name }))]} />
+                  </FormField>
+                  <FormField label="Kurumsal/Şahıs">
+                    <SelectInput value={fIndividualPersonal} onChange={(v) => { setFIndividualPersonal(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, { value: "T", label: "Tüzel" }, { value: "S", label: "Şahıs" }]} />
+                  </FormField>
+                  <UserPicker label="Görevli" value={fAssignedUser} onChange={(v) => { setFAssignedUser(v); setPage(1); }} />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
         <Tabs
           tabs={TYPE_TABS.map((t) => t.label)}
           active={listTab}
@@ -386,30 +496,33 @@ export function CustomersPage() {
             setListTab(v);
             setPage(1);
           }}
-          className="mb-4"
+          className="mb-4 px-6 pt-4"
         />
-        <div className="bg-white">
+        <div className="bg-gray-50/70 min-h-full">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={Users} title="Kayıt bulunamadı" desc="Arama kriterlerinize uygun müşteri bulunamadı." />
           ) : (
             <>
-              <DataTable
-                data={rows}
-                columns={columns}
-                loading={loading}
-                onRowClick={(r) => openEdit(r.id)}
-                actions={
-                  canUpdate || canDelete
-                    ? (r) => (
-                        <RowActions
-                          onView={() => openEdit(r.id)}
-                          onEdit={canUpdate ? () => openEdit(r.id) : undefined}
-                          onDelete={canDelete ? () => handleDelete(r.id, r.name) : undefined}
-                        />
-                      )
-                    : undefined
-                }
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 h-[132px] animate-pulse">
+                        <div className="h-3 w-20 bg-gray-200 rounded mb-3" />
+                        <div className="h-3 w-32 bg-gray-200 rounded mb-2" />
+                        <div className="h-3 w-24 bg-gray-100 rounded" />
+                      </div>
+                    ))
+                  : rows.map((r, i) => (
+                      <AccountCard
+                        key={r.id}
+                        row={r}
+                        index={i}
+                        onClick={() => openEdit(r.id)}
+                        canDelete={canDelete}
+                        onDelete={() => handleDelete(r.id, r.name)}
+                      />
+                    ))}
+              </div>
               <Pagination page={page} total={total} perPage={PER_PAGE} onChange={setPage} />
             </>
           )}

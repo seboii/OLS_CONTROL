@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import { Car, Plus } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { clsx } from "clsx";
+import { Car, Plus, Filter, ChevronDown, X, Gauge, Trash2 } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
-import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
+import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer } from "@/components/ui/Overlay";
-import { Btn, FormField, TextInput, SelectInput } from "@/components/ui/primitives";
+import { Badge, Btn, FormField, TextInput, SelectInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerModal";
 
@@ -31,7 +33,64 @@ interface CarItem {
   customer: AccountOption | null;
 }
 
-const PER_PAGE = 10;
+const PER_PAGE = 24;
+
+function CarCard({
+  row, index, onClick, canDelete, onDelete,
+}: {
+  row: CarItem; index: number; onClick: () => void; canDelete: boolean; onDelete: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.03 }}
+      whileHover={{ y: -2 }}
+      onClick={onClick}
+      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-shadow cursor-pointer p-4 flex flex-col gap-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <Car size={16} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-mono text-sm font-bold text-gray-900 truncate">{row.plate_number}</p>
+            {row.customer?.name && <p className="text-[10px] text-gray-400 mt-0.5 truncate">{row.customer.name}</p>}
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {row.vehicle_status?.name && <Badge label={row.vehicle_status.name} />}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 pt-3 border-t border-gray-100">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Tipi</p>
+          <p className="text-xs text-gray-700 truncate">{row.car_type?.name ?? "—"}</p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Sahiplik Durumu</p>
+          <p className="text-xs text-gray-700 truncate">{row.vehicle_owner?.name ?? "—"}</p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 text-[11px] text-gray-500 pt-2.5 border-t border-gray-100">
+        <Gauge size={12} className="text-gray-400 shrink-0" />
+        <span>{row.km != null ? `${row.km.toLocaleString("tr-TR")} km` : "Kilometre girilmedi"}</span>
+      </div>
+    </motion.div>
+  );
+}
 
 export function VehiclesPage() {
   const { can } = useAuth();
@@ -46,6 +105,25 @@ export function VehiclesPage() {
   const [rows, setRows] = useState<CarItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+
+  const [fCarType, setFCarType] = useState("");
+  const [fRomorkType, setFRomorkType] = useState("");
+  const [fVehicleOwner, setFVehicleOwner] = useState("");
+  const [fVehicleStatus, setFVehicleStatus] = useState("");
+  const [fCustomer, setFCustomer] = useState<AccountOption | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const hasActiveAdvancedFilters = !!(fCarType || fRomorkType || fVehicleOwner || fVehicleStatus || fCustomer);
+  const hasActiveFilters = !!(search || hasActiveAdvancedFilters);
+
+  function clearFilters() {
+    setSearch("");
+    setFCarType("");
+    setFRomorkType("");
+    setFVehicleOwner("");
+    setFVehicleStatus("");
+    setFCustomer(null);
+    setPage(1);
+  }
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -77,7 +155,16 @@ export function VehiclesPage() {
   function load() {
     setLoading(true);
     api
-      .get<DataMessage<Paginated<CarItem>>>("/api/v1/car", { search: debouncedSearch || undefined, per_page: PER_PAGE, page })
+      .get<DataMessage<Paginated<CarItem>>>("/api/v1/car", {
+        search: debouncedSearch || undefined,
+        car_type_id: fCarType || undefined,
+        romork_type_id: fRomorkType || undefined,
+        vehicle_owner_id: fVehicleOwner || undefined,
+        vehicle_status_id: fVehicleStatus || undefined,
+        customer_id: fCustomer?.siber_id || undefined,
+        per_page: PER_PAGE,
+        page,
+      })
       .then((res) => {
         setRows(res.data.data);
         setTotal(res.data.total);
@@ -89,7 +176,7 @@ export function VehiclesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page]);
+  }, [debouncedSearch, page, fCarType, fRomorkType, fVehicleOwner, fVehicleStatus, fCustomer]);
 
   function resetForm() {
     setForm({ plate_number: "", car_type: "", romork_type: "", vehicle_owner: "", vehicle_status: "", km: "", width: "", length: "", height: "", capacity: "" });
@@ -130,6 +217,9 @@ export function VehiclesPage() {
   }
 
   async function handleSubmit() {
+    // Buton disabled={saving} render'a kadar DOM'a yansımıyor — hızlı çift
+    // tıklama/tekrar tetiklemeye karşı erken çıkış.
+    if (saving) return;
     setSaving(true);
     setErrors({});
     const num = (v: string) => (v === "" ? null : Number(v));
@@ -178,41 +268,93 @@ export function VehiclesPage() {
     }
   }
 
-  // olsold: pages/car/list.vue — yalnızca 5 sütun (Plaka/Tipi/Araç Durumu/Sahiplik
-  // Durumu/Kilometre) bu sırayla. "Romork"/"Kapasite" kaynakta yok, kaldırıldı.
-  const columns: Column<CarItem>[] = [
-    { key: "plate_number", header: "Plaka", sortable: true, render: (r) => <span className="font-mono text-sm font-bold text-gray-900">{r.plate_number}</span> },
-    { key: "car_type", header: "Tipi", render: (r) => r.car_type?.name ?? "—" },
-    { key: "vehicle_status", header: "Araç Durumu", render: (r) => r.vehicle_status?.name ?? "—" },
-    { key: "vehicle_owner", header: "Sahiplik Durumu", render: (r) => r.vehicle_owner?.name ?? "—" },
-    { key: "km", header: "Kilometre", render: (r) => <span className="font-mono text-xs">{r.km ?? "—"}</span> },
-  ];
-
   return (
     <>
       <ModulePage
         title="Araçlar"
-        search={search}
-        onSearchChange={(v) => { setSearch(v); setPage(1); }}
-        searchPlaceholder="Plaka..."
         action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Araç</Btn> : undefined}
       >
-        <div className="bg-white">
+        <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex-1 max-w-md">
+              <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: plaka..." />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((s) => !s)}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                showAdvanced || hasActiveAdvancedFilters
+                  ? "text-blue-600 border-blue-200 bg-blue-50/50"
+                  : "text-gray-600 border-gray-200 hover:border-blue-200 hover:text-blue-600",
+              )}
+            >
+              <Filter size={13} />
+              Detaylı Arama
+              {hasActiveAdvancedFilters && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+              <ChevronDown size={13} className={clsx("transition-transform", showAdvanced && "rotate-180")} />
+            </button>
+            {hasActiveFilters && (
+              <button type="button" onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1 shrink-0">
+                <X size={12} />
+                Temizle
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence initial={false}>
+            {showAdvanced && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-4 mt-4 border-t border-gray-100">
+                  <AccountPicker label="Kiralanan Firma" value={fCustomer} onChange={(v) => { setFCustomer(v); setPage(1); }} />
+                  <FormField label="Araç Tipi">
+                    <SelectInput value={fCarType} onChange={(v) => { setFCarType(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...carTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
+                  </FormField>
+                  <FormField label="Romork Tipi">
+                    <SelectInput value={fRomorkType} onChange={(v) => { setFRomorkType(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...romorkTypes.map((t) => ({ value: String(t.id), label: t.name }))]} />
+                  </FormField>
+                  <FormField label="Sahiplik Durumu">
+                    <SelectInput value={fVehicleOwner} onChange={(v) => { setFVehicleOwner(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...carOwners.map((t) => ({ value: String(t.id), label: t.name }))]} />
+                  </FormField>
+                  <FormField label="Araç Durumu">
+                    <SelectInput value={fVehicleStatus} onChange={(v) => { setFVehicleStatus(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...carStatuses.map((t) => ({ value: String(t.id), label: t.name }))]} />
+                  </FormField>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className="bg-gray-50/70 min-h-full">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={Car} title="Araç bulunamadı" desc="Arama kriterlerine uygun araç bulunamadı." />
           ) : (
             <>
-              <DataTable
-                data={rows}
-                columns={columns}
-                loading={loading}
-                onRowClick={(r) => openEdit(r.id)}
-                actions={
-                  canUpdate || canDelete
-                    ? (r) => <RowActions onView={() => openEdit(r.id)} onEdit={canUpdate ? () => openEdit(r.id) : undefined} onDelete={canDelete ? () => handleDelete(r.id, r.plate_number) : undefined} />
-                    : undefined
-                }
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 h-[132px] animate-pulse">
+                        <div className="h-3 w-20 bg-gray-200 rounded mb-3" />
+                        <div className="h-3 w-32 bg-gray-200 rounded mb-2" />
+                        <div className="h-3 w-24 bg-gray-100 rounded" />
+                      </div>
+                    ))
+                  : rows.map((r, i) => (
+                      <CarCard
+                        key={r.id}
+                        row={r}
+                        index={i}
+                        onClick={() => openEdit(r.id)}
+                        canDelete={canDelete}
+                        onDelete={() => handleDelete(r.id, r.plate_number)}
+                      />
+                    ))}
+              </div>
               <Pagination page={page} total={total} perPage={PER_PAGE} onChange={setPage} />
             </>
           )}
