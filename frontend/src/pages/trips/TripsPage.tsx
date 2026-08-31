@@ -1,14 +1,49 @@
-import { useEffect, useState } from "react";
-import { Truck, Plus, Trash2, Link2, ChevronDown, ChevronUp } from "lucide-react";
-import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { clsx } from "clsx";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Truck, Plus, Trash2, Link2, ChevronDown, ChevronUp, Filter, X, CalendarDays, FileText, ExternalLink } from "lucide-react";
+import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
-import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
+import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SearchInput, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerModal";
+import { CarPicker } from "@/components/shared/CarPicker";
+import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
+import { BusyLabel } from "@/components/ui/Busy";
+
+/**
+ * Kaydedilmemiş "Yeni Sefer" otomatik taslağı — Teklif'teki (QuotesPage) ile aynı
+ * mantık: form doldurulurken kaydetmeden çıkılırsa kaybolmasın, Taslaklar
+ * menüsünden kaldığı yerden devam edilsin. Sefer'in sunucu tarafında bir "taslak"
+ * kavramı yok (Teklif'teki is_draft gibi), bu yüzden menüde yalnızca bu
+ * kaydedilmemiş taslak listelenir.
+ */
+const TRIP_DRAFT_KEY = "ols.trip.autodraft.v1";
+
+type TripForm = {
+  // romork_id kaydedilen DEĞER (araç kimliği), romork_plate ise SEÇİCİDE ve
+  // taslak listesinde gösterilen plaka. İkisi de metin tutuluyor çünkü
+  // tripFormHasContent tüm alanlarda .trim() çağırıyor ve taslak JSON'a
+  // serileştiriliyor — forma nesne koymak ikisini de bozardı.
+  romork_id: string; romork_plate: string;
+  work_type: string; department_id: string; expedition_type: string;
+  release_date: string; entry_date: string; loading_date: string; return_date: string;
+};
+
+type TripDraft = { savedAt: string; form: TripForm };
+
+const EMPTY_TRIP_FORM: TripForm = {
+  romork_id: "", romork_plate: "", work_type: "", department_id: "", expedition_type: "",
+  release_date: "", entry_date: "", loading_date: "", return_date: "",
+};
+
+/** Boş formu taslak diye kaydetmeyelim — en az bir alan dolu olmalı. */
+const tripFormHasContent = (f: TripForm) => Object.values(f).some((v) => v.trim() !== "");
 
 interface NamedRef {
   id: string;
@@ -33,11 +68,17 @@ interface ExpeditionItem {
 }
 
 interface ExpeditionDetail extends ExpeditionItem {
+  /** Seferin KENDİ Siber arşiv evrakları. */
+  siber_archive: SiberArchiveFile[];
   release_date: string | null;
   loading_date: string | null;
   return_date: string | null;
   car_exit_date: string | null;
   load_city_id: NamedRef | null;
+  expedition_id: string | null;
+  sefer_id: string | null;
+  year_week: string | null;
+  registration_login_date: string | null;
 }
 
 interface MovementUserDetail {
@@ -77,6 +118,16 @@ interface LoadPackageDetail {
   lademeter: number | null;
   volume: number | null;
   product_type_id: NamedRef | null;
+  case_type_id: NamedRef | null;
+}
+
+interface SiberArchiveFile {
+  id: string;
+  name: string | null;
+  created_at: string | null;
+  created_by: string | null;
+  personal_data: boolean;
+  restricted_groups: string | null;
 }
 
 interface MappedLoadTransfer {
@@ -84,13 +135,18 @@ interface MappedLoadTransfer {
   load_number_work_type: string | null;
   customer_id: { id: number; name: string | null } | null;
   load_transfer_package: LoadPackageDetail[];
+  /** Bu yükün Siber arşivindeki evrakları. */
+  siber_archive: SiberArchiveFile[];
 }
 
 interface ExpeditionMapping {
   id: number;
+  yukaktarmaid: string | null;
+  upload_unload: number | null;
   date: string | null;
   load_transfer_id: MappedLoadTransfer | null;
   romork_id: CarRef | null;
+  yer_id: NamedRef | null;
   total_values: MappingTotals;
 }
 
@@ -106,20 +162,114 @@ interface AvailableLoad {
   customer_id: { id: number; name: string | null } | null;
 }
 
-const PER_PAGE = 8;
+const PER_PAGE = 24;
 const DETAIL_TABS = ["Genel Bilgiler", "Bağlı Yükler", "Hareketler"];
+// İş Tipi ham id'leri seed'e göre değişebilir (bkz. QuotesPage STATUS_TABS notu),
+// bu yüzden sekmeler workTypes listesinden AD ile eşleştirilir, sabit id kullanılmaz.
+const WORK_TYPE_TABS = ["Tümü", "İhracat", "İthalat", "Transit", "Yurtiçi"];
 const ZERO_TOTALS: MappingTotals = { total_quantity: 0, total_gross_weight: 0, total_net_weight: 0, total_lademeter: 0, total_volume: 0 };
 const EMPTY_MOVEMENT_FORM = { destination_id: "", expedition_status_id: "", description: "", address: "" };
+
+function ExpeditionCard({
+  row, index, onClick, canDelete, onDelete,
+}: {
+  row: ExpeditionItem; index: number; onClick: () => void; canDelete: boolean; onDelete: () => void;
+}) {
+  const date = row.created_at ? new Date(row.created_at).toLocaleDateString("tr-TR") : null;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.03 }}
+      whileHover={{ y: -2 }}
+      onClick={onClick}
+      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-shadow cursor-pointer p-4 flex flex-col gap-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+            <Truck size={16} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-mono text-xs font-semibold text-blue-600 truncate">{row.expedition_number ?? `SEF-${row.id}`}</p>
+            {date && (
+              <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
+                <CalendarDays size={10} />
+                {date}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {row.status_id?.name && <Badge label={row.status_id.name} />}
+          {canDelete && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="pt-3 border-t border-gray-100">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Araç</p>
+        <p className="text-sm font-semibold text-gray-900 truncate">{row.romork_id?.plate_number ?? "—"}</p>
+      </div>
+
+      {(row.start_city_id?.name || row.end_city_id?.name) && (
+        <div className="pt-2.5 border-t border-gray-100">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Güzergâh</p>
+          <p className="text-xs text-gray-700 truncate">
+            {row.start_city_id?.name && row.end_city_id?.name
+              ? `${row.start_city_id.name} → ${row.end_city_id.name}`
+              : (row.start_city_id?.name ?? row.end_city_id?.name)}
+          </p>
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-3 pt-2.5 border-t border-gray-100">
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">İş Tipi</p>
+          <p className="text-xs text-gray-700 truncate">{row.work_type?.name ?? "—"}</p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Sefer Tipi</p>
+          <p className="text-xs text-gray-700 truncate">{row.expedition_type_id?.name ?? "—"}</p>
+        </div>
+        <div className="min-w-0">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Departman</p>
+          <p className="text-xs text-gray-700 truncate">{row.department_id?.name ?? "—"}</p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
 
 export function TripsPage() {
   const { can } = useAuth();
   const { addToast } = useToast();
+  const navigate = useNavigate();
+
+  // DERİN BAĞLANTI: /seferler?sefer=<id> ile doğrudan o seferin kartı açılır.
+  // Yük ekranındaki "Sefere Git" düğmesi buraya yönlendiriyor.
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // "Yüke Git": sefere bağlı yükün kartını Yükler ekranında açar. Yük modülünü
+  // okuma yetkisi yoksa düğme gösterilmez — tıklayınca "Yetkiniz yok" ekranına
+  // düşmek kullanıcıyı boşuna dolaştırırdı.
+  const canOpenLoad = can("load_management", "read");
+
   const canCreate = can("expedition_management", "create");
   const canUpdate = can("expedition_management", "update");
   const canDelete = can("expedition_management", "delete");
 
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebouncedValue(search);
+  const [workTypeTab, setWorkTypeTab] = useState(WORK_TYPE_TABS[0]);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
@@ -127,13 +277,34 @@ export function TripsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  const [fExpeditionType, setFExpeditionType] = useState("");
+  const [fStatus, setFStatus] = useState("");
+  const [fDepartment, setFDepartment] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const hasActiveAdvancedFilters = !!(dateFrom || dateTo || fExpeditionType || fStatus || fDepartment);
+  const hasActiveFilters = !!(search || hasActiveAdvancedFilters);
+
+  function clearFilters() {
+    setSearch("");
+    setDateFrom("");
+    setDateTo("");
+    setFExpeditionType("");
+    setFStatus("");
+    setFDepartment("");
+    setPage(1);
+  }
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
-  const [form, setForm] = useState({
-    romork_id: "", work_type: "", department_id: "", expedition_type: "",
-    release_date: "", entry_date: "", loading_date: "", return_date: "",
-  });
+  const [form, setForm] = useState<TripForm>({ ...EMPTY_TRIP_FORM });
+
+  // Kaydedilmemiş "Yeni Sefer" taslağı — bkz. TRIP_DRAFT_KEY açıklaması.
+  const [tripDraft, setTripDraft] = useState<TripDraft | null>(() => readDraft<TripDraft>(TRIP_DRAFT_KEY));
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  const draftsRef = useRef<HTMLDivElement>(null);
+  // Geri yükleme sırasındaki ara state'ler taslağın üstüne yazmasın diye.
+  const restoringDraftRef = useRef(false);
 
   const { options: workTypes } = useLookupOptions("/api/v1/work_type");
   const { options: departments, refresh: refreshDepartments } = useLookupOptions("/api/v1/department");
@@ -151,6 +322,8 @@ export function TripsPage() {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
   }
 
+  const activeWorkTypeId = workTypeTab === "Tümü" ? undefined : workTypes.find((w) => w.name === workTypeTab)?.id;
+
   function load() {
     setLoading(true);
     api
@@ -158,6 +331,10 @@ export function TripsPage() {
         search: debouncedSearch || undefined,
         date_from: dateFrom || undefined,
         date_to: dateTo || undefined,
+        work_type_id: activeWorkTypeId || undefined,
+        expedition_type_id: fExpeditionType || undefined,
+        status_id: fStatus || undefined,
+        department_id: fDepartment || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -172,12 +349,53 @@ export function TripsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, dateFrom, dateTo, page]);
+  }, [debouncedSearch, workTypeTab, workTypes.length, dateFrom, dateTo, page, fExpeditionType, fStatus, fDepartment]);
 
   function openNew() {
-    setForm({ romork_id: "", work_type: "", department_id: "", expedition_type: "", release_date: "", entry_date: "", loading_date: "", return_date: "" });
+    setForm({ ...EMPTY_TRIP_FORM });
     setErrors({});
     setDrawerOpen(true);
+  }
+
+  /**
+   * Form her değiştiğinde tarayıcıya yazılır — kullanıcı kaydetmeden çıksa (hatta
+   * sekmeyi kapatsa) bile Taslaklar menüsünden kaldığı yerden devam eder.
+   */
+  useEffect(() => {
+    if (!drawerOpen || restoringDraftRef.current) return;
+    if (!tripFormHasContent(form)) return;
+
+    const timer = setTimeout(() => {
+      const draft: TripDraft = { savedAt: new Date().toISOString(), form };
+      writeDraft(TRIP_DRAFT_KEY, draft);
+      setTripDraft(draft);
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [drawerOpen, form]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (draftsRef.current && !draftsRef.current.contains(e.target as Node)) setDraftsOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  function resumeTripDraft() {
+    const d = readDraft<TripDraft>(TRIP_DRAFT_KEY);
+    if (!d) return;
+
+    restoringDraftRef.current = true;
+    setErrors({});
+    setForm({ ...EMPTY_TRIP_FORM, ...d.form });
+    setDrawerOpen(true);
+    setDraftsOpen(false);
+    setTimeout(() => { restoringDraftRef.current = false; }, 0);
+  }
+
+  function discardTripDraft() {
+    clearDraft(TRIP_DRAFT_KEY);
+    setTripDraft(null);
   }
 
   async function handleSubmit() {
@@ -189,6 +407,9 @@ export function TripsPage() {
       addToast("Lütfen tüm alanları doldurunuz.", "error");
       return;
     }
+    // Buton disabled={saving} render'a kadar DOM'a yansımıyor — hızlı çift
+    // tıklama/tekrar tetiklemeye karşı erken çıkış.
+    if (saving) return;
 
     setSaving(true);
     setErrors({});
@@ -204,10 +425,26 @@ export function TripsPage() {
       return_date: form.return_date || null,
     };
     try {
-      await api.post("/api/v1/expedition", body);
+      // YÜK EKLEME AKIŞI: yeni sefer formunda yük bağlama alanı OLAMAZ, çünkü
+      // eşleme ucu (/api/v1/expedition_load_mapping) var olan bir sefer kimliği
+      // istiyor — sefer kaydedilmeden bağlanacak bir şey yok. Eskiden kayıttan
+      // sonra sadece liste yenileniyordu ve kullanıcı yükleri eklemek için
+      // seferi listeden bulup tekrar açmak zorundaydı; "yük ekleme yeri yok"
+      // şikâyeti buradan geliyordu.
+      //
+      // Uç zaten oluşturulan seferi geri döndürüyor; onu kullanıp kartı hemen
+      // "Bağlı Yükler" sekmesinde açıyoruz. Akış kesintisiz: kaydet -> yük bağla.
+      const created = await api.post<DataMessage<ExpeditionDetail>>("/api/v1/expedition", body);
       addToast("Sefer oluşturuldu");
+      // Sefer artık sunucuda: kaydedilmemiş otomatik taslak gereksiz.
+      discardTripDraft();
       setDrawerOpen(false);
       load();
+
+      if (created?.data?.id) {
+        await openDetail(created.data.id);
+        setDetailTab("Bağlı Yükler");
+      }
     } catch (err) {
       if (err instanceof ApiError && err.errors) setErrors(err.errors);
       else addToast(err instanceof Error ? err.message : "Kaydedilemedi", "error");
@@ -237,7 +474,7 @@ export function TripsPage() {
   const [detailSaving, setDetailSaving] = useState(false);
   const [detailErrors, setDetailErrors] = useState<Record<string, string[]>>({});
   const [detailForm, setDetailForm] = useState({
-    romork_id: "", work_type: "", department_id: "", expedition_type: "", status_id: "",
+    romork_id: "", romork_plate: "", work_type: "", department_id: "", expedition_type: "", status_id: "",
     release_date: "", entry_date: "", loading_date: "", return_date: "", car_exit_date: "",
     start_city_id: "", load_city_id: "", end_city_id: "",
   });
@@ -261,6 +498,44 @@ export function TripsPage() {
   const [pickerResults, setPickerResults] = useState<AvailableLoad[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
 
+  // ?sefer=<id> geldiyse o seferin kartını aç.
+  //
+  // SIRA ÖNEMLİ: ilk sürümde parametre kartı AÇMADAN ÖNCE siliniyordu. Bu, aynı
+  // tik içinde bir gezinme (setSearchParams) tetikliyor ve kartı açan durum
+  // güncellemesiyle yarışıyordu — sonuç: Seferler ekranına gidiliyor ama kart
+  // açılmıyordu. Artık önce açılıyor, parametre kart KAPANINCA temizleniyor.
+  //
+  // handledRef: aynı id için ikinci kez açmayı engeller. Parametre URL'de
+  // kaldığı sürece bu efekt her searchParams değişiminde yeniden çalışır.
+  const handledExpeditionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const requested = searchParams.get("sefer");
+
+    if (!requested) {
+      handledExpeditionRef.current = null;
+      return;
+    }
+
+    if (handledExpeditionRef.current === requested) return;
+    handledExpeditionRef.current = requested;
+
+    const id = Number(requested);
+    if (Number.isFinite(id) && id > 0) openDetail(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  /** Kart kapanınca derin bağlantı parametresini temizle (yenilemede tekrar açılmasın). */
+  function clearExpeditionDeepLink() {
+    if (!searchParams.get("sefer")) return;
+
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.delete("sefer");
+      return next;
+    }, { replace: true });
+  }
+
   async function openDetail(id: number) {
     setDetailId(id);
     setDetailTab(DETAIL_TABS[0]);
@@ -273,6 +548,7 @@ export function TripsPage() {
       setDetail(d);
       setDetailForm({
         romork_id: d.romork_id ? String(d.romork_id.id) : "",
+        romork_plate: d.romork_id?.plate_number ?? "",
         work_type: d.work_type ? String(d.work_type.id) : "",
         department_id: d.department_id ? String(d.department_id.id) : "",
         expedition_type: d.expedition_type_id ? String(d.expedition_type_id.id) : "",
@@ -356,6 +632,70 @@ export function TripsPage() {
       .finally(() => setPickerLoading(false));
   }, [pickerOpen, debouncedPickerSearch, detailId]);
 
+  /**
+   * Siber arşiv evrağını açar. Dosya API üzerinden vekil geliyor (FTP adresi ve
+   * parolası tarayıcıya verilmiyor) ve jetonlu istek gerektiği için blob'a
+   * alınıp öyle açılıyor — düz bağlantı 401 dönerdi.
+   */
+  async function openArchiveFile(file: SiberArchiveFile) {
+    try {
+      const { blob } = await downloadFile(`/api/v1/load_transfer/archive/${encodeURIComponent(file.id)}`);
+      const url = URL.createObjectURL(blob);
+      const viewable = blob.type === "application/pdf" || blob.type.startsWith("image/");
+
+      if (viewable) {
+        window.open(url, "_blank", "noopener");
+      } else {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = file.name ?? "evrak";
+        link.click();
+      }
+
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      addToast("Evrak açılamadı", "error");
+    }
+  }
+
+  /** Arşiv listesi — hem seferin kendi evrakları hem bağlı yüklerinki için. */
+  function ArchiveList({ files, empty }: { files: SiberArchiveFile[]; empty: string }) {
+    if (files.length === 0)
+      return <p className="text-[11px] text-gray-400 py-2">{empty}</p>;
+
+    return (
+      <div className="space-y-1.5">
+        {files.map((f) => (
+          <div key={f.id} className="flex items-center gap-2 rounded-lg border border-gray-100 bg-gray-50/60 p-2">
+            <FileText size={13} className="text-gray-400 shrink-0" />
+            <button
+              type="button"
+              onClick={() => openArchiveFile(f)}
+              className="flex-1 truncate text-left text-xs text-blue-600 hover:underline"
+              title="Siber arşivinden aç"
+            >
+              {f.name ?? "—"}
+            </button>
+            {f.personal_data && (
+              <span className="shrink-0 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                Kişisel veri
+              </span>
+            )}
+            {f.restricted_groups && (
+              <span className="shrink-0 rounded border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-700" title={f.restricted_groups}>
+                Kısıtlı
+              </span>
+            )}
+            <span className="shrink-0 text-[10px] text-gray-400">
+              {f.created_at ? new Date(f.created_at).toLocaleDateString("tr-TR") : "—"}
+              {f.created_by ? ` · ${f.created_by}` : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   async function addMapping(loadTransferId: number) {
     if (!detailId) return;
     try {
@@ -431,61 +771,158 @@ export function TripsPage() {
     }
   }
 
-  const columns: Column<ExpeditionItem>[] = [
-    { key: "expedition_number", header: "Sefer No", sortable: true, render: (r) => <span className="font-mono text-[11px] text-blue-600">{r.expedition_number ?? `SEF-${r.id}`}</span> },
-    // olsold: ExpeditionTable.vue — "Tipi" (expedition_type_id) target'ta hiç yoktu.
-    { key: "expedition_type_id", header: "Tipi", render: (r) => <span className="text-xs text-gray-500">{r.expedition_type_id?.name ?? "—"}</span> },
-    { key: "romork_id", header: "Araç", render: (r) => <span className="font-mono text-xs font-semibold">{r.romork_id?.plate_number ?? "—"}</span> },
-    { key: "work_type", header: "İş Tipi", render: (r) => r.work_type?.name ?? "—" },
-    {
-      key: "route",
-      header: "Güzergâh",
-      render: (r) =>
-        r.start_city_id && r.end_city_id ? (
-          <span>{r.start_city_id.name} → {r.end_city_id.name}</span>
-        ) : (
-          <span className={r.start_city_id || r.end_city_id ? "" : "text-gray-400"}>
-            {r.start_city_id?.name ?? r.end_city_id?.name ?? "—"}
-          </span>
-        ),
-    },
-    { key: "department_id", header: "Departman", render: (r) => r.department_id?.name ?? "—" },
-    { key: "status_id", header: "Durum", render: (r) => (r.status_id?.name ? <Badge label={r.status_id.name} /> : "—") },
-    { key: "created_at", header: "Tarih", render: (r) => <span className="font-mono text-xs text-gray-500">{r.created_at ? new Date(r.created_at).toLocaleDateString("tr-TR") : "—"}</span> },
-  ];
-
   return (
     <>
       <ModulePage
         title="Seferler"
-        search={search}
-        onSearchChange={(v) => { setSearch(v); setPage(1); }}
-        searchPlaceholder="Sefer no, plaka..."
-        filters={
-          <div className="flex items-center gap-1.5">
-            <div className="w-[136px]"><TextInput type="date" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} /></div>
-            <span className="text-xs text-gray-400">–</span>
-            <div className="w-[136px]"><TextInput type="date" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} /></div>
+        action={canCreate ? (
+          <div className="flex items-center gap-2">
+            {/* Kaydedilmemiş "Yeni Sefer" taslağı — Teklif'teki Taslaklar menüsüyle
+                aynı desen (bkz. QuotesPage.tsx). Sefer'de sunucu taraflı taslak
+                kavramı olmadığı için menü yalnızca bu girdiyi listeler. */}
+            <div className="relative" ref={draftsRef}>
+              <Btn variant="secondary" onClick={() => setDraftsOpen((o) => !o)}>
+                <FileText size={14} />
+                Taslaklar
+                {tripDraft && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold">
+                    1
+                  </span>
+                )}
+              </Btn>
+              {draftsOpen && (
+                <div className="absolute z-30 mt-1 right-0 w-80 bg-white border border-gray-200 rounded-md shadow-2xl">
+                  <div className="px-4 py-2.5 border-b border-gray-100">
+                    <p className="text-xs font-semibold text-gray-700">Taslaklar</p>
+                  </div>
+                  {tripDraft ? (
+                    <div className="flex items-stretch bg-amber-50/50">
+                      <button
+                        type="button"
+                        onClick={resumeTripDraft}
+                        className="flex-1 text-left px-4 py-2.5 hover:bg-amber-50 transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium text-gray-800 truncate">
+                            {workTypes.find((w) => String(w.id) === tripDraft.form.work_type)?.name
+                              ?? (tripDraft.form.romork_plate || (tripDraft.form.romork_id ? `Araç #${tripDraft.form.romork_id}` : "Yeni sefer"))}
+                          </p>
+                          <span className="shrink-0 text-[10px] font-semibold text-amber-700">
+                            Kaydedilmedi
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-gray-500 mt-0.5">
+                          Kaldığı yerden devam et · {formatDraftTime(tripDraft.savedAt)}
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={discardTripDraft}
+                        title="Taslağı sil"
+                        className="px-3 text-gray-300 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 text-center py-6">Taslak bulunamadı.</p>
+                  )}
+                </div>
+              )}
+            </div>
+            <Btn onClick={openNew}><Plus size={14} />Yeni Sefer</Btn>
           </div>
-        }
-        action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Sefer</Btn> : undefined}
+        ) : undefined}
       >
-        <div className="bg-white">
+        <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex-1 max-w-md">
+              <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: sefer no, plaka..." />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((s) => !s)}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                showAdvanced || hasActiveAdvancedFilters
+                  ? "text-blue-600 border-blue-200 bg-blue-50/50"
+                  : "text-gray-600 border-gray-200 hover:border-blue-200 hover:text-blue-600",
+              )}
+            >
+              <Filter size={13} />
+              Detaylı Arama
+              {hasActiveAdvancedFilters && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+              <ChevronDown size={13} className={clsx("transition-transform", showAdvanced && "rotate-180")} />
+            </button>
+            {hasActiveFilters && (
+              <button type="button" onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1 shrink-0">
+                <X size={12} />
+                Temizle
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence initial={false}>
+            {showAdvanced && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 pt-4 mt-4 border-t border-gray-100">
+                  <FormField label="Sefer Tipi">
+                    <SelectInput value={fExpeditionType} onChange={(v) => { setFExpeditionType(v); setPage(1); }} options={opts(expeditionTypes)} />
+                  </FormField>
+                  <FormField label="Durum">
+                    <SelectInput value={fStatus} onChange={(v) => { setFStatus(v); setPage(1); }} options={opts(expeditionStatuses)} />
+                  </FormField>
+                  <FormField label="Departman">
+                    <SelectInput value={fDepartment} onChange={(v) => { setFDepartment(v); setPage(1); }} options={opts(departments)} />
+                  </FormField>
+                  <FormField label="Başlangıç Tarihi">
+                    <TextInput type="date" value={dateFrom} onChange={(v) => { setDateFrom(v); setPage(1); }} />
+                  </FormField>
+                  <FormField label="Bitiş Tarihi">
+                    <TextInput type="date" value={dateTo} onChange={(v) => { setDateTo(v); setPage(1); }} />
+                  </FormField>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <Tabs
+          tabs={WORK_TYPE_TABS}
+          active={workTypeTab}
+          onChange={(t) => { setWorkTypeTab(t); setPage(1); }}
+          className="px-6 bg-white"
+        />
+        <div className="bg-gray-50/70 min-h-full">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={Truck} title="Sefer bulunamadı" desc="Arama kriterlerine uygun sefer bulunamadı." />
           ) : (
             <>
-              <DataTable
-                data={rows}
-                columns={columns}
-                loading={loading}
-                onRowClick={(r) => openDetail(r.id)}
-                actions={
-                  canDelete
-                    ? (r) => <RowActions onDelete={() => handleDelete(r.id, r.expedition_number)} />
-                    : undefined
-                }
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 h-[132px] animate-pulse">
+                        <div className="h-3 w-20 bg-gray-200 rounded mb-3" />
+                        <div className="h-3 w-32 bg-gray-200 rounded mb-2" />
+                        <div className="h-3 w-24 bg-gray-100 rounded" />
+                      </div>
+                    ))
+                  : rows.map((r, i) => (
+                      <ExpeditionCard
+                        key={r.id}
+                        row={r}
+                        index={i}
+                        onClick={() => openDetail(r.id)}
+                        canDelete={canDelete}
+                        onDelete={() => handleDelete(r.id, r.expedition_number)}
+                      />
+                    ))}
+              </div>
               <Pagination page={page} total={total} perPage={PER_PAGE} onChange={setPage} />
             </>
           )}
@@ -501,20 +938,28 @@ export function TripsPage() {
         footer={
           canCreate && (
             <div className="flex gap-2">
-              <Btn onClick={handleSubmit} disabled={saving}>{saving ? "Kaydediliyor..." : "Kaydet"}</Btn>
+              <Btn onClick={handleSubmit} disabled={saving}>
+                <BusyLabel busy={saving} busyText="Kaydediliyor...">Kaydet</BusyLabel>
+              </Btn>
               <Btn variant="secondary" onClick={() => setDrawerOpen(false)}>İptal</Btn>
             </div>
           )
         }
       >
         <div className="p-8 grid grid-cols-2 gap-x-6 gap-y-5">
-          <FormField label="Araç (Plaka)" required error={errors.romork_id?.[0]}>
-            <TextInput value={form.romork_id} onChange={(v) => setForm((f) => ({ ...f, romork_id: v }))} placeholder="Araç ID" error={!!errors.romork_id} />
-            <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
-          </FormField>
+          <CarPicker
+            label="Araç (Plaka)"
+            required
+            error={errors.romork_id?.[0]}
+            value={form.romork_id ? { id: Number(form.romork_id), plate_number: form.romork_plate || null } : null}
+            onChange={(v) => setForm((f) => ({
+              ...f,
+              romork_id: v ? String(v.id) : "",
+              romork_plate: v?.plate_number ?? "",
+            }))}
+          />
           <FormField label="İş Tipi" required error={errors.work_type?.[0]}>
             <SelectInput value={form.work_type} onChange={(v) => setForm((f) => ({ ...f, work_type: v }))} options={opts(workTypes)} />
-            <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
           </FormField>
           <FormField label="Departman" required error={errors.department_id?.[0]}>
             <SelectInput value={form.department_id} onChange={(v) => setForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
@@ -522,7 +967,6 @@ export function TripsPage() {
           </FormField>
           <FormField label="Sefer Tipi" required error={errors.expedition_type?.[0]}>
             <SelectInput value={form.expedition_type} onChange={(v) => setForm((f) => ({ ...f, expedition_type: v }))} options={opts(expeditionTypes)} />
-            <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
           </FormField>
           <FormField label="Çıkış Tarihi" error={errors.release_date?.[0]}>
             <TextInput value={form.release_date} onChange={(v) => setForm((f) => ({ ...f, release_date: v }))} type="date" error={!!errors.release_date} />
@@ -541,15 +985,17 @@ export function TripsPage() {
 
       <Drawer
         open={detailOpen}
-        onClose={() => setDetailOpen(false)}
+        onClose={() => { setDetailOpen(false); clearExpeditionDeepLink(); }}
         title={detail?.expedition_number ?? "Sefer"}
         subtitle={detail?.romork_id?.plate_number ?? undefined}
         width="w-[760px]"
         footer={
           detailTab === "Genel Bilgiler" && canUpdate ? (
             <div className="flex gap-2">
-              <Btn onClick={handleDetailSave} disabled={detailSaving || detailLoading}>{detailSaving ? "Kaydediliyor..." : "Kaydet"}</Btn>
-              <Btn variant="secondary" onClick={() => setDetailOpen(false)}>İptal</Btn>
+              <Btn onClick={handleDetailSave} disabled={detailSaving || detailLoading}>
+                <BusyLabel busy={detailSaving} busyText="Kaydediliyor...">Kaydet</BusyLabel>
+              </Btn>
+              <Btn variant="secondary" onClick={() => { setDetailOpen(false); clearExpeditionDeepLink(); }}>İptal</Btn>
             </div>
           ) : undefined
         }
@@ -561,18 +1007,41 @@ export function TripsPage() {
           detail && (
             <div className="p-8">
               {detailTab === "Genel Bilgiler" && (
-                <div className="grid grid-cols-3 gap-x-6 gap-y-5">
-                  <FormField label="Araç (Plaka)" required error={detailErrors.romork_id?.[0]}>
-                    <TextInput value={detailForm.romork_id} onChange={(v) => setDetailForm((f) => ({ ...f, romork_id: v }))} placeholder="Araç ID" error={!!detailErrors.romork_id} />
-                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
-                  </FormField>
+                <div>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-5">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Sefer Bilgisi</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-white p-2 rounded-md border border-gray-200">
+                        <div className="text-[10px] text-gray-500">Hafta</div>
+                        <div className="text-xs font-semibold text-gray-800">{detail.year_week || "—"}</div>
+                      </div>
+                      <div className="bg-white p-2 rounded-md border border-gray-200">
+                        <div className="text-[10px] text-gray-500">Kayıt Giriş Tarihi</div>
+                        <div className="text-xs font-semibold text-gray-800">
+                          {detail.registration_login_date ? new Date(detail.registration_login_date).toLocaleDateString("tr-TR") : "—"}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-x-6 gap-y-5">
+                  <CarPicker
+                    label="Araç (Plaka)"
+                    required
+                    error={detailErrors.romork_id?.[0]}
+                    value={detailForm.romork_id
+                      ? { id: Number(detailForm.romork_id), plate_number: detailForm.romork_plate || null }
+                      : null}
+                    onChange={(v) => setDetailForm((f) => ({
+                      ...f,
+                      romork_id: v ? String(v.id) : "",
+                      romork_plate: v?.plate_number ?? "",
+                    }))}
+                  />
                   <FormField label="Durum" required error={detailErrors.expedition_status_id?.[0]}>
                     <SelectInput value={detailForm.status_id} onChange={(v) => setDetailForm((f) => ({ ...f, status_id: v }))} options={opts(expeditionStatuses)} />
-                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                   </FormField>
                   <FormField label="İş Tipi" required error={detailErrors.work_type?.[0]}>
                     <SelectInput value={detailForm.work_type} onChange={(v) => setDetailForm((f) => ({ ...f, work_type: v }))} options={opts(workTypes)} />
-                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                   </FormField>
                   <FormField label="Departman" required error={detailErrors.department_id?.[0]}>
                     <SelectInput value={detailForm.department_id} onChange={(v) => setDetailForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
@@ -580,7 +1049,6 @@ export function TripsPage() {
                   </FormField>
                   <FormField label="Sefer Tipi" required error={detailErrors.expedition_type?.[0]}>
                     <SelectInput value={detailForm.expedition_type} onChange={(v) => setDetailForm((f) => ({ ...f, expedition_type: v }))} options={opts(expeditionTypes)} />
-                    <button type="button" onClick={() => setDepartmentModalOpen(true)} className="mt-1 text-[11px] text-blue-600 hover:underline text-left">Yeni Ekle</button>
                   </FormField>
                   <FormField label="Araç Çıkış Tarihi" error={detailErrors.car_exit_date?.[0]} hint="Sefer durumu 8 iken zorunlu.">
                     <TextInput value={detailForm.car_exit_date} onChange={(v) => setDetailForm((f) => ({ ...f, car_exit_date: v }))} type="date" error={!!detailErrors.car_exit_date} />
@@ -603,11 +1071,25 @@ export function TripsPage() {
                   <FormField label="Bitiş Şehri" error={detailErrors.end_city_id?.[0]} hint="Sefer durumu 8 iken zorunlu.">
                     <SelectInput value={detailForm.end_city_id} onChange={(v) => setDetailForm((f) => ({ ...f, end_city_id: v }))} options={opts(cities)} />
                   </FormField>
+                  </div>
                 </div>
               )}
 
               {detailTab === "Bağlı Yükler" && (
                 <div>
+                  {/* SEFERİN KENDİ evrakları — bağlı yüklerinkinden ayrı.
+                      Siber'de ikisi farklı kayda bağlanıyor: sefer evrakı
+                      pozisyonid'ye, yük evrakı yukid'ye. */}
+                  <div className="mb-5 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                      Sefer Evrakları (Siber Arşivi)
+                    </p>
+                    <ArchiveList
+                      files={detail?.siber_archive ?? []}
+                      empty="Bu sefer için Siber arşivinde evrak yok."
+                    />
+                  </div>
+
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Bağlı Yükler</p>
                     {canUpdate && (
@@ -667,12 +1149,31 @@ export function TripsPage() {
                                   <p className="text-xs text-gray-700">
                                     Römork: <span className="font-medium">{m.romork_id?.plate_number ?? "—"}</span>
                                   </p>
+                                  <p className="text-xs text-gray-700">
+                                    Şehir: <span className="font-medium">{m.yer_id?.name ?? "—"}</span>
+                                    {" · "}
+                                    {m.upload_unload === 1 ? "Yükleme" : m.upload_unload === 2 ? "Boşaltma" : "—"}
+                                    {m.date && ` · ${new Date(m.date).toLocaleDateString("tr-TR")}`}
+                                  </p>
                                 </div>
-                                {canUpdate && (
-                                  <button type="button" onClick={() => removeMapping(m.id)} className="text-gray-300 hover:text-red-500 shrink-0">
-                                    <Trash2 size={13} />
-                                  </button>
-                                )}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {canOpenLoad && m.load_transfer_id?.id && (
+                                    <button
+                                      type="button"
+                                      onClick={() => navigate(`/yukler?yuk=${m.load_transfer_id!.id}`)}
+                                      title="Bu yükü Yükler ekranında aç"
+                                      className="flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100"
+                                    >
+                                      <ExternalLink size={12} />
+                                      Yüke Git
+                                    </button>
+                                  )}
+                                  {canUpdate && (
+                                    <button type="button" onClick={() => removeMapping(m.id)} className="text-gray-300 hover:text-red-500">
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
 
                               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 mt-3">
@@ -708,6 +1209,18 @@ export function TripsPage() {
                               </button>
                               {expanded && (
                                 <div className="mt-2 space-y-2">
+                                  {/* Bu yükün Siber arşivindeki evrakları — yük
+                                      kartına gitmeden buradan açılabilsin. */}
+                                  <div>
+                                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                                      Evraklar (Siber Arşivi)
+                                    </p>
+                                    <ArchiveList
+                                      files={m.load_transfer_id?.siber_archive ?? []}
+                                      empty="Bu yük için Siber arşivinde evrak yok."
+                                    />
+                                  </div>
+
                                   {packages.length === 0 ? (
                                     <p className="text-[11px] text-gray-400 text-center py-3">Bu yüke ait paket bulunamadı.</p>
                                   ) : (
@@ -716,6 +1229,7 @@ export function TripsPage() {
                                         <p className="text-xs font-semibold text-gray-700 mb-2">{i + 1}. Ürün</p>
                                         <div className="flex flex-wrap gap-1.5">
                                           <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Mal Cinsi: <b className="text-gray-700">{p.product_type_id?.name ?? "—"}</b></span>
+                                          <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Ambalaj: <b className="text-gray-700">{p.case_type_id?.name ?? "—"}</b></span>
                                           <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Adet: <b className="text-gray-700">{p.quantity ?? 0}</b></span>
                                           <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Hacim: <b className="text-gray-700">{p.volume ?? 0} m³</b></span>
                                           <span className="text-[11px] text-gray-500 py-1 px-2 bg-gray-50 rounded-md">Brüt Ağırlık: <b className="text-gray-700">{p.gross_weight ?? 0} kg</b></span>

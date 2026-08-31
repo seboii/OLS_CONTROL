@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
-import { Plus, Shield, Upload, Trash2, Target, Calendar, Pencil } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { clsx } from "clsx";
+import { Plus, Shield, Upload, Trash2, Target, Calendar, Pencil, Filter, ChevronDown, X, Phone, Mail } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
-import { DataTable, EmptyState, Pagination, RowActions, type Column } from "@/components/ui/DataTable";
+import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
-import { Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
+import { Badge, Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
 
 interface NamedRef {
   id: string;
@@ -27,6 +29,24 @@ interface UserItem {
 interface UserDetail extends UserItem {
   pkds_id: string | null;
   phone_country_id: NamedRef | null;
+  /** Uygulanmış yetki şablonu (bkz. Role). */
+  role_id: number | null;
+  /** Görme kapsamı: hangi Siber şirketinin yük/seferlerini görür. */
+  siber_company_id: string | null;
+  /** Siber'deki departman — rolün neden bu olduğunu açıklamak için gösterilir. */
+  siber_department_name: string | null;
+  siber_blocked: boolean | null;
+}
+
+/** sbr_sirket: AVRORA ULUSLARARASI TASIMACILIK LIMITED SIRKETI (bkz. CompanyScope). */
+const AVRORA_COMPANY_ID = "46258A01-8D77-4F87-AAF5-6B331DEDD8A7";
+
+interface RoleOption {
+  id: number;
+  name: string;
+  slug: string;
+  description: string | null;
+  user_count: number;
 }
 
 interface UserGoalItem {
@@ -47,7 +67,7 @@ interface PermissionRow {
   permission_page_slug: string;
 }
 
-const PER_PAGE = 10;
+const PER_PAGE = 24;
 const PERM_LABELS: Record<"read" | "create" | "update" | "delete", string> = {
   read: "Görüntüle",
   create: "Oluştur",
@@ -57,6 +77,59 @@ const PERM_LABELS: Record<"read" | "create" | "update" | "delete", string> = {
 
 function initials(name: string | null, surname: string | null) {
   return `${(name ?? "?").charAt(0)}${(surname ?? "").charAt(0)}`.toUpperCase();
+}
+
+function UserCard({
+  row, index, onClick, canDelete, onDelete,
+}: {
+  row: UserItem; index: number; onClick: () => void; canDelete: boolean; onDelete: () => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.03 }}
+      whileHover={{ y: -2 }}
+      onClick={onClick}
+      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-shadow cursor-pointer p-4 flex flex-col gap-3"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {row.avatar ? (
+            <img src={`/storage/${row.avatar}`} alt="" className="w-9 h-9 rounded-lg object-cover border border-gray-200 shrink-0" />
+          ) : (
+            <div className="w-9 h-9 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-[11px] font-bold border border-gray-200 shrink-0">
+              {initials(row.name, row.surname)}
+            </div>
+          )}
+          <p className="text-sm font-semibold text-gray-900 truncate min-w-0">{row.name} {row.surname}</p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <Badge label={row.status ? "Aktif" : "Pasif"} />
+          {canDelete && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onDelete(); }}
+              className="p-1 rounded text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="pt-2.5 border-t border-gray-100 space-y-1.5">
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500 min-w-0">
+          <Phone size={12} className="text-gray-400 shrink-0" />
+          <span className="truncate">{row.phone || "—"}</span>
+        </div>
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-500 min-w-0">
+          <Mail size={12} className="text-gray-400 shrink-0" />
+          <span className="truncate">{row.email || "—"}</span>
+        </div>
+      </div>
+    </motion.div>
+  );
 }
 
 export function UsersPage() {
@@ -74,6 +147,21 @@ export function UsersPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  const [fStatus, setFStatus] = useState("");
+  const [fPhoneCountry, setFPhoneCountry] = useState("");
+  const [fWorkingTracking, setFWorkingTracking] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const hasActiveAdvancedFilters = !!(fStatus || fPhoneCountry || fWorkingTracking);
+  const hasActiveFilters = !!(search || hasActiveAdvancedFilters);
+
+  function clearFilters() {
+    setSearch("");
+    setFStatus("");
+    setFPhoneCountry("");
+    setFWorkingTracking("");
+    setPage(1);
+  }
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [tab, setTab] = useState("Profil");
@@ -81,6 +169,21 @@ export function UsersPage() {
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [form, setForm] = useState({ name: "", surname: "", email: "", phone: "", password: "", password_confirmation: "", phone_country_id: "", pkds_id: "" });
   const [permRows, setPermRows] = useState<PermissionRow[]>([]);
+
+  // ROL KATMANI: yetki tablosu tek tek kutu işaretlemeye izin veriyor, ama 25
+  // sayfayı elle işaretlemek pratik değil. Rol seçildiğinde o rolün şablonu
+  // sunucuda kullanıcıya uygulanır (user_permissions satırlarına yazılır) ve
+  // tablo yeniden okunur. Rol uygulandıktan sonra tek tek değiştirmek serbest —
+  // rol bir başlangıç noktası, kilit değil.
+  const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [detailRoleId, setDetailRoleId] = useState<number | null>(null);
+  const [detailDepartment, setDetailDepartment] = useState<string | null>(null);
+  const [applyingRole, setApplyingRole] = useState(false);
+
+  // ŞİRKET KAPSAMI — roldan ayrı: rol "ne yapabilir", kapsam "ne görebilir".
+  // Boş = Avrora hariç her şey; Avrora = yalnızca Avrora kayıtları.
+  const [detailCompany, setDetailCompany] = useState<string>("");
+  const [applyingCompany, setApplyingCompany] = useState(false);
   const [permLoading, setPermLoading] = useState(false);
   const [existingAvatar, setExistingAvatar] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
@@ -108,7 +211,14 @@ export function UsersPage() {
   function load() {
     setLoading(true);
     api
-      .get<DataMessage<Paginated<UserItem>>>("/api/v1/user", { search: debouncedSearch || undefined, per_page: PER_PAGE, page })
+      .get<DataMessage<Paginated<UserItem>>>("/api/v1/user", {
+        search: debouncedSearch || undefined,
+        status: fStatus || undefined,
+        phone_country_id: fPhoneCountry || undefined,
+        working_tracking: fWorkingTracking || undefined,
+        per_page: PER_PAGE,
+        page,
+      })
       .then((res) => {
         setRows(res.data.data);
         setTotal(res.data.total);
@@ -120,7 +230,7 @@ export function UsersPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page]);
+  }, [debouncedSearch, page, fStatus, fPhoneCountry, fWorkingTracking]);
 
   function openNew() {
     setEditingId(null);
@@ -173,6 +283,9 @@ export function UsersPage() {
         password: "", password_confirmation: "", phone_country_id: d.phone_country_id?.id ?? "", pkds_id: d.pkds_id ?? "",
       });
       setExistingAvatar(d.avatar);
+      setDetailRoleId(d.role_id);
+      setDetailDepartment(d.siber_department_name);
+      setDetailCompany(d.siber_company_id ?? "");
     } catch {
       addToast("Kullanıcı bilgileri yüklenemedi", "error");
     }
@@ -182,6 +295,9 @@ export function UsersPage() {
   }
 
   async function handleSubmit() {
+    // Buton disabled={saving} render'a kadar DOM'a yansımıyor — hızlı çift
+    // tıklama/tekrar tetiklemeye karşı erken çıkış.
+    if (saving) return;
     setSaving(true);
     setErrors({});
     const fd = new FormData();
@@ -224,6 +340,48 @@ export function UsersPage() {
       load();
     } catch (err) {
       addToast(err instanceof Error ? err.message : "Silinemedi", "error");
+    }
+  }
+
+  // Rol listesi yalnızca rol yönetimi yetkisi olanlara lazım; yetkisiz kullanıcı
+  // için uç 403 döner ve liste boş kalır (seçici de gizlenir).
+  useEffect(() => {
+    if (!canManageRoles) return;
+    api
+      .get<DataMessage<RoleOption[]>>("/api/v1/roles")
+      .then((res) => setRoles(res.data))
+      .catch(() => setRoles([]));
+  }, [canManageRoles]);
+
+  async function applyRole(roleId: number) {
+    if (!editingId) return;
+    setApplyingRole(true);
+    try {
+      await api.post("/api/v1/roles/assign", { user_id: editingId, role_id: roleId });
+      setDetailRoleId(roleId);
+      await loadPermissions(editingId);
+      addToast("Rol uygulandı");
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Rol uygulanamadı", "error");
+    } finally {
+      setApplyingRole(false);
+    }
+  }
+
+  async function applyCompanyScope(companyId: string) {
+    if (!editingId) return;
+    setApplyingCompany(true);
+    try {
+      await api.post("/api/v1/roles/company-scope", {
+        user_id: editingId,
+        company_id: companyId || null,
+      });
+      setDetailCompany(companyId);
+      addToast("Şirket kapsamı güncellendi");
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Kapsam güncellenemedi", "error");
+    } finally {
+      setApplyingCompany(false);
     }
   }
 
@@ -310,57 +468,89 @@ export function UsersPage() {
     }
   }
 
-  // olsold: UserTable.vue — yalnızca 3 sütun (Kullanıcı: avatar+ad soyad, Telefon,
-  // E-Posta). "Durum" kaynakta yok, kaldırıldı. Avatar+ad soyad tek sütunda birleşti
-  // (Müşteri'deki #26 ile aynı desen). "title" alt yazısı kaynakta da boş kalıyordu
-  // (User modelinde böyle bir alan yok — dead reference), taşınmadı.
-  const columns: Column<UserItem>[] = [
-    {
-      key: "name",
-      header: "Kullanıcı",
-      sortable: true,
-      render: (r) => (
-        <div className="flex items-center gap-3">
-          {r.avatar ? (
-            <img src={`/storage/${r.avatar}`} alt={r.name ?? ""} className="w-8 h-8 rounded-lg object-cover border border-gray-200" />
-          ) : (
-            <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center text-[10px] font-bold border border-gray-200">
-              {initials(r.name, r.surname)}
-            </div>
-          )}
-          <span className="font-semibold">{r.name} {r.surname}</span>
-        </div>
-      ),
-    },
-    { key: "phone", header: "Telefon", render: (r) => <span className="font-mono text-xs text-gray-500">{r.phone ?? "—"}</span> },
-    { key: "email", header: "E-posta", render: (r) => <span className="text-xs text-gray-500">{r.email}</span> },
-  ];
-
   return (
     <>
       <ModulePage
         title="Kullanıcılar"
-        search={search}
-        onSearchChange={(v) => { setSearch(v); setPage(1); }}
-        searchPlaceholder="Ad, e-posta..."
         action={canCreate ? <Btn onClick={openNew}><Plus size={14} />Yeni Kullanıcı</Btn> : undefined}
       >
-        <div className="bg-white">
+        <div className="bg-white border-b border-gray-200 px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex-1 max-w-md">
+              <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: ad, e-posta..." />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((s) => !s)}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                showAdvanced || hasActiveAdvancedFilters
+                  ? "text-blue-600 border-blue-200 bg-blue-50/50"
+                  : "text-gray-600 border-gray-200 hover:border-blue-200 hover:text-blue-600",
+              )}
+            >
+              <Filter size={13} />
+              Detaylı Arama
+              {hasActiveAdvancedFilters && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+              <ChevronDown size={13} className={clsx("transition-transform", showAdvanced && "rotate-180")} />
+            </button>
+            {hasActiveFilters && (
+              <button type="button" onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1 shrink-0">
+                <X size={12} />
+                Temizle
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence initial={false}>
+            {showAdvanced && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2, ease: "easeInOut" }}
+                className="overflow-hidden"
+              >
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-4 mt-4 border-t border-gray-100">
+                  <FormField label="Durum">
+                    <SelectInput value={fStatus} onChange={(v) => { setFStatus(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, { value: "true", label: "Aktif" }, { value: "false", label: "Pasif" }]} />
+                  </FormField>
+                  <FormField label="Ülke Kodu">
+                    <SelectInput value={fPhoneCountry} onChange={(v) => { setFPhoneCountry(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...countries.map((c) => ({ value: String(c.id), label: c.phone_code ? `+${c.phone_code}` : c.name }))]} />
+                  </FormField>
+                  <FormField label="Mesai Takibi">
+                    <SelectInput value={fWorkingTracking} onChange={(v) => { setFWorkingTracking(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, { value: "true", label: "Evet" }, { value: "false", label: "Hayır" }]} />
+                  </FormField>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+        <div className="bg-gray-50/70 min-h-full">
           {!loading && rows.length === 0 ? (
             <EmptyState icon={Shield} title="Kullanıcı bulunamadı" desc="Arama kriterlerine uygun kullanıcı bulunamadı." />
           ) : (
             <>
-              <DataTable
-                data={rows}
-                columns={columns}
-                loading={loading}
-                onRowClick={(r) => openEdit(r)}
-                actions={
-                  canUpdate || canDelete
-                    ? (r) => <RowActions onView={() => openEdit(r)} onEdit={canUpdate ? () => openEdit(r) : undefined} onDelete={canDelete && r.id !== me?.id ? () => handleDelete(r.id, r.name) : undefined} />
-                    : undefined
-                }
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
+                {loading
+                  ? Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i} className="bg-white rounded-xl border border-gray-200 p-4 h-[132px] animate-pulse">
+                        <div className="h-3 w-20 bg-gray-200 rounded mb-3" />
+                        <div className="h-3 w-32 bg-gray-200 rounded mb-2" />
+                        <div className="h-3 w-24 bg-gray-100 rounded" />
+                      </div>
+                    ))
+                  : rows.map((r, i) => (
+                      <UserCard
+                        key={r.id}
+                        row={r}
+                        index={i}
+                        onClick={() => openEdit(r)}
+                        canDelete={canDelete && r.id !== me?.id}
+                        onDelete={() => handleDelete(r.id, r.name)}
+                      />
+                    ))}
+              </div>
               <Pagination page={page} total={total} perPage={PER_PAGE} onChange={setPage} />
             </>
           )}
@@ -456,6 +646,66 @@ export function UsersPage() {
         )}
         {tab === "Yetkiler" && (
           <div className="p-6">
+            {canManageRoles && roles.length > 0 && (
+              <div className="mb-5 rounded-lg border border-gray-200 bg-gray-50/70 p-4">
+                <div className="flex items-center justify-between gap-3 mb-1">
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Rol</p>
+                  {detailDepartment && (
+                    <span className="text-[11px] text-gray-400">
+                      Siber departmanı: <b className="text-gray-600">{detailDepartment}</b>
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={detailRoleId ?? ""}
+                    disabled={applyingRole}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      if (value) applyRole(Number(value));
+                    }}
+                    className="px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+                  >
+                    <option value="">Rol seçin…</option>
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                  {applyingRole && <span className="text-xs text-gray-500">Uygulanıyor…</span>}
+                </div>
+
+                <div className="mt-3 border-t border-gray-200 pt-3">
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                    Şirket Kapsamı
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={detailCompany}
+                      disabled={applyingCompany}
+                      onChange={(e) => applyCompanyScope(e.target.value)}
+                      className="px-3 py-2 text-sm border border-gray-200 rounded-md bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-50"
+                    >
+                      <option value="">Avrora hariç tümü (varsayılan)</option>
+                      <option value={AVRORA_COMPANY_ID}>Yalnızca Avrora</option>
+                    </select>
+                    {applyingCompany && <span className="text-xs text-gray-500">Uygulanıyor…</span>}
+                  </div>
+                  <p className="mt-1 text-[11px] text-gray-500">
+                    Yük ve sefer listelerinde hangi şirketin kayıtlarının görüneceğini belirler.
+                    E-postası <b>@avroralog.com</b> olan kullanıcılar bu ayar boş olsa da
+                    yalnızca Avrora'yı görür. Yönetim rolü her şeyi görür.
+                  </p>
+                </div>
+
+                <p className="mt-2 text-[11px] text-gray-500">
+                  {roles.find((r) => r.id === detailRoleId)?.description
+                    ?? "Rol seçildiğinde o rolün yetki şablonu aşağıdaki tabloya uygulanır."}
+                  {" "}Uyguladıktan sonra tek tek değiştirebilirsiniz.
+                </p>
+              </div>
+            )}
+
             {permLoading ? (
               <p className="text-sm text-gray-400 text-center py-10">Yükleniyor...</p>
             ) : (

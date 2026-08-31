@@ -12,6 +12,8 @@ import { InvoicesPage } from "@/pages/invoices/InvoicesPage";
 import { VehiclesPage } from "@/pages/vehicles/VehiclesPage";
 import { UsersPage } from "@/pages/users/UsersPage";
 import { SupportPage } from "@/pages/support/SupportPage";
+import { ReportingPage } from "@/pages/reporting/ReportingPage";
+import { AuditLogPage } from "@/pages/audit/AuditLogPage";
 import { ProfilePage } from "@/pages/ProfilePage";
 
 export default function App() {
@@ -32,6 +34,8 @@ export default function App() {
               <Route path="/araclar" element={<VehiclesPage />} />
               <Route path="/kullanicilar" element={<UsersPage />} />
               <Route path="/destek-talepleri" element={<SupportPage />} />
+              <Route path="/raporlama" element={<ReportingPage />} />
+              <Route path="/denetim" element={<AuditLogPage />} />
               <Route path="/hesabim" element={<ProfilePage />} />
             </Route>
             <Route path="*" element={<Navigate to="/panel" replace />} />
