@@ -1,14 +1,27 @@
-# OLS — Scoped .NET Port (Müşteri, Teklif, Yük, Sefer, Fatura, Araç, Kullanıcılar, Destek Talebi)
+# OLS — Nakliye / Lojistik / Gümrükleme ERP
 
-Uluslararası nakliye/lojistik/gümrükleme ERP'si **OLS**'nin, mevcut Laravel sisteminden (`olsold`)
-seçilen **8 kullanıcı modülünün** ASP.NET Core 9 + PostgreSQL + React'e taşınmış, çalışır durumdaki
-kapsamlı portu. Kapsam dışı bırakılan modüller (dashboard/ciro, PDKS, mesajlaşma, Excel yönetimi,
-muhasebe planı, gümrük beyanname/ordino, CMS) bilinçli bir karar — ayrıntı için
-[docs/SECILI-MODUL-PARITE-MATRISI.md](docs/SECILI-MODUL-PARITE-MATRISI.md).
+Uluslararası nakliye, lojistik ve gümrükleme operasyonlarını yöneten **OLS**'nin ASP.NET Core 9 +
+PostgreSQL + React ile yazılmış sürümü. Uygulama, kurumun mevcut **Siber ERP**'si (MSSQL) ile çift
+yönlü çalışır: cari, teklif, yük, sefer, araç, kullanıcı ve evrak verisi Siber'den okunur; uygulamada
+açılan kayıtlar Siber'e geri yazılır.
 
-Bu proje `olsold`/`olsnew`'i **okur ama değiştirmez** — bağımsız, kendi git geçmişine sahip bir teslim.
+## Modüller
 
-## Hızlı başlangıç (Docker — tek komut)
+| Modül | Yol | Yetki slug'ı |
+|---|---|---|
+| Panel | `/panel` | — |
+| Müşteriler (cari) | `/musteriler` | `account_management` |
+| Teklifler | `/teklifler` | `load_management` |
+| Yükler | `/yukler` | `load_management` |
+| Seferler | `/seferler` | `expedition_management` |
+| Faturalar | `/faturalar` | `invoice_management` |
+| Araçlar | `/araclar` | `car_management` |
+| Kullanıcılar | `/kullanicilar` | `user_management`, `role_management` |
+| Destek talepleri | `/destek-talepleri` | `support_request_management` |
+| Raporlama | `/raporlama` | `report_management` |
+| Denetim kaydı | `/denetim` | `audit_log_management` |
+
+## Hızlı başlangıç
 
 Gereksinim: Docker Desktop.
 
@@ -17,81 +30,149 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Servisler ayağa kalktığında:
-
-| Servis | URL/port | Not |
+| Servis | Adres | Not |
 |---|---|---|
-| Frontend | http://localhost:8105 | nginx + React production build |
+| Arayüz | http://localhost:8105 | nginx + React üretim derlemesi |
 | API | http://localhost:8106 | `/health` ile canlılık kontrolü |
 | PostgreSQL | localhost:5443 | uygulama veritabanı |
-| Sahte Siber (MSSQL) | localhost:1444 | **CANLI Siber ERP'ye asla bağlanmaz** — yalnızca akış doğrulaması için yerel taklit |
+| MSSQL (yerel taklit) | localhost:1444 | `SIBER_CONNECTION_OVERRIDE` boşken kullanılır |
 
-İlk açılışta API konteyneri migrasyonları otomatik uygular ve temel verileri (yetki sayfaları, durum
-kodları, lookup'lar, geliştirme admin kullanıcısı) seed eder.
+API konteyneri ilk açılışta migrasyonları uygular ve temel verileri (yetki sayfaları, roller, durum
+kodları, tanım tabloları) yükler.
 
-**Geliştirme admin girişi** (yalnızca `ASPNETCORE_ENVIRONMENT=Development`'ta, sabit varsayılan olarak
-üretimde KULLANILMAZ — bkz. `Seed:AdminEmail`/`Seed:AdminPassword`):
+## Ağa açma
+
+Uygulamayı telefondan veya ağdaki diğer bilgisayarlardan kullanmak için `.env` içinde makinenin LAN
+adresini tanımlayın:
 
 ```
-E-posta:  admin@ols-scoped.local
-Şifre:    ChangeMe!Dev1
+LAN_ORIGIN=http://192.168.1.50:8105
+FRONTEND_BIND_HOST=0.0.0.0
+API_BIND_HOST=0.0.0.0
 ```
 
-## Yerel geliştirme (Docker olmadan, hızlı iterasyon için)
+`LAN_ORIGIN` API'nin CORS izin listesine işlenir. Arayüz kendi API isteklerini nginx üzerinden aynı
+köken içinde (`/api` → API konteyneri) yönlendirdiği için istemcide ayrı bir adres tanımlamak gerekmez;
+tarayıcıdan yalnızca arayüz portu açılır.
 
-Backend'i lokal çalıştırıp yalnızca Postgres/Siber-mock'u Docker'da tutmak isterseniz:
+Veritabanı portları bilinçli olarak `127.0.0.1`'e bağlıdır (`DB_BIND_HOST`, `SIBER_BIND_HOST`) —
+PostgreSQL ve MSSQL ağa açılmaz.
+
+## Siber entegrasyonu
+
+`SIBER_CONNECTION_OVERRIDE` dolu olduğunda uygulama **canlı Siber veritabanına** bağlanır; boş
+bırakılırsa `docker-compose` içindeki yerel MSSQL taklidi kullanılır. Taklit yalnızca akış doğrulaması
+içindir, veri sadakati hedeflemez.
+
+**Okuma yönü.** Arka plan senkronu cari, kullanıcı, teklif, yük, sefer, araç ve mali kalem tablolarını
+düzenli aralıkla tarar; yalnızca değişen kayıtları günceller. Siber tarafında engellenen kullanıcılar
+uygulamada pasife alınır.
+
+**Yazma yönü.** Uygulamadan açılan teklif, yük ve sefer kayıtları Siber'e yazılır. Kayıt numaraları
+Siber'in kendi sayaç düzenine göre, `sp_getapplock` ile kilitlenmiş tek bir işlem içinde üretilir —
+eşzamanlı iki kullanıcı aynı numarayı alamaz. Sefer numarası (yıl, araç sahibi) kapsamında ilerler.
+
+**Evrak arşivi.** Siber'in `sbr_arsiv` tablosu ve FTP arşivi hem okunur hem yazılır. Bir yüke, sefere
+veya teklife Siber üzerinden eklenmiş evraklar uygulamada listelenir ve indirilebilir; uygulamadan
+yüklenen dosyalar da aynı arşive gönderilir. Klasör düzeyi kodu kayıt türüne göre belirlenir (yük iş
+türüne göre `0401`–`0404`, sefer `0405`, teklif `04113`).
+
+**Kimlik eşleşmesi.** Siber `uniqueidentifier` değerlerini büyük harfle döndürür, .NET küçük harfle
+üretir. PostgreSQL karşılaştırması harfe duyarlı olduğu için Siber tarafındaki kimlikler sorgularda
+küçük harfe indirgenir.
+
+## Yetkilendirme
+
+Yetki modeli **sayfa slug'ı × CRUD bayrağı** temellidir: her kullanıcının her sayfa için ayrı
+okuma/ekleme/güncelleme/silme hakkı vardır. Listelenmeyen bir slug varsayılan olarak reddedilir.
+
+Bunun üzerine, Siber departmanlarından türetilmiş **8 rol** bir şablon katmanı olarak durur: Yönetim,
+Satış & Pazarlama, İhracat Operasyon, İthalat Operasyon, Transit Operasyon, Muhasebe & Finans,
+İdari İşler ve Standart Kullanıcı. Rol atandığında şablon kullanıcının yetki satırlarına yazılır;
+şablonda yer almayan sayfalar sıfırlanır, böylece önceki rolden kalan hak sessizce sürmez. Atama
+sonrası yetkiler kullanıcı ekranından tek tek düzenlenebilir.
+
+`super_admin` slug'ı ayrı bir nesne-seviyesi kural taşır: okuma hakkı olan kullanıcı tüm carileri
+görür, olmayan yalnızca kendisine atanmış carileri görür.
+
+**Şirket kapsamı.** Kurum iki şirket üzerinden çalışır. Avrora ekibindeki kullanıcılar yalnızca Avrora
+yük, sefer ve tekliflerini görür; diğer kullanıcılar Avrora kayıtlarını görmez. Kapsam kullanıcının
+şirket alanından, o boşsa e-posta alan adından belirlenir; yönetici yetkisi olanlar her iki tarafı da
+görür.
+
+## Denetim kaydı
+
+Kayıt ekleme, güncelleme ve silme işlemleri kullanıcı, zaman ve değişen alan bazında saklanır. Parola
+ve belirteç alanları kayda yazılmaz. `/denetim` ekranı yalnızca Yönetim rolüne açıktır ve yük numarası,
+sefer veya kullanıcı üzerinden filtrelenebilir.
+
+## Yerel geliştirme
+
+Yalnızca veritabanlarını Docker'da tutup arka ucu yerelde çalıştırmak için:
 
 ```bash
 docker compose up -d postgres siber-mock siber-init
-dotnet run --project src/OLS.API   # appsettings.Development.json: Postgres localhost:5443
 ```
-
-Frontend'i Vite dev sunucusuyla (hot reload):
 
 ```bash
-cd frontend
-npm install
-npm run dev   # http://localhost:5173, /api ve /storage backend'e (5197) proxy'lenir
+dotnet run --project src/OLS.API
 ```
+
+Arayüzü Vite geliştirme sunucusuyla (hot reload):
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+`http://localhost:5173` üzerinden açılır; `/api` ve `/storage` istekleri arka uca yönlendirilir.
+
+Tip kontrolü için `npm run build` (veya `npx tsc -b`) kullanın — kök `tsconfig.json` proje
+referanslarıyla çalıştığı için `tsc --noEmit` hiçbir dosyayı denetlemez.
 
 ## Testler
 
 ```bash
-dotnet test                                          # tüm çözüm (70 test)
-dotnet test tests/OLS.Business.Tests                 # 29 birim testi, veritabanı gerekmez
-dotnet test tests/OLS.API.IntegrationTests            # 41 entegrasyon testi, gerçek Postgres gerekir (localhost:5443)
+dotnet test
 ```
 
-Entegrasyon testleri `docker compose`'daki Postgres'e karşı, HER ÇALIŞTIRMADA rastgele adlı izole bir
-veritabanı (`ols_scoped_inttest_*`) oluşturup silerek çalışır — geliştirme veritabanınızı (`ols_scoped`)
-etkilemez. Ayrıntı ve bu mekanizmayı bulurken karşılaşılan gerçek sorunlar için
-[docs/TEST-RAPORU.md](docs/TEST-RAPORU.md).
+129 test: `tests/OLS.Business.Tests` altında 29 birim testi (veritabanı gerekmez),
+`tests/OLS.API.IntegrationTests` altında 100 entegrasyon testi (Postgres gerekir).
+
+Entegrasyon testleri her çalıştırmada rastgele adlı izole bir veritabanı (`ols_scoped_inttest_*`)
+oluşturup siler; geliştirme veritabanını etkilemez.
 
 ## Mimari
 
-- **Backend:** ASP.NET Core 9, 3 katman (`OLS.API` → `OLS.Business` → `OLS.DataAccess`), EF Core/Npgsql
-  (PostgreSQL — ana veri), Dapper (Siber/MSSQL — yalnızca legacy senkronizasyon uçları). JWT Bearer auth
-  (jti tabanlı iptal listesi), sayfa-slug × CRUD bayrağı yetki modeli (rol tabanlı DEĞİL — bkz.
-  [docs/YETKI-MATRISI.md](docs/YETKI-MATRISI.md)), snake_case JSON, `/api/v1` öneki.
-- **Frontend:** React 19 + TypeScript + Vite + Tailwind v4, `docs/` altındaki hazır tasarımın birebir
-  portu (koyu lacivert daraltılabilir sidebar, kompakt kurumsal bileşenler).
-- **Veri modeli:** 58 tablo, kapsam dışı 33 tablo taşınmadı. Ayrıntı:
-  [docs/VERI-MODELI.md](docs/VERI-MODELI.md).
+- **Arka uç:** ASP.NET Core 9, üç katman (`OLS.API` → `OLS.Business` → `OLS.DataAccess`).
+  EF Core/Npgsql ana veri için, Dapper Siber/MSSQL uçları için. JWT Bearer kimlik doğrulama
+  (`jti` tabanlı iptal listesi), snake_case JSON, `/api/v1` öneki.
+- **Ön yüz:** React 19 + TypeScript + Vite + Tailwind v4. Daraltılabilir yan menü, kompakt kurumsal
+  bileşenler, modül başına tek sayfa.
+- **Veri modeli:** 64 tablo. Durum kodları (1 Olumsuz, 2 Sipariş, 3 Düzeltme Talebi, 4 Teklif,
+  5 Olumlu) Siber ile birebir sabittir; bu değerler değiştirilemez.
 
-## Belgeler
+## Yapılandırma
 
-| Belge | İçerik |
-|---|---|
-| [docs/SECILI-MODUL-PARITE-MATRISI.md](docs/SECILI-MODUL-PARITE-MATRISI.md) | Modül bazlı ekran/uç parite tablosu |
-| [docs/API-PARITE-MATRISI.md](docs/API-PARITE-MATRISI.md) | Her olsold uç noktası için tek tek durum (PORT/YENİ/KAPSAM-DIŞI/...) |
-| [docs/YETKI-MATRISI.md](docs/YETKI-MATRISI.md) | Yetki modeli, sayfa-slug listesi, nesne-seviyesi kurallar (super_admin, kendi-rolünü-okuma) |
-| [docs/VERI-MODELI.md](docs/VERI-MODELI.md) | Tablo listesi, modül→tablo eşlemesi, DATA-002 durum kodu sabitliği |
-| [docs/TEST-RAPORU.md](docs/TEST-RAPORU.md) | Gerçekten çalıştırılan testler, sonuçları, geliştirme sırasında bulunan gerçek hatalar |
-| [docs/TESLIM-RAPORU.md](docs/TESLIM-RAPORU.md) | Kapsam, tamamlanan/eksik iş, bilinen kısıtlar, teslim özeti |
+| Değişken | Varsayılan | Açıklama |
+|---|---|---|
+| `FRONTEND_PORT` / `API_PORT` | 8105 / 8106 | Yayın portları |
+| `FORWARD_DB_PORT` / `FORWARD_SIBER_PORT` | 5443 / 1444 | Veritabanı portları |
+| `FRONTEND_BIND_HOST` / `API_BIND_HOST` | 0.0.0.0 | Ağa açılan servisler |
+| `DB_BIND_HOST` / `SIBER_BIND_HOST` | 127.0.0.1 | Veritabanları yalnızca yerel |
+| `LAN_ORIGIN` | boş | LAN erişimi için tam adres |
+| `SIBER_CONNECTION_OVERRIDE` | boş | Doluysa canlı Siber'e bağlanır |
+| `SEED_DEFAULT_USER_PASSWORD` | `Admin123` | Yeni hesapların başlangıç parolası |
+| `SEED_RESET_ALL_PASSWORDS` | `false` | `true` ise tüm parolalar varsayılana çekilir |
+| `JWT_KEY` | — | En az 32 bayt; üretimde mutlaka değiştirilmeli |
+
+`.env` sürüm kontrolüne dahil değildir. `JWT_KEY`, `DB_PASSWORD` ve `SIBER_SA_PASSWORD` üretimde
+`.env.example`'daki değerlerle bırakılmamalıdır.
 
 ## Bilinen kısıtlar
 
-Bu port, 8 modülün TEMEL akışlarını (liste/oluştur/düzenle/sil, yetki zorlaması, giriş/çıkış) uçtan uca
-çalışır ve test edilmiş durumda teslim eder. Teklif/Sefer/Fatura'nın zengin alan derinliği (çoklu sekme,
-çoklu satır girişleri, dosya yükleme) ve 3-viewport görsel karşılaştırma henüz tamamlanmadı — güncel,
-dürüst durum için [docs/TESLIM-RAPORU.md](docs/TESLIM-RAPORU.md)'ye bakın.
+- Bir yük yalnızca tek bir sefere bağlanır; buna karşılık Siber'in geçmiş verisinde birden fazla sefere
+  bağlı yük kayıtları mevcuttur ve bunlar liste olarak gösterilir.
+- Siber'in kendi verisindeki boş alanlar (departmansız sefer kayıtları gibi) uygulamada da boş görünür;
+  bunlar uygulama hatası değildir.
+- Evrak arşivi FTP üzerinden çalıştığı için arşiv sunucusuna erişilemediğinde dosya uygulamanın kendi
+  deposuna kaydedilir, Siber arşivine gönderilemez ve bu durum günlüğe yazılır.
