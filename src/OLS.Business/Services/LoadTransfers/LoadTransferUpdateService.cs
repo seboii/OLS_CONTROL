@@ -43,10 +43,6 @@ public sealed class LoadTransferUpdateRequest
     public int? FcrWaiting { get; set; }
     public int? InstructionId { get; set; }
     public int? RomorkTypeId { get; set; }
-    public decimal? TotalGrossWeight { get; set; }
-    public decimal? TotalVolume { get; set; }
-    public decimal? TotalLademeter { get; set; }
-    public decimal? TotalQuantity { get; set; }
     public int? DepartmentId { get; set; }
     public int? LoadTransferTypeId { get; set; }
     public int? DeliveryMethodId { get; set; }
@@ -148,13 +144,27 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         await UpsertPackagesAsync(transfer, request, cancellationToken);
         await UpsertInvoiceItemsAsync(transfer, request, user, now, cancellationToken);
 
+        // Toplamları hesaplamadan önce az önce eklenen/değişen paketleri veritabanına
+        // yaz — RecomputeTotalsFromPackagesAsync AsNoTracking sorgusuyla okuduğu için
+        // henüz kaydedilmemiş (yalnızca izlenen) yeni paket satırlarını göremez.
+        await _db.SaveChangesAsync(cancellationToken);
+
+        await RecomputeTotalsFromPackagesAsync(transfer, cancellationToken);
+
         await _db.SaveChangesAsync(cancellationToken);
 
         // Siber tarafı yalnızca bağlantı yapılandırılmışsa güncellenir; yerel
         // kayıt her hâlükârda kaydedilir (olsold Siber hatasında tamamını geri
         // alıyordu — yerel düzenlemenin kaybolması daha kötü bir sonuç).
         if (_siber.IsConfigured && !string.IsNullOrEmpty(transfer.LoadTransferId))
-            await SyncSiberAsync(transfer, user, cancellationToken);
+        {
+            await SyncSiberAsync(transfer, user, now, cancellationToken);
+
+            // SyncSiberAsync yeni açılan koli/kalem satırlarına ÜRETTİĞİ Siber
+            // kimliklerini geri yazıyor; kaydedilmezse satır yerelde kimliksiz
+            // kalır ve bir sonraki güncellemede Siber'de İKİNCİ bir kopya açılırdı.
+            await _db.SaveChangesAsync(cancellationToken);
+        }
 
         await tx.CommitAsync(cancellationToken);
 
@@ -180,12 +190,12 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         transfer.FcrWaiting = request.FcrWaiting;
         transfer.InstructionId = request.InstructionId;
         transfer.RomorkTypeId = request.RomorkTypeId;
-        transfer.TotalGrossWeight = request.TotalGrossWeight;
-        transfer.TotalVolume = request.TotalVolume;
-        transfer.TotalLademeter = request.TotalLademeter;
-        transfer.WeightFee = (request.TotalLademeter ?? 0) * WeightFeeMultiplier;
+        // TotalGrossWeight/TotalVolume/TotalLademeter/TotalCap/WeightFee BİLİNÇLİ OLARAK
+        // burada YOK — bkz. RecomputeTotalsFromPackagesAsync. olsold: bu dört alan formda
+        // salt-okunur, update() her kaydede paket satırlarından yeniden toplanıp üzerine
+        // yazılıyordu (LoadTransferController.php satır ~874-894) — istemciden gelen değer
+        // hiç kullanılmıyordu. Burada da aynı: request'teki değerler YOK SAYILIR.
         transfer.DepartmentId = request.DepartmentId;
-        transfer.TotalCap = request.TotalQuantity;
         transfer.LoadTransferTypeId = request.LoadTransferTypeId;
         transfer.DeliveryMethodId = request.DeliveryMethodId;
         transfer.CustomerRepresentativeName = request.CustomerRepresentativeUserId;
@@ -208,6 +218,29 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         transfer.UsercodeWithNotification = (int)userId;
         transfer.SalesRepCode = (int)userId;
         transfer.UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// olsold: <c>LoadTransferController::update()</c>'ün paket satırlarını yeniden
+    /// toplayıp toplam ağırlık/hacim/lademetre/kap sayısının ÜZERİNE YAZDIĞI adım
+    /// (istemciden gelen değer hiç kullanılmaz — form da bu alanları salt-okunur
+    /// gösterir). Burada da aynı: bu dört alan HER ZAMAN güncel paket satırlarından
+    /// hesaplanır, Siber'e de bu hesaplanan değerler gider.
+    /// </summary>
+    private async Task RecomputeTotalsFromPackagesAsync(
+        LoadTransfer transfer, CancellationToken cancellationToken)
+    {
+        var packages = await _db.LoadTransferPackages.AsNoTracking()
+            .Where(p => p.LoadTransferId == transfer.LoadTransferId)
+            .ToListAsync(cancellationToken);
+
+        var totalLademeter = packages.Sum(p => p.Lademeter ?? 0);
+
+        transfer.TotalGrossWeight = packages.Sum(p => p.GrossWeight ?? 0);
+        transfer.TotalVolume = packages.Sum(p => p.Volume ?? 0);
+        transfer.TotalLademeter = totalLademeter;
+        transfer.TotalCap = packages.Sum(p => p.Quantity ?? 0);
+        transfer.WeightFee = totalLademeter * WeightFeeMultiplier;
     }
 
     private async Task UpsertPackagesAsync(
@@ -296,7 +329,7 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
 
     /// <summary>Yerel kaydı Siber'e yansıtır (skn_yuk + koli + modül kalemleri).</summary>
     private async Task SyncSiberAsync(
-        LoadTransfer transfer, User? user, CancellationToken cancellationToken)
+        LoadTransfer transfer, User? user, DateTime now, CancellationToken cancellationToken)
     {
         var refs = await LoadSiberRefsAsync(transfer, cancellationToken);
 
@@ -320,20 +353,55 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             DepartmanId = refs.DepartmentSiberId,
             TalimatGelisTarihi = transfer.RequestArrivalDate?.ToDateTime(TimeOnly.MinValue)
                                  ?? _clock.Now,
-            YuklemeUlke = transfer.DepartureCountryId,
-            BosaltmaUlke = transfer.TargetCountryId,
+            YuklemeUlke = refs.DepartureCountryName,
+            BosaltmaUlke = refs.TargetCountryName,
             CalismaSekli = transfer.WayOfWorking,
+            TeslimSekil = refs.DeliveryMethodEdikod,
+            OnTasimaTarafimizdanYapilir = transfer.FrontTransportationByUs,
+            SonTasimaTarafimizdanYapilir = transfer.FinalTransportationByUs,
+            // Kaynakta aynı kaynak alan hem talimatgelistarihi'ye hem buna yazılıyor
+            // (LoadTransferController.php satır 713 ve 729) — bilinçli yineleme.
+            IstenenVarisTarihi = transfer.RequestArrivalDate?.ToDateTime(TimeOnly.MinValue),
+            HazirOlmaTarih = transfer.ReadinessDate?.ToDateTime(TimeOnly.MinValue),
+            MusteridenAlinisTarih = transfer.DateOfReceiptCustomer?.ToDateTime(TimeOnly.MinValue),
         }, cancellationToken);
 
-        // Koliler: Siber kimliği olanlar güncellenir. Kimliği olmayanlar
-        // (yeni eklenen satırlar) burada atlanır — Siber'e ekleme dönüşüm
-        // akışının işi, düzenlemede yeni kimlik üretmiyoruz.
-        var packages = await _db.LoadTransferPackages.AsNoTracking()
-            .Where(p => p.LoadTransferId == transfer.LoadTransferId && p.Yukkoliid != null)
+        // Koliler. BULUNAN GERÇEK BOŞLUK: burada yalnızca Siber kimliği OLAN
+        // satırlar güncelleniyordu, yeni eklenenler "ekleme dönüşüm akışının işi"
+        // denilerek atlanıyordu. Sonuç: kullanıcı Yük ekranından paket EKLEYİP
+        // kaydedebiliyor, satır yerelde görünüyor, ama Siber'e hiç gitmiyordu —
+        // yani sessiz veri kaybı. Artık kimliği olmayan satıra Siber kimliği
+        // üretilip INSERT ediliyor ve kimlik yerele geri yazılıyor.
+        var packages = await _db.LoadTransferPackages
+            .Where(p => p.LoadTransferId == transfer.LoadTransferId)
             .ToListAsync(cancellationToken);
 
         foreach (var package in packages)
         {
+            if (package.Yukkoliid is null)
+            {
+                package.Yukkoliid = (await _siber.GenerateYukKoliIdAsync(cancellationToken)).ToString();
+
+                await _siber.InsertYukKoliAsync(new SiberYukKoli
+                {
+                    YukKoliId = package.Yukkoliid,
+                    YukId = transfer.LoadTransferId!,
+                    KapAdet = package.Quantity,
+                    KapId = refs.CaseTypeCodes.GetValueOrDefault(ToInt(package.CaseTypeId)),
+                    En = package.Width,
+                    Boy = package.Length,
+                    Yukseklik = package.Height,
+                    Hacim = package.Volume,
+                    BurutAgirlik = package.GrossWeight,
+                    NetAgirlik = package.NetWeight,
+                    Lademetre = package.Lademeter,
+                    Istiflenemez = package.Stackable ?? 0,
+                    MalCinsId = refs.ProductTypeCodes.GetValueOrDefault(package.ProductTypeId ?? 0),
+                }, cancellationToken);
+
+                continue;
+            }
+
             await _siber.UpdateYukKoliAsync(new SiberYukKoli
             {
                 YukKoliId = package.Yukkoliid!,
@@ -352,12 +420,48 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             }, cancellationToken);
         }
 
-        var items = await _db.LoadTransferInvoiceItems.AsNoTracking()
-            .Where(i => i.InsertName == transfer.LoadNumberWorkType && i.Modulkalemid != null)
+        // Finans kalemleri — kolilerle AYNI boşluk buradaydı: yeni eklenen kalem
+        // Siber'e hiç yazılmıyordu. Modül kaydı (sfy_modulkayit) yükün numarasına
+        // göre bulunur; yoksa Siber'de kalem açılamaz, o satır yerel kalır.
+        var items = await _db.LoadTransferInvoiceItems
+            .Where(i => i.InsertName == transfer.LoadNumberWorkType)
             .ToListAsync(cancellationToken);
+
+        var modulKayit = items.Any(i => i.Modulkalemid is null) && transfer.LoadNumberWorkType is not null
+            ? await _siber.FindModulKayitAsync(transfer.LoadNumberWorkType, cancellationToken)
+            : null;
 
         foreach (var item in items)
         {
+            if (item.Modulkalemid is null)
+            {
+                if (modulKayit is null)
+                    continue;
+
+                item.Modulkalemid = (await _siber.GenerateModulKalemIdAsync(cancellationToken)).ToString();
+                item.Modulid = modulKayit.ModulId;
+                item.Modulkod = modulKayit.ModulKod;
+
+                await _siber.InsertModulKalemAsync(new SiberModulKalem
+                {
+                    ModulKalemId = item.Modulkalemid,
+                    ModulId = modulKayit.ModulId,
+                    ModulKod = modulKayit.ModulKod,
+                    KalemId = refs.FinancialItemCodes.GetValueOrDefault(item.ItemId ?? 0),
+                    Gc = item.Buysell == "1" ? "C" : "G",
+                    FirmaId = refs.AccountSiberIds.GetValueOrDefault(item.AccountId ?? 0),
+                    ToplamTutar = item.TotalPrice,
+                    DovizKod = refs.CurrencyCodes.GetValueOrDefault(item.CurrencyCode ?? 0),
+                    BirimFiyat = item.NetPrice,
+                    Miktar = item.Quantity,
+                    Tutar = item.TotalPrice,
+                    KayitGirisTarih = now,
+                    KayitGiren = user?.SiberCode,
+                }, cancellationToken);
+
+                continue;
+            }
+
             await _siber.UpdateModulKalemAsync(new SiberModulKalem
             {
                 ModulKalemId = item.Modulkalemid!,
@@ -386,6 +490,7 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         string? LoadStatusSiberId, string? LoadTypeCode, string? CustomerSiberId,
         string? SenderSiberId, string? ReceiverSiberId, string? PaymentTypeSiberId,
         string? InstructionCode, string? RomorkTypeCode, string? DepartmentSiberId,
+        string? DeliveryMethodEdikod, string? DepartureCountryName, string? TargetCountryName,
         IReadOnlyDictionary<int, string?> CaseTypeCodes,
         IReadOnlyDictionary<int, string?> ProductTypeCodes,
         IReadOnlyDictionary<int, string?> FinancialItemCodes,
@@ -420,6 +525,11 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             await _db.Departments.AsNoTracking()
                 .Where(d => d.Id == transfer.DepartmentId)
                 .Select(d => d.SiberId).FirstOrDefaultAsync(cancellationToken),
+            await _db.LoadTransferDeliveryMethods.AsNoTracking()
+                .Where(d => d.Id == transfer.DeliveryMethodId)
+                .Select(d => d.Edikod).FirstOrDefaultAsync(cancellationToken),
+            await CountryNameAsync(transfer.DepartureCountryId, cancellationToken),
+            await CountryNameAsync(transfer.TargetCountryId, cancellationToken),
             await _db.CaseTypes.AsNoTracking()
                 .ToDictionaryAsync(c => (int)c.Id, c => c.SiberId, cancellationToken),
             await _db.ProductTypes.AsNoTracking()
@@ -430,4 +540,18 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             await _db.Currencies.AsNoTracking()
                 .ToDictionaryAsync(c => (int)c.Id, c => c.Code, cancellationToken));
     }
+
+    /// <summary>
+    /// olsold: LoadTransferController.php satır 719-720 — Siber'in
+    /// <c>_yuklemeulke</c>/<c>_bosaltmaulke</c> sütununa ülkenin kendi GUID'i DEĞİL,
+    /// ADI yazılır (<c>$load_transfer->departureCountryId->name</c>). Gerçek Siber'de
+    /// bu kuralın ne kadar baskın olduğu doğrulandı: mevcut satırların %96'sı GUID
+    /// değil, düz ülke adı taşıyor — okuma tarafı da (LoadTransferService.
+    /// CountryRefAsync) buna göre önce GUID, olmazsa ada göre çözer.
+    /// </summary>
+    private async Task<string?> CountryNameAsync(string? countryId, CancellationToken cancellationToken) =>
+        Guid.TryParse(countryId, out var id)
+            ? await _db.Countries.AsNoTracking()
+                .Where(c => c.Id == id).Select(c => c.Name).FirstOrDefaultAsync(cancellationToken)
+            : null;
 }

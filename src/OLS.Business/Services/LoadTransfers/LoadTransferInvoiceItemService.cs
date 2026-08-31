@@ -110,15 +110,27 @@ public sealed class LoadTransferInvoiceItemService : ILoadTransferInvoiceItemSer
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var pattern = $"%{query.Search}%";
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
+
+            // DÜRÜST NOT / performans: burada da LoadTransferService.cs'teki gibi korelasyonlu
+            // .Any() yerine önce eşleşen ID'ler materialize edilip Contains() ile birleştiriliyor
+            // (Postgres'in parametreli sorguda OR'lu EXISTS alt sorgularını kötü planlaması riski).
+            var matchingItemIds = await _db.FinancialItems
+                .Where(f => f.Name != null && EF.Functions.Like(f.Name.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Select(f => (int)f.Id)
+                .ToListAsync(cancellationToken);
+
+            var matchingAccountIds = await _db.Accounts
+                .Where(a => a.Name != null && EF.Functions.Like(a.Name.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Select(a => (int)a.Id)
+                .ToListAsync(cancellationToken);
 
             // Kaynak: insert_name VEYA ilişkili kalem adı VEYA cari adı.
             items = items.Where(i =>
-                (i.InsertName != null && EF.Functions.ILike(i.InsertName, pattern)) ||
-                _db.FinancialItems.Any(f => f.Id == i.ItemId && f.Name != null &&
-                                            EF.Functions.ILike(f.Name, pattern)) ||
-                _db.Accounts.Any(a => a.Id == i.AccountId && a.Name != null &&
-                                      EF.Functions.ILike(a.Name, pattern)));
+                (i.InsertName != null && EF.Functions.Like(i.InsertName.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)) ||
+                (i.ItemId != null && matchingItemIds.Contains(i.ItemId.Value)) ||
+                (i.AccountId != null && matchingAccountIds.Contains(i.AccountId.Value)));
         }
 
         var projected = items.OrderByDescending(i => i.Id).Select(Project());
