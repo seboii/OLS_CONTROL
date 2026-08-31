@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
+using OLS.API.Filters;
 using OLS.Business.Services.Roles;
 
 namespace OLS.API.Controllers.Front;
@@ -20,16 +21,70 @@ public sealed class RoleController : ApiControllerBase
     private readonly IUserPermissionService _permissions;
     private readonly IPermissionService _permissionCheck;
     private readonly ICurrentUser _currentUser;
+    private readonly IRoleService _roles;
 
     public RoleController(
         IUserPermissionService permissions,
         IPermissionService permissionCheck,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        IRoleService roles)
     {
         _permissions = permissions;
         _permissionCheck = permissionCheck;
         _currentUser = currentUser;
+        _roles = roles;
     }
+
+    /// <summary>Tanımlı rolleri ve her rolün kullanıcı sayısını döndürür.</summary>
+    [HttpGet("roles")]
+    [RequiresPermission(PermissionAction.Read, "role_management")]
+    public async Task<IActionResult> Roles(CancellationToken cancellationToken) =>
+        Ok(await _roles.ListAsync(cancellationToken), "Kayıtlar");
+
+    /// <summary>
+    /// Kullanıcıya rol uygular — rolün şablonu user_permissions satırlarına yazılır.
+    /// </summary>
+    [HttpPost("roles/assign")]
+    [RequiresPermission(PermissionAction.Update, "role_management")]
+    public async Task<IActionResult> AssignRole(
+        [FromBody] AssignRoleRequest request, CancellationToken cancellationToken)
+    {
+        if (request.UserId is not { } userId || request.RoleId is not { } roleId)
+            return BadRequestError("Kullanıcı ve rol zorunludur.");
+
+        return await _roles.AssignAsync(userId, roleId, cancellationToken)
+            ? base.Ok(ApiResponse.Message("Rol uygulandı"))
+            : NotFoundError();
+    }
+
+    /// <summary>
+    /// Kullanıcının ŞİRKET GÖRME KAPSAMINI ayarlar (AVRORA / OLS).
+    ///
+    /// Rolden ayrı tutuluyor: rol "ne yapabilir", kapsam "ne görebilir".
+    /// Boş gönderilirse kapsam temizlenir — kullanıcı Avrora dışındaki her şeyi
+    /// görür (varsayılan davranış, bkz. CompanyScope).
+    /// </summary>
+    [HttpPost("roles/company-scope")]
+    [RequiresPermission(PermissionAction.Update, "role_management")]
+    public async Task<IActionResult> SetCompanyScope(
+        [FromBody] CompanyScopeRequest request, CancellationToken cancellationToken)
+    {
+        if (request.UserId is not { } userId)
+            return BadRequestError("Kullanıcı zorunludur.");
+
+        return await _roles.SetCompanyScopeAsync(userId, request.CompanyId, cancellationToken)
+            ? base.Ok(ApiResponse.Message("Şirket kapsamı güncellendi"))
+            : NotFoundError();
+    }
+
+    /// <summary>
+    /// Siber departmanlarına göre TÜM kullanıcılara rol uygular ve Siber'de
+    /// engelli olanları pasife alır. Toplu bakım ucu.
+    /// </summary>
+    [HttpPost("roles/apply-from-siber")]
+    [RequiresPermission(PermissionAction.Update, "role_management")]
+    public async Task<IActionResult> ApplyFromSiber(CancellationToken cancellationToken) =>
+        Ok(await _roles.ApplyFromSiberAsync(cancellationToken), "Roller uygulandı");
 
     [HttpGet("role")]
     public async Task<IActionResult> Single([FromQuery] long id, CancellationToken cancellationToken)
@@ -137,4 +192,17 @@ public sealed class RoleController : ApiControllerBase
         [JsonPropertyName("result")]
         public string Result { get; init; } = string.Empty;
     }
+}
+
+public sealed class AssignRoleRequest
+{
+    [JsonPropertyName("user_id")] public long? UserId { get; set; }
+    [JsonPropertyName("role_id")] public long? RoleId { get; set; }
+}
+
+public sealed class CompanyScopeRequest
+{
+    [JsonPropertyName("user_id")] public long? UserId { get; set; }
+    /// <summary>Boş/null = kapsam yok (Avrora hariç her şey).</summary>
+    [JsonPropertyName("company_id")] public string? CompanyId { get; set; }
 }

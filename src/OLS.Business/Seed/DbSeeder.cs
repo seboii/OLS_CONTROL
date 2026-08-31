@@ -24,6 +24,8 @@ public static class DbSeeder
     public static async Task SeedAsync(
         OlsDbContext db,
         IPasswordHasher hasher,
+        IDefaultUserPassword defaultPassword,
+        Services.Roles.IRoleService roles,
         IConfiguration configuration,
         IHostEnvironment environment,
         ILogger logger,
@@ -33,9 +35,85 @@ public static class DbSeeder
         await SeedStatusTypesAsync(db, cancellationToken);
         await SeedCoreLookupsAsync(db, cancellationToken);
         await SeedAdminUserAsync(db, hasher, configuration, environment, logger, cancellationToken);
+        await SeedUserPasswordsAsync(db, defaultPassword, configuration, logger, cancellationToken);
+        await roles.SyncCatalogAsync(cancellationToken);
+
+        // TEK SEFERLİK bakım anahtarı (şifre sıfırlamayla aynı desen):
+        // Seed:ApplyRolesFromSiber=true iken açılışta tüm kullanıcılara Siber
+        // departmanına göre rol uygulanır ve Siber'de engelli olanlar pasife
+        // alınır. Her açılışta çalışacağı için kullandıktan sonra kapatılmalı —
+        // elle verilmiş özel yetkileri ezer. Bu yüzden her çalıştığında uyarı
+        // loglanır. Gündelik kullanımda rol atama arayüzden yapılır.
+        if (configuration.GetValue("Seed:ApplyRolesFromSiber", false))
+        {
+            var summary = await roles.ApplyFromSiberAsync(cancellationToken);
+
+            logger.LogWarning(
+                "Seed:ApplyRolesFromSiber ETKİN — {Assigned} kullanıcıya rol uygulandı, " +
+                "{Deactivated} hesap pasife alındı, {Skipped} hesap atlandı (Siber bağı yok). " +
+                "Dağılım: {PerRole}. Bu anahtarı kapatın.",
+                summary.Assigned, summary.Deactivated, summary.Skipped,
+                string.Join(", ", summary.PerRole.Select(x => $"{x.Key}={x.Value}")));
+        }
 
         if (environment.IsDevelopment())
             await SeedDemoConvenienceDataAsync(db, cancellationToken);
+    }
+
+
+    // ------------------------------------------------------------------
+    // Şifresiz kalan kullanıcılara ortak başlangıç şifresi verir.
+    //
+    // BULUNAN GERÇEK BOŞLUK: Siber'den içe aktarılan kullanıcılar password =
+    // NULL ile geliyordu (Siber bizim bcrypt formatımızda şifre taşımıyor),
+    // dolayısıyla hiçbiri giriş yapamıyordu. Canlıda 131 kullanıcının 126'sı
+    // bu durumdaydı. Ayrıntı ve yapılandırma için bkz. IDefaultUserPassword.
+    //
+    // Varsayılan davranış TAMAMLAYICIDIR: yalnızca şifresi boş olanlara yazar,
+    // mevcut şifreleri ASLA ezmez — seed'in geri kalanıyla aynı "yoksa ekle"
+    // sözleşmesi.
+    //
+    // Seed:ResetAllPasswords=true verilirse MEVCUT şifreler DAHİL tüm
+    // kullanıcılar varsayılana döndürülür. Tek seferlik bir bakım anahtarıdır;
+    // her açılışta çalışacağı için açık bırakılmamalıdır — bu yüzden her
+    // çalıştığında uyarı loglanır.
+    // ------------------------------------------------------------------
+    private static async Task SeedUserPasswordsAsync(
+        OlsDbContext db,
+        IDefaultUserPassword defaultPassword,
+        IConfiguration configuration,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (!defaultPassword.IsEnabled)
+        {
+            logger.LogInformation(
+                "Seed:DefaultUserPassword tanımlı değil — kullanıcı şifreleri atanmadı.");
+            return;
+        }
+
+        var resetAll = configuration.GetValue("Seed:ResetAllPasswords", false);
+
+        var users = await db.Users
+            .Where(u => resetAll || u.Password == null || u.Password == "")
+            .ToListAsync(ct);
+
+        if (users.Count == 0)
+            return;
+
+        var hash = defaultPassword.Hash();
+        foreach (var user in users)
+            user.Password = hash;
+
+        await db.SaveChangesAsync(ct);
+
+        if (resetAll)
+            logger.LogWarning(
+                "Seed:ResetAllPasswords ETKİN — {Count} kullanıcının şifresi varsayılana " +
+                "DÖNDÜRÜLDÜ (mevcut şifreler dahil). Bu anahtarı kapatın.", users.Count);
+        else
+            logger.LogInformation(
+                "{Count} şifresiz kullanıcıya varsayılan şifre atandı.", users.Count);
     }
 
     // ------------------------------------------------------------------
@@ -145,6 +223,8 @@ public static class DbSeeder
             // kural, olsold'dan birebir). Seed edilmezse KİMSE süper admin
             // olamaz ve hiçbir cari hiçbir yeni kullanıcıya görünmez.
             ("super_admin", "Süper Admin"),
+            // Denetim kaydı sayfası — yalnızca Yönetim rolüne verilir (RoleCatalog).
+            ("audit_log_management", "Denetim Kaydı"),
             ("account_management", "Cari Yönetimi"),
             ("account_type_management", "Müşteri Tipi Yönetimi"),
             ("load_management", "Yük/Teklif Yönetimi"),
@@ -167,6 +247,7 @@ public static class DbSeeder
             ("user_management", "Kullanıcı Yönetimi"),
             ("role_management", "Rol/Yetki Yönetimi"),
             ("support_request_management", "Destek Talebi Yönetimi"),
+            ("report_management", "Raporlama Yönetimi"),
         ];
 
         var existingSlugs = await db.UserPermissionPages
@@ -429,6 +510,23 @@ public static class DbSeeder
             new TransportType { Name = "RO-RO", Code = "1", GroupCode = "REZERVASYONTASIMASEKLI", SiberId = "9E45ED23-EF9F-45E4-9530-0FA9F2D6C51C", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
             new TransportType { Name = "Tren", Code = "2", GroupCode = "REZERVASYONTASIMASEKLI", SiberId = "E0ADF7B0-6711-48ED-B2F5-FFBDEBD405A2", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
             new TransportType { Name = "Kara", Code = "3", GroupCode = "REZERVASYONTASIMASEKLI", SiberId = "B84B6983-7328-469C-8CBE-58E4AB2B3DB4", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+        ]);
+
+        // Siber'de bu 10 tür için ayrı bir tanım tablosu yok — skn_yukevrak.sirano
+        // sabit değerleri (gerçek Siber'de doğrulandı, bkz. EvrakTuru). Code, evrak
+        // takibi Siber'e yazılırken doğrudan sirano sütununa gidiyor.
+        await SeedIfEmptyAsync(db.EvrakTurus, ct, () =>
+        [
+            new EvrakTuru { Name = "Navlun Faturası", Code = "1", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "Invoice", Code = "2", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "Konşimento", Code = "3", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "CMR", Code = "4", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "Mal Faturası", Code = "5", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "ATR-1", Code = "6", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "Packing List", Code = "7", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "Sağlık Sertifikası", Code = "8", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "Çeki Listesi", Code = "9", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new EvrakTuru { Name = "Menşei Şehadetnamesi", Code = "10", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         await SeedIfEmptyAsync(db.InvoiceTypes, ct, () =>

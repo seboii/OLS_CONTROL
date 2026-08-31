@@ -43,7 +43,8 @@ public interface IUserService
 }
 
 public sealed record UserListQuery(
-    string? Search, bool? WorkingTracking, int? PerPage, int Page, string Path);
+    string? Search, bool? WorkingTracking, int? PerPage, int Page, string Path,
+    bool? Status = null, Guid? PhoneCountryId = null);
 
 public sealed class UserDto
 {
@@ -56,6 +57,14 @@ public sealed class UserDto
     [JsonPropertyName("working_tracking")] public bool WorkingTracking { get; init; }
     [JsonPropertyName("pkds_id")] public string? PkdsId { get; init; }
     [JsonPropertyName("status")] public bool Status { get; init; }
+    /// <summary>Uygulanmış yetki şablonu — Kullanıcılar ekranındaki rol seçici okur.</summary>
+    [JsonPropertyName("role_id")] public long? RoleId { get; init; }
+    /// <summary>Siber'deki departman adı; rolün neden bu olduğunu ekranda açıklar.</summary>
+    [JsonPropertyName("siber_department_name")] public string? SiberDepartmentName { get; init; }
+    /// <summary>Siber'de hesap engelli mi (işten ayrılmış).</summary>
+    [JsonPropertyName("siber_blocked")] public bool? SiberBlocked { get; init; }
+    /// <summary>Görme kapsamı: hangi Siber şirketinin kayıtlarını görür (bkz. CompanyScope).</summary>
+    [JsonPropertyName("siber_company_id")] public string? SiberCompanyId { get; init; }
 
     /// <summary>İlişki adı <c>phoneCountryId</c> → snake_case: <c>phone_country_id</c>.</summary>
     [JsonPropertyName("phone_country_id")] public CountryDto? PhoneCountryId { get; init; }
@@ -96,19 +105,26 @@ public sealed class UserService : IUserService
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
-            var pattern = $"%{query.Search}%";
+            // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
+            var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
             users = users.Where(u =>
-                EF.Functions.ILike(u.Name, pattern) ||
-                EF.Functions.ILike(u.Surname, pattern) ||
-                (u.Phone != null && EF.Functions.ILike(u.Phone, pattern)) ||
-                EF.Functions.ILike(u.Email, pattern) ||
+                EF.Functions.Like(u.Name.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(u.Surname.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                (u.Phone != null && EF.Functions.Like(u.Phone.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)) ||
+                EF.Functions.Like(u.Email.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
                 _db.Countries.Any(c => c.Id == u.PhoneCountryId &&
-                                       c.Name != null && EF.Functions.ILike(c.Name, pattern)));
+                                       c.Name != null && EF.Functions.Like(c.Name.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)));
         }
 
         // olsold: yalnızca "true ise filtrele" — false gönderilirse süzgeç yok.
         if (query.WorkingTracking == true)
             users = users.Where(u => u.WorkingTracking);
+
+        if (query.Status is { } status)
+            users = users.Where(u => u.Status == status);
+
+        if (query.PhoneCountryId is { } phoneCountryId)
+            users = users.Where(u => u.PhoneCountryId == phoneCountryId);
 
         var projected = users.OrderBy(u => u.Name).Select(Project);
 
@@ -277,6 +293,10 @@ public sealed class UserService : IUserService
         WorkingTracking = u.WorkingTracking,
         PkdsId = u.PkdsId,
         Status = u.Status,
+        RoleId = u.RoleId,
+        SiberDepartmentName = u.SiberDepartmentName,
+        SiberBlocked = u.SiberBlocked,
+        SiberCompanyId = u.SiberCompanyId,
         PhoneCountryId = _db.Countries
             .Where(c => c.Id == u.PhoneCountryId)
             .Select(c => new CountryDto
