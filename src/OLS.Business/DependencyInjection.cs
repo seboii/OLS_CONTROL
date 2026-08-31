@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OLS.Business.Common;
 using OLS.Business.Services.Accounts;
@@ -7,6 +7,7 @@ using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Cars;
 using OLS.Business.Services.Dashboard;
 using OLS.Business.Services.Expeditions;
+using OLS.Business.Services.Finance;
 using OLS.Business.Services.Invoices;
 using OLS.Business.Services.Loads;
 using OLS.Business.Services.LoadTransfers;
@@ -99,6 +100,10 @@ public static class DependencyInjection
 
         services.AddScoped<ISiberImportService, SiberImportService>();
         services.AddScoped<ISiberSyncService, SiberSyncService>();
+        services.AddScoped<IFinanceSyncService, FinanceSyncService>();
+        services.AddScoped<ILedgerService, LedgerService>();
+        services.AddScoped<IFinanceDocumentService, FinanceDocumentService>();
+        services.AddScoped<IFinanceInvoiceWriteService, FinanceInvoiceWriteService>();
 
         // 23 referans/tanım modülü (27'den EinvoicePrefix hariç) tek generic kayıtla karşılanır.
         services.AddScoped(typeof(ILookupService<>), typeof(LookupService<>));
