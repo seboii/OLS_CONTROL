@@ -96,8 +96,16 @@ yalnızca değişen alan adları listelenir.
 görünmeye devam ediyordu. Artık her tam senkronda Siber'den gelen kimlik kümesi yerelle
 karşılaştırılır ve eksik kayıtlar "Siber'de silinmiş" olarak işaretlenir. Kayıt yerelden
 SİLİNMEZ — bağlı finans kayıtları, evrak arşivi ve denetim izi korunur, kayıt Siber'de
-yeniden görünürse işaret kalkar. Listeler bu kayıtları varsayılan olarak gizler
-(`include_deleted=true` ile görünür).
+yeniden görünürse işaret kalkar.
+
+Listeler bu kayıtları varsayılan olarak gizler; yük, teklif ve sefer ekranlarındaki
+**"Siberde silinenler"** düğmesi yalnızca silinenleri listeler ve her kayıt kırmızı bir
+rozetle işaretlenir. Silme ayrıca Denetim Kaydı ekranına düşer.
+
+Siber kendi günlüğünde silme işlemlerini de tuttuğu için, kaydı **kimin ne zaman sildiği**
+gösterilebiliyor. Bu bilgi her kayıtta bulunmaz (Siber ekranından geçmemiş kayıtların
+günlük satırı yoktur); bulunamadığında yalnızca durumun fark edildiği an gösterilir. İki
+zaman damgası ayrı tutulur: gerçek silme anı ile fark edilme anı aynı şey değildir.
 
 Silme kontrolünün bir güvenlik eşiği vardır: Siber'den gelen kayıt sayısı yereldekinin
 yarısından azsa hiçbir kayıt işaretlenmez. Bu olmadan yarım dönen tek bir çekim tüm tabloyu
@@ -192,8 +200,8 @@ referanslarıyla çalıştığı için `tsc --noEmit` hiçbir dosyayı denetleme
 dotnet test
 ```
 
-153 test: `tests/OLS.Business.Tests` altında 37 birim testi (veritabanı gerekmez),
-`tests/OLS.API.IntegrationTests` altında 116 entegrasyon testi (Postgres gerekir).
+155 test: `tests/OLS.Business.Tests` altında 37 birim testi (veritabanı gerekmez),
+`tests/OLS.API.IntegrationTests` altında 118 entegrasyon testi (Postgres gerekir).
 
 Entegrasyon testleri her çalıştırmada rastgele adlı izole bir veritabanı (`ols_scoped_inttest_*`)
 oluşturup siler; geliştirme veritabanını etkilemez.
