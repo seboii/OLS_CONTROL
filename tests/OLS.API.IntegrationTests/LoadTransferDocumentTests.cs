@@ -136,6 +136,11 @@ public sealed class LoadTransferDocumentTests
 
     private sealed class RecordingSiberLoadRepository : ISiberLoadRepository
     {
+    // Doğrulama uçları testte kullanılmıyor; kalem eksikliği simüle edilmiyor.
+    public Task<IReadOnlyList<string>> FindMissingKalemIdsAsync(
+        IReadOnlyCollection<string> kalemIds, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<string>>([]);
+
         public RecordingSiberLoadRepository(bool isConfigured = true) => IsConfigured = isConfigured;
 
         public bool IsConfigured { get; }

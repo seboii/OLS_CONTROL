@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
 using OLS.DataAccess.Context;
@@ -137,6 +137,19 @@ public sealed class DirectLoadService : IDirectLoadService
             .FirstOrDefaultAsync(t => t.Id == model.LoadingTypeId, cancellationToken);
         if (loadingType?.Code is null)
             return LoadTransferWriteResult.Fail("Yükleme tipi boş olamaz");
+
+        // MALİ KALEMLER SİBER'E YAZILMADAN ÖNCE DOĞRULANIR.
+        //
+        // Yük Siber'e yazıldıktan sonra kalem yazımı patlarsa Siber'deki yük
+        // geri ALINAMIYOR (yerel işlem geri alınsa bile): kullanıcı hata
+        // görüyor ama kayıt Siber'de duruyor. Canlıda tam olarak bu oldu —
+        // yerel tabloda taklit Siber'den kalmış üç kalem vardı
+        // (Navlun/Gümrükleme/Sigorta) ve gerçek Siber'de karşılıkları yoktu;
+        // kullanıcı en doğal görünen bu kalemleri seçince
+        // FK_sfy_modulkalem_skn_kalem_kalemid hatası alınıyordu.
+        var itemFailure = await ValidateFinancialItemsAsync(model, cancellationToken);
+        if (itemFailure is not null)
+            return itemFailure;
 
         var customer = await SiberAccountAsync(model.CustomerId, cancellationToken);
         if (customer is null) return LoadTransferWriteResult.Fail("Müşteri boş olamaz");
@@ -344,6 +357,53 @@ public sealed class DirectLoadService : IDirectLoadService
     /// oluşturmamışsa kalem yerelde açılır ve bir sonraki güncellemede Siber'e
     /// gider (bkz. LoadTransferUpdateService).
     /// </summary>
+
+    /// <summary>
+    /// Seçilen mali kalemlerin Siber'de gerçekten var olduğunu doğrular.
+    /// Sorun varsa Siber'e HİÇBİR ŞEY yazılmadan hata döner.
+    /// </summary>
+    private async Task<LoadTransferWriteResult?> ValidateFinancialItemsAsync(
+        DirectLoadModel model, CancellationToken cancellationToken)
+    {
+        var itemIds = model.FinancialItems
+            .Where(i => i.ItemId is not null)
+            .Select(i => i.ItemId!.Value)
+            .Distinct()
+            .ToList();
+
+        if (itemIds.Count == 0)
+            return null;
+
+        var items = await _db.FinancialItems.AsNoTracking()
+            .Where(i => itemIds.Contains(i.Id))
+            .Select(i => new { i.Id, i.Name, i.SiberId })
+            .ToListAsync(cancellationToken);
+
+        var withoutSiberId = items
+            .Where(i => string.IsNullOrWhiteSpace(i.SiberId))
+            .Select(i => i.Name ?? i.Id.ToString())
+            .ToList();
+
+        if (withoutSiberId.Count > 0)
+            return LoadTransferWriteResult.Fail(
+                $"Şu mali kalemler Siber'de tanımlı değil: {string.Join(", ", withoutSiberId)}");
+
+        var missingInSiber = await _siber.FindMissingKalemIdsAsync(
+            items.Select(i => i.SiberId!).ToList(), cancellationToken);
+
+        if (missingInSiber.Count == 0)
+            return null;
+
+        var names = items
+            .Where(i => missingInSiber.Contains(i.SiberId!, StringComparer.OrdinalIgnoreCase))
+            .Select(i => i.Name ?? i.Id.ToString())
+            .ToList();
+
+        return LoadTransferWriteResult.Fail(
+            $"Şu mali kalemler Siber'de bulunamadı: {string.Join(", ", names)}. " +
+            "Kalem Siber'den silinmiş olabilir; listeyi yenileyip yeniden seçin.");
+    }
+
     private async Task WriteFinancialItemsAsync(
         DirectLoadModel model, string? loadNumberWorkType, long currentUserId,
         string? userSiberCode, DateTime now, CancellationToken cancellationToken)

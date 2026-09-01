@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 
 namespace OLS.DataAccess.Siber;
 
@@ -16,6 +16,17 @@ public interface ISiberLoadRepository
     /// <summary>Teklifin Siber'deki rezervasyon kaydını okur (doğrulama için).</summary>
     Task<SiberRezervasyon?> FindRezervasyonAsync(
         string rezervasyonId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Verilen mali kalem kimliklerinden Siber'de BULUNMAYANLARI döner.
+    ///
+    /// Yük Siber'e yazıldıktan SONRA kalem yazımı patlarsa, Siber'deki yük
+    /// geri alınamıyor (yerel işlem geri alınsa bile) ve kullanıcı "hata"
+    /// görürken kayıt Siber'de duruyor. Bu yüzden kalemler yazmadan ÖNCE
+    /// doğrulanır.
+    /// </summary>
+    Task<IReadOnlyList<string>> FindMissingKalemIdsAsync(
+        IReadOnlyCollection<string> kalemIds, CancellationToken cancellationToken = default);
 
     Task<Guid> GenerateYukIdAsync(CancellationToken cancellationToken = default);
     Task<Guid> GenerateYukKoliIdAsync(CancellationToken cancellationToken = default);
@@ -277,6 +288,41 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
     public SiberLoadRepository(ISiberConnectionFactory factory) => _factory = factory;
 
     public bool IsConfigured => _factory.IsConfigured;
+
+    public async Task<IReadOnlyList<string>> FindMissingKalemIdsAsync(
+        IReadOnlyCollection<string> kalemIds, CancellationToken cancellationToken = default)
+    {
+        var candidates = kalemIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (candidates.Count == 0)
+            return [];
+
+        // Biçimi GUID olmayan kimlik zaten Siber'de olamaz; sorguya sokmadan
+        // eksik sayılır (uniqueidentifier dönüşümü aksi hâlde hata verirdi).
+        var parsable = candidates.Where(id => Guid.TryParse(id, out _)).ToList();
+        var missing = candidates.Except(parsable, StringComparer.OrdinalIgnoreCase).ToList();
+
+        if (parsable.Count == 0)
+            return missing;
+
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        var found = (await connection.QueryAsync<string>(new CommandDefinition(
+            """
+            SELECT LOWER(CAST(kalemid AS VARCHAR(64)))
+            FROM skn_kalem
+            WHERE kalemid IN @Ids
+            """,
+            new { Ids = parsable.Select(Guid.Parse).ToArray() },
+            cancellationToken: cancellationToken))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        missing.AddRange(parsable.Where(id => !found.Contains(id)));
+        return missing;
+    }
 
     public async Task<SiberRezervasyon?> FindRezervasyonAsync(
         string rezervasyonId, CancellationToken cancellationToken = default)

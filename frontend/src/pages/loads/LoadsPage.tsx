@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
-import { Package, Plus, Trash2, Upload, File as FileIcon, X, User, CalendarDays, Filter, ChevronDown, ChevronUp, Truck } from "lucide-react";
+import { Package, Plus, Trash2, Upload, File as FileIcon, X, User, CalendarDays, Filter, ChevronDown, ChevronUp, Truck, AlertTriangle } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
@@ -19,6 +19,10 @@ import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicke
 import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
+import {
+  listDrafts, saveDraft, deleteDraft, writeAutosave, readAutosave, clearAutosave,
+  isPayloadEmpty, type DirectLoadDraft,
+} from "@/lib/directLoadDrafts";
 
 interface NamedRef {
   id: number;
@@ -518,6 +522,118 @@ export function LoadsPage() {
   const [directPackages, setDirectPackages] = useState<PackageRow[]>([{ ...EMPTY_PACKAGE_ROW }]);
   const [directItems, setDirectItems] = useState<InvoiceItemRow[]>([]);
 
+  // Taslaklar (tarayıcı belleğinde) — bkz. lib/directLoadDrafts.ts
+  const [drafts, setDrafts] = useState<DirectLoadDraft[]>([]);
+  const [draftsOpen, setDraftsOpen] = useState(false);
+  // Açık olan adlı taslak; "Kaydet" aynı taslağın üzerine yazsın diye tutulur.
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  const [recoverable, setRecoverable] = useState<{ savedAt: string; payload: unknown } | null>(null);
+
+  /** Formun tüm durumu tek nesnede — taslak da kurtarma da bunu saklar. */
+  const directSnapshot = useCallback(() => ({
+    form: directForm,
+    customer: directCustomer,
+    sender: directSender,
+    receiver: directReceiver,
+    agent: directAgent,
+    freightPayer: directFreightPayer,
+    packages: directPackages,
+    items: directItems,
+  }), [directForm, directCustomer, directSender, directReceiver,
+       directAgent, directFreightPayer, directPackages, directItems]);
+
+  /** Anlık görüntüyü forma geri yükler. */
+  const applySnapshot = useCallback((raw: unknown) => {
+    const snap = raw as ReturnType<typeof directSnapshot> | null;
+    if (!snap) return;
+
+    if (snap.form) setDirectForm(snap.form);
+    setDirectCustomer(snap.customer ?? null);
+    setDirectSender(snap.sender ?? null);
+    setDirectReceiver(snap.receiver ?? null);
+    setDirectAgent(snap.agent ?? null);
+    setDirectFreightPayer(snap.freightPayer ?? null);
+    setDirectPackages(snap.packages?.length ? snap.packages : [{ ...EMPTY_PACKAGE_ROW }]);
+    setDirectItems(snap.items ?? []);
+  }, []);
+
+  // Form açıkken her değişiklikte kaza kurtarma kopyası yazılır. Kaydedilmemiş
+  // veri sekme kapanmasında/elektrik kesintisinde kaybolmasın.
+  useEffect(() => {
+    if (!directOpen) return;
+    const snap = directSnapshot();
+    if (isPayloadEmpty(snap as unknown as Record<string, unknown>)) return;
+    writeAutosave(snap);
+  }, [directOpen, directSnapshot]);
+
+  // Açılışta: kurtarılabilir bir kopya varsa kullanıcıya sorulur.
+  useEffect(() => {
+    if (!directOpen) return;
+    setDrafts(listDrafts());
+    const auto = readAutosave();
+    if (auto && !activeDraftId) setRecoverable(auto);
+    // activeDraftId bilerek dışarıda: taslak açıldıktan sonra tekrar sormasın.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directOpen]);
+
+  function resetDirectForm() {
+    setDirectForm({
+      work_type_id: "", loading_type_id: "", load_transfer_type_id: "",
+      instruction_id: "", romork_type_id: "", payment_type_id: "", department_id: "",
+      delivery_method_id: "", payer_company: "",
+      departure_country_id: "", transit_country_id: "", target_country_id: "",
+      front_transportation_by_us: "0", final_transportation_by_us: "0", way_of_working: "0",
+      instruction_arrival_date: "", request_arrival_date: "", readiness_date: "",
+      description: "",
+    });
+    setDirectCustomer(null); setDirectSender(null); setDirectReceiver(null);
+    setDirectAgent(null); setDirectFreightPayer(null);
+    setDirectPackages([{ ...EMPTY_PACKAGE_ROW }]);
+    setDirectItems([]);
+    setDirectTab(DIRECT_TABS[0]);
+    setActiveDraftId(null);
+  }
+
+  function handleSaveDraft() {
+    const snap = directSnapshot();
+    if (isPayloadEmpty(snap as unknown as Record<string, unknown>)) {
+      addToast("Boş form taslak olarak kaydedilmez", "error");
+      return;
+    }
+
+    const suggested = directCustomer?.name
+      ? `${directCustomer.name}${directForm.work_type_id ? "" : ""}`
+      : `Taslak ${new Date().toLocaleString("tr-TR")}`;
+
+    const name = window.prompt("Taslak adı:", suggested);
+    if (name === null) return;
+
+    const saved = saveDraft(name, snap, activeDraftId ?? undefined);
+    if (!saved) {
+      addToast("Taslak kaydedilemedi (tarayıcı belleği dolu olabilir)", "error");
+      return;
+    }
+
+    setActiveDraftId(saved.id);
+    setDrafts(listDrafts());
+    addToast(`Taslak kaydedildi: ${saved.name}`);
+  }
+
+  function handleOpenDraft(draft: DirectLoadDraft) {
+    applySnapshot(draft.payload);
+    setActiveDraftId(draft.id);
+    setDraftsOpen(false);
+    setRecoverable(null);
+    setDirectTab(DIRECT_TABS[0]);
+    addToast(`Taslak açıldı: ${draft.name}`);
+  }
+
+  function handleDeleteDraft(draft: DirectLoadDraft) {
+    deleteDraft(draft.id);
+    setDrafts(listDrafts());
+    if (activeDraftId === draft.id) setActiveDraftId(null);
+  }
+
   useEffect(() => {
     api
       .get<{ data: { allowed: boolean } }>("/api/v1/load_transfer/direct/allowed")
@@ -581,10 +697,15 @@ export function LoadsPage() {
         });
 
       addToast(`Yük oluşturuldu: ${res.data.yuk_no}`);
+
+      // Kayıt Siber'e gittiğine göre taslak da kurtarma kopyası da gereksiz.
+      if (activeDraftId) deleteDraft(activeDraftId);
+      clearAutosave();
+      setDrafts(listDrafts());
+      setRecoverable(null);
+
       setDirectOpen(false);
-      setDirectPackages([{ ...EMPTY_PACKAGE_ROW }]);
-      setDirectItems([]);
-      setDirectTab(DIRECT_TABS[0]);
+      resetDirectForm();
       load();
     } catch (err) {
       addToast(err instanceof Error ? err.message : "Yük oluşturulamadı", "error");
@@ -595,6 +716,23 @@ export function LoadsPage() {
 
   function opts(list: { id: string | number; name: string }[]) {
     return [{ value: "", label: "Seçiniz" }, ...list.map((t) => ({ value: String(t.id), label: t.name }))];
+  }
+
+  /**
+   * Kodu olan tanımlar için "EXW — Fabrika çıkışında teslim" biçimi.
+   *
+   * Teslim şekli Siber'de Incoterm KODUYLA tutuluyor (skn_yuk.teslimsekil =
+   * EXW/FOB/CIF...) ve kullanıcı da işini bu kodlarla konuşuyor. Liste yalnızca
+   * açıklamayı gösterdiği için doğru seçeneği bulmak zordu.
+   */
+  function codeOpts(list: { id: string | number; name: string; edikod?: string | null; code?: string | null }[]) {
+    return [
+      { value: "", label: "Seçiniz" },
+      ...list.map((t) => {
+        const code = (t.edikod ?? t.code ?? "").trim();
+        return { value: String(t.id), label: code ? `${code} — ${t.name}` : t.name };
+      }),
+    ];
   }
 
   // İş Tipi sekmeleri de STATUS_TABS deseniyle aynı sebepten (bkz. QuotesPage)
@@ -1238,11 +1376,111 @@ export function LoadsPage() {
             <Btn onClick={submitDirectLoad} disabled={directSaving}>
               <BusyLabel busy={directSaving} busyText="Oluşturuluyor...">Yükü Oluştur</BusyLabel>
             </Btn>
-            <Btn variant="secondary" onClick={() => setDirectOpen(false)}>İptal</Btn>
+            <Btn variant="secondary" onClick={handleSaveDraft} disabled={directSaving}>
+              Taslak Kaydet
+            </Btn>
+            <Btn variant="secondary" onClick={() => { setDraftsOpen((o) => !o); setDrafts(listDrafts()); }} disabled={directSaving}>
+              Taslaklar{drafts.length > 0 ? ` (${drafts.length})` : ""}
+            </Btn>
+            <Btn variant="secondary" onClick={() => setDirectOpen(false)} disabled={directSaving}>İptal</Btn>
           </div>
         }
       >
         <Tabs tabs={DIRECT_TABS} active={directTab} onChange={setDirectTab} className="px-6" />
+
+        {/* Kaza kurtarma: kaydedilmemiş bir form kalmışsa geri yüklenebilir.
+            Sekme kapanması / sayfa yenilenmesi / elektrik kesintisi sonrası. */}
+        {recoverable && (
+          <div className="mx-6 mt-4 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <div className="flex-1">
+              Kaydedilmemiş bir form bulundu
+              <span className="text-amber-700">
+                {" "}({new Date(recoverable.savedAt).toLocaleString("tr-TR")})
+              </span>
+              . Geri yüklemek ister misiniz?
+            </div>
+            <button
+              className="shrink-0 font-medium text-amber-900 underline"
+              onClick={() => { applySnapshot(recoverable.payload); setRecoverable(null); }}
+            >
+              Geri yükle
+            </button>
+            <button
+              className="shrink-0 text-amber-700"
+              onClick={() => { clearAutosave(); setRecoverable(null); }}
+            >
+              Yoksay
+            </button>
+          </div>
+        )}
+
+        {/* Taslak listesi — birden fazla taslak tutulabilir. */}
+        {draftsOpen && (
+          <div className="mx-6 mt-4 rounded border border-gray-200">
+            <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2">
+              <span className="text-xs font-semibold text-gray-700">
+                Kayıtlı taslaklar ({drafts.length})
+              </span>
+              <button className="text-xs text-gray-500" onClick={() => setDraftsOpen(false)}>
+                Kapat
+              </button>
+            </div>
+
+            {drafts.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-gray-400">
+                Henüz taslak yok. Formu doldurup "Taslak Kaydet" deyin.
+              </div>
+            ) : (
+              <div className="max-h-56 overflow-y-auto">
+                {drafts.map((d) => (
+                  <div
+                    key={d.id}
+                    className={clsx(
+                      "flex items-center gap-2 border-t border-gray-100 px-3 py-2 first:border-t-0",
+                      activeDraftId === d.id && "bg-blue-50",
+                    )}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm text-gray-800">{d.name}</div>
+                      <div className="text-[11px] text-gray-400">
+                        {new Date(d.savedAt).toLocaleString("tr-TR")}
+                        {activeDraftId === d.id && " · açık"}
+                      </div>
+                    </div>
+                    <button
+                      className="shrink-0 text-xs font-medium text-blue-600"
+                      onClick={() => handleOpenDraft(d)}
+                    >
+                      Aç
+                    </button>
+                    <button
+                      className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                      title="Taslağı sil"
+                      onClick={() => handleDeleteDraft(d)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Kayıt sırasında formu kilitleyip ne olduğunu gösteren ekran:
+            işlem Siber'e yazıyor ve saniyeler sürebiliyor. */}
+        {directSaving && (
+          <div className="mx-6 mt-4 flex items-center gap-3 rounded border border-blue-200 bg-blue-50 p-3">
+            <span className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-blue-600 border-t-transparent" />
+            <div className="text-xs text-blue-900">
+              <div className="font-semibold">Yük oluşturuluyor…</div>
+              <div className="text-blue-700">
+                Kayıt Siber'e yazılıyor, numara üretiliyor. Bu ekranı kapatmayın.
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="p-6 space-y-6">
           {directTab === "Genel Bilgiler" && (
@@ -1263,7 +1501,7 @@ export function LoadsPage() {
                 <SelectInput value={directForm.payment_type_id} onChange={(v) => setDirectForm((f) => ({ ...f, payment_type_id: v }))} options={opts(paymentTypes)} />
               </FormField>
               <FormField label="Teslim Şekli">
-                <SelectInput value={directForm.delivery_method_id} onChange={(v) => setDirectForm((f) => ({ ...f, delivery_method_id: v }))} options={opts(deliveryMethods)} />
+                <SelectInput value={directForm.delivery_method_id} onChange={(v) => setDirectForm((f) => ({ ...f, delivery_method_id: v }))} options={codeOpts(deliveryMethods)} />
               </FormField>
               <FormField label="Talimat Geliş Şekli">
                 <SelectInput value={directForm.instruction_id} onChange={(v) => setDirectForm((f) => ({ ...f, instruction_id: v }))} options={opts(instructions)} />

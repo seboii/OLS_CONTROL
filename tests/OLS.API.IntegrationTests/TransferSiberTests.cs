@@ -403,6 +403,11 @@ public sealed class TransferSiberTests
 /// </summary>
 internal sealed class FakeSiberLoadRepository : ISiberLoadRepository
 {
+    // Doğrulama uçları testte kullanılmıyor; kalem eksikliği simüle edilmiyor.
+    public Task<IReadOnlyList<string>> FindMissingKalemIdsAsync(
+        IReadOnlyCollection<string> kalemIds, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<string>>([]);
+
     public FakeSiberLoadRepository(bool isConfigured) => IsConfigured = isConfigured;
 
     public bool IsConfigured { get; }
