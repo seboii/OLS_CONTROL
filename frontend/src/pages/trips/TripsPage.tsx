@@ -16,6 +16,7 @@ import { CarPicker } from "@/components/shared/CarPicker";
 import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
 import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
+import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 
 /**
  * Kaydedilmemiş "Yeni Sefer" otomatik taslağı — Teklif'teki (QuotesPage) ile aynı
@@ -165,7 +166,7 @@ interface AvailableLoad {
 }
 
 const PER_PAGE = 24;
-const DETAIL_TABS = ["Genel Bilgiler", "Bağlı Yükler", "Hareketler"];
+const DETAIL_TABS = ["Genel Bilgiler", "Bağlı Yükler", "Hareketler", "İşlem Geçmişi"];
 // İş Tipi ham id'leri seed'e göre değişebilir (bkz. QuotesPage STATUS_TABS notu),
 // bu yüzden sekmeler workTypes listesinden AD ile eşleştirilir, sabit id kullanılmaz.
 const WORK_TYPE_TABS = ["Tümü", "İhracat", "İthalat", "Transit", "Yurtiçi"];
@@ -1256,6 +1257,10 @@ export function TripsPage() {
                     </>
                   )}
                 </div>
+              )}
+
+              {detailTab === "İşlem Geçmişi" && (
+                <RecordHistoryTab resource="expedition" recordId={detail?.id ?? null} />
               )}
 
               {detailTab === "Hareketler" && (

@@ -18,6 +18,7 @@ import { FinancialItemPicker, type FinancialItemOption } from "@/components/shar
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
 import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
+import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 
 interface NamedRef {
   id: number;
@@ -248,7 +249,7 @@ function computeLademeter(widthCm: string, lengthCm: string): string {
 }
 
 const PER_PAGE = 24;
-const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler", "Evrak Takibi", "Faturalar", "Dosya Arşivi"];
+const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler", "Evrak Takibi", "Faturalar", "Dosya Arşivi", "İşlem Geçmişi"];
 // İş Tipi ham id'leri seed'e göre değişebilir (bkz. QuotesPage STATUS_TABS notu),
 // bu yüzden sekmeler workTypes listesinden AD ile eşleştirilir, sabit id kullanılmaz.
 const WORK_TYPE_TABS = ["Tümü", "İhracat", "İthalat", "Transit", "Yurtiçi"];
@@ -1912,6 +1913,10 @@ export function LoadsPage() {
                     ))
                   )}
                 </div>
+              )}
+
+              {tab === "İşlem Geçmişi" && (
+                <RecordHistoryTab resource="load_transfer" recordId={detail?.id ?? null} />
               )}
 
               {tab === "Dosya Arşivi" && (

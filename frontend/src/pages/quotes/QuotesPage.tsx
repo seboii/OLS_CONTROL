@@ -19,6 +19,7 @@ import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicke
 import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
 import { BusyLabel, FullScreenBusy } from "@/components/ui/Busy";
 import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
+import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 
 interface NamedRef {
   id: number;
@@ -215,7 +216,7 @@ const PER_PAGE = 24;
 // olsnew: OfferFormDrawer.vue TabList — Genel Bilgiler/Yük İçeriği/Finans/Görevliler/
 // Dosya Arşivi/E-Posta Ayarları (yapı olsnew ile birebir; "İlgili E-Posta" AI-mail
 // sekmesi kapsam dışı — bkz. Mail Analizi hariç tutma kararı).
-const TABS = ["Genel Bilgiler", "Yük İçeriği", "Finans", "Görevliler", "Dosya Arşivi", "E-Posta Ayarları"];
+const TABS = ["Genel Bilgiler", "Yük İçeriği", "Finans", "Görevliler", "Dosya Arşivi", "E-Posta Ayarları", "İşlem Geçmişi"];
 
 // status_types tablosundaki sabit satırlar (gerçek Siber verisiyle eşleşir; backend
 // tarafında da aynı sabitler var — LoadController/LoadWriteService).
@@ -1986,6 +1987,10 @@ export function QuotesPage() {
                   )}
                 </div>
               </div>
+            )}
+
+            {tab === "İşlem Geçmişi" && (
+              <RecordHistoryTab resource="load" recordId={editingId} />
             )}
 
             {tab === "Dosya Arşivi" && (
