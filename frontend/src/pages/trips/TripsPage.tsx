@@ -15,7 +15,7 @@ import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerMod
 import { CarPicker } from "@/components/shared/CarPicker";
 import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
 import { BusyLabel } from "@/components/ui/Busy";
-import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
+import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 
 /**
@@ -57,6 +57,7 @@ interface CarRef {
 }
 
 interface ExpeditionItem {
+  siber_deleted_at?: string | null;
   id: number;
   expedition_number: string | null;
   created_at: string | null;
@@ -196,6 +197,7 @@ function ExpeditionCard({
           </div>
           <div className="min-w-0">
             <p className="font-mono text-xs font-semibold text-blue-600 truncate">{row.expedition_number ?? `SEF-${row.id}`}</p>
+            {row.siber_deleted_at && <div className="mt-1"><SiberDeletedBadge deletedAt={row.siber_deleted_at} /></div>}
             {date && (
               <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
                 <CalendarDays size={10} />
@@ -276,6 +278,9 @@ export function TripsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
+  // Siber'de silinmiş kayıtlar normalde gizli; bu süzgeç açıldığında YALNIZCA
+  // onlar listelenir ("ne silinmiş?" sorusuna tek tıkla cevap).
+  const [onlyDeleted, setOnlyDeleted] = useState(false);
   const [rows, setRows] = useState<ExpeditionItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -338,6 +343,7 @@ export function TripsPage() {
         expedition_type_id: fExpeditionType || undefined,
         status_id: fStatus || undefined,
         department_id: fDepartment || undefined,
+        only_deleted: onlyDeleted || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -352,7 +358,7 @@ export function TripsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, workTypeTab, workTypes.length, dateFrom, dateTo, page, fExpeditionType, fStatus, fDepartment]);
+  }, [debouncedSearch, workTypeTab, workTypes.length, dateFrom, dateTo, page, fExpeditionType, fStatus, fDepartment, onlyDeleted]);
 
   function openNew() {
     setForm({ ...EMPTY_TRIP_FORM });
@@ -842,6 +848,20 @@ export function TripsPage() {
             <div className="flex-1 max-w-md">
               <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: sefer no, plaka..." />
             </div>
+            <button
+              type="button"
+              onClick={() => { setOnlyDeleted((v) => !v); setPage(1); }}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                onlyDeleted
+                  ? "text-red-600 border-red-200 bg-red-50"
+                  : "text-gray-600 border-gray-200 hover:border-red-200 hover:text-red-600",
+              )}
+              title="Siber'de silinmiş kayıtları listeler"
+            >
+              <Trash2 size={13} />
+              Siberde silinenler
+            </button>
             <button
               type="button"
               onClick={() => setShowAdvanced((s) => !s)}

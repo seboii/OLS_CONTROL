@@ -20,6 +20,10 @@ export interface SiberAuditInfo {
   updated_by_name: string | null;
   updated_at: string | null;
   deleted_at: string | null;
+  deleted_by_code: string | null;
+  deleted_by_name: string | null;
+  /** Siber'deki gerçek silme anı; deleted_at ise fark edilme anı. */
+  deleted_on: string | null;
 }
 
 const stamp = (value: string | null) =>
@@ -64,11 +68,21 @@ export function SiberAuditPanel({
   return (
     <div className={clsx("rounded border border-gray-200 bg-gray-50 p-2.5 space-y-1.5", className)}>
       {audit.deleted_at && (
-        <div className="flex items-center gap-1.5 text-xs text-red-700">
-          <Trash2 size={12} className="shrink-0" />
+        <div className="flex items-start gap-1.5 text-xs text-red-700">
+          <Trash2 size={12} className="shrink-0 mt-0.5" />
           <span>
-            Bu kayıt Siber'de bulunamıyor. {stamp(audit.deleted_at)} tarihinde silinmiş olarak
-            işaretlendi; geçmişi korumak için burada tutuluyor.
+            {/* Silme günlüğü varsa gerçek silen ve zamanı gösterilir; yoksa
+                yalnızca bizim fark ettiğimiz an bilinir. */}
+            {who(audit.deleted_by_name, audit.deleted_by_code) ? (
+              <>
+                Bu kaydı Siber'de{" "}
+                <span className="font-semibold">{who(audit.deleted_by_name, audit.deleted_by_code)}</span>
+                {audit.deleted_on && <> · {stamp(audit.deleted_on)}</>} sildi.
+              </>
+            ) : (
+              <>Bu kayıt Siber'de bulunamıyor ({stamp(audit.deleted_at)} tarihinde fark edildi).</>
+            )}{" "}
+            Geçmişi ve bağlı kayıtları korumak için burada tutuluyor.
           </span>
         </div>
       )}

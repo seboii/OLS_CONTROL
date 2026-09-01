@@ -18,7 +18,7 @@ import { FinancialItemPicker, type FinancialItemOption } from "@/components/shar
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
 import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
 import { BusyLabel, FullScreenBusy } from "@/components/ui/Busy";
-import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
+import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 
 interface NamedRef {
@@ -27,6 +27,7 @@ interface NamedRef {
 }
 
 interface LoadItem {
+  siber_deleted_at?: string | null;
   id: number;
   reservation_number: string | null;
   load_number: string | null;
@@ -443,6 +444,7 @@ function QuoteCard({
               <p className="text-xs font-medium text-gray-400 truncate">Numara atanmadı</p>
             )}
             {row.load_number && <p className="text-[10px] text-gray-400 mt-0.5 truncate">Yük No: {row.load_number}</p>}
+            {row.siber_deleted_at && <div className="mt-1"><SiberDeletedBadge deletedAt={row.siber_deleted_at} /></div>}
           </div>
         </div>
         <CardMenu
@@ -628,6 +630,9 @@ export function QuotesPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
+  // Siber'de silinmiş kayıtlar normalde gizli; bu süzgeç açıldığında YALNIZCA
+  // onlar listelenir ("ne silinmiş?" sorusuna tek tıkla cevap).
+  const [onlyDeleted, setOnlyDeleted] = useState(false);
   const [listTab, setListTab] = useState(STATUS_TABS[0].label);
   const [rows, setRows] = useState<LoadItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -776,6 +781,7 @@ export function QuotesPage() {
         agent_id: fAgent?.id || undefined,
         assigned_user_id: fAssignedUser?.id || undefined,
         work_type_id: fWorkType || undefined,
+        only_deleted: onlyDeleted || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -795,7 +801,7 @@ export function QuotesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     debouncedSearch, dateFrom, dateTo, page, listTab, statusTypes.length,
-    fCustomer, fSender, fReceiver, fAgent, fAssignedUser, fWorkType,
+    fCustomer, fSender, fReceiver, fAgent, fAssignedUser, fWorkType, onlyDeleted,
   ]);
 
   // Buton rozetindeki taslak sayısı: menü hiç açılmasa bile görünsün diye
@@ -1448,6 +1454,20 @@ export function QuotesPage() {
             <div className="flex-1 max-w-md">
               <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: teklif no, müşteri..." />
             </div>
+            <button
+              type="button"
+              onClick={() => { setOnlyDeleted((v) => !v); setPage(1); }}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                onlyDeleted
+                  ? "text-red-600 border-red-200 bg-red-50"
+                  : "text-gray-600 border-gray-200 hover:border-red-200 hover:text-red-600",
+              )}
+              title="Siber'de silinmiş kayıtları listeler"
+            >
+              <Trash2 size={13} />
+              Siberde silinenler
+            </button>
             <button
               type="button"
               onClick={() => setShowAdvanced((s) => !s)}
