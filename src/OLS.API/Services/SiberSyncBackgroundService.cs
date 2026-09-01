@@ -1,4 +1,4 @@
-using OLS.Business.Services.Finance;
+﻿using OLS.Business.Services.Finance;
 using OLS.Business.Services.TransferData;
 using OLS.DataAccess.Siber;
 
@@ -125,6 +125,11 @@ public sealed class SiberSyncBackgroundService : BackgroundService
 
         foreach (var (label, step, _) in Entities)
             await RunStepAsync(label, step, sync, cancellationToken);
+
+        // Siber değişiklik günlüğü yalnızca YENİ satır ekler (günlük kayıtları
+        // değişmez), bu yüzden her tam turda ucuz kalıyor.
+        await RunStepAsync("Değişiklik günlüğü",
+            (sync, ct) => sync.SyncChangeLogsAsync(false, ct), sync, cancellationToken);
 
         // Muhasebe/finans YALNIZCA tam senkronda çekilir. Hızlı katman satır
         // sayısı karşılaştırmasına dayanıyor; sfy_fisdetay 214.954 satır ve her

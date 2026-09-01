@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OLS.Business.Services.TransferData;
 
@@ -19,8 +19,13 @@ namespace OLS.API.Controllers.Front;
 public sealed class TransferDataController : ApiControllerBase
 {
     private readonly ISiberImportService _import;
+    private readonly ISiberSyncService _sync;
 
-    public TransferDataController(ISiberImportService import) => _import = import;
+    public TransferDataController(ISiberImportService import, ISiberSyncService sync)
+    {
+        _import = import;
+        _sync = sync;
+    }
 
     [HttpPost]
     public async Task<IActionResult> Save(CancellationToken cancellationToken) =>
@@ -61,6 +66,14 @@ public sealed class TransferDataController : ApiControllerBase
     [HttpGet("getCar")]
     public async Task<IActionResult> GetCar(CancellationToken cancellationToken) =>
         Result(await _import.ImportCarsAsync(cancellationToken));
+
+    /// <summary>
+    /// Siber değişiklik günlüğü. <c>full=true</c> tüm geçmişi çeker (ilk dolum).
+    /// </summary>
+    [HttpGet("change_logs")]
+    public async Task<IActionResult> ChangeLogs(
+        [FromQuery] bool full, CancellationToken cancellationToken) =>
+        Result(await _sync.SyncChangeLogsAsync(full, cancellationToken));
 
     private IActionResult Result(SiberImportSummary summary) => base.Ok(new Dictionary<string, object?>
     {

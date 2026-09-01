@@ -25,6 +25,9 @@ namespace OLS.Business.Services.TransferData;
 /// </summary>
 public interface ISiberSyncService
 {
+    /// <summary>Siber değişiklik günlüğü — bkz. gerçekleştirimdeki açıklama.</summary>
+    Task<SiberImportSummary> SyncChangeLogsAsync(bool full = false, CancellationToken cancellationToken = default);
+
     Task<SiberImportSummary> SyncOffersAsync(CancellationToken cancellationToken = default);
     Task<SiberImportSummary> SyncOfferContentsAsync(CancellationToken cancellationToken = default);
     Task<SiberImportSummary> SyncOfferFinancialsAsync(CancellationToken cancellationToken = default);
@@ -405,6 +408,148 @@ public sealed class SiberSyncService : ISiberSyncService
             label, marked);
 
         return $"{label}: {marked} kayıt Siber'de bulunamadı, silindi olarak işaretlendi.";
+    }
+
+
+    /// <summary>
+    /// Siber'in değişiklik günlüğü (<c>sbr_log</c>) — bir kaydın TAM işlem
+    /// geçmişi: kim, ne zaman, hangi alanı, hangi değerden hangi değere.
+    ///
+    /// <c>insuser</c>/<c>upduser</c> yalnızca açan ve son dokunanı verir;
+    /// aradaki her işlem burada. Kapsam üç operasyon tablosuyla sınırlı
+    /// (yük 36.941, teklif 31.331, sefer 18.000 satır) — sbr_log'un tamamı
+    /// 797.855 satır ve büyük kısmı bu uygulamanın göstermediği modüllere ait.
+    ///
+    /// Günlük satırları DEĞİŞMEZ: bir kez yazıldıktan sonra Siber tarafından
+    /// güncellenmiyor. Bu yüzden yalnızca YENİ satırlar çekilir — yerelde en
+    /// son görülen tarihten itibaren, bir gün geri örtüşmeyle (aynı gün içinde
+    /// sonradan eklenen satırlar kaçmasın diye).
+    /// </summary>
+    public async Task<SiberImportSummary> SyncChangeLogsAsync(
+        bool full = false, CancellationToken cancellationToken = default)
+    {
+        if (!_siber.IsConfigured)
+            return SiberImportSummary.Empty;
+
+        var since = full
+            ? (DateTime?)null
+            : await _db.SiberChangeLogs
+                .OrderByDescending(l => l.ChangedAt)
+                .Select(l => l.ChangedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+        if (since is { } s)
+            since = s.AddDays(-1);
+
+        using var connection = await OpenAsync(cancellationToken);
+
+        var rows = (await connection.QueryAsync<ChangeLogRow>(
+            new CommandDefinition(
+                """
+                SELECT LOWER(CAST(logid AS VARCHAR(64)))          AS LogId,
+                       LTRIM(RTRIM(tablename))                    AS TableName,
+                       LOWER(CAST(tablerecordid AS VARCHAR(64)))  AS RecordId,
+                       LTRIM(RTRIM(kullanici))                    AS UserCode,
+                       tarih                                      AS ChangedAt,
+                       yapilanislem                               AS Operation,
+                       CAST(fieldlar AS NVARCHAR(MAX))            AS Fields,
+                       CAST(oncekideger AS NVARCHAR(MAX))         AS OldValues,
+                       CAST(sonrakideger AS NVARCHAR(MAX))        AS NewValues,
+                       findfieldvalue                             AS RecordLabel,
+                       LTRIM(RTRIM(islemmodul))                   AS Module
+                FROM sbr_log
+                WHERE tablename IN ('skn_yuk', 'skn_rezervasyon', 'skn_pozisyon')
+                  AND (@Since IS NULL OR tarih >= @Since)
+                """,
+                new { Since = since },
+                commandTimeout: 300,
+                cancellationToken: cancellationToken))).ToList();
+
+        if (rows.Count == 0)
+            return SiberImportSummary.Empty;
+
+        var existing = await _db.SiberChangeLogs
+            .Where(l => since == null || l.ChangedAt >= since)
+            .Select(l => l.SiberId)
+            .ToListAsync(cancellationToken);
+
+        var known = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
+        var userCodes = await SiberUserCodeMapAsync(cancellationToken);
+
+        var created = 0;
+        var pending = 0;
+
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.LogId) || !known.Add(row.LogId))
+                continue;
+
+            var code = string.IsNullOrWhiteSpace(row.UserCode) ? null : row.UserCode.Trim();
+
+            _db.SiberChangeLogs.Add(new SiberChangeLog
+            {
+                SiberId = row.LogId,
+                TableName = row.TableName ?? string.Empty,
+                RecordId = row.RecordId ?? string.Empty,
+                UserCode = code,
+                UserId = code is not null && userCodes.TryGetValue(code, out var id) ? id : null,
+                ChangedAt = row.ChangedAt,
+                Operation = row.Operation,
+                Fields = StripNul(row.Fields),
+                OldValues = StripNul(row.OldValues),
+                NewValues = StripNul(row.NewValues),
+                RecordLabel = Truncate(StripNul(row.RecordLabel), 510),
+                Module = Truncate(StripNul(row.Module), 255),
+                CreatedAt = DateTime.Now,
+            });
+
+            created++;
+
+            if (++pending >= 5000)
+            {
+                await _db.SaveChangesAsync(cancellationToken);
+                pending = 0;
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return new SiberImportSummary(created, 0, []);
+    }
+
+    private static string? Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength ? trimmed : trimmed[..maxLength];
+    }
+
+    /// <summary>
+    /// NUL baytlarını (0x00) atar.
+    ///
+    /// Siber'in günlük metinleri NUL içerebiliyor (sabit uzunluklu alanlardan
+    /// gelen dolgu). PostgreSQL <c>text</c> sütunu bunu kabul etmiyor ve tüm
+    /// toplu yazma
+    /// "invalid byte sequence for encoding UTF8: 0x00" ile düşüyor —
+    /// tek bir satır yüzünden 86 bin satırlık aktarım iptal oluyordu.
+    /// </summary>
+    private static string? StripNul(string? value) =>
+        value is null ? null : value.Replace(" ", string.Empty);
+
+    private sealed class ChangeLogRow
+    {
+        public string? LogId { get; set; }
+        public string? TableName { get; set; }
+        public string? RecordId { get; set; }
+        public string? UserCode { get; set; }
+        public DateTime? ChangedAt { get; set; }
+        public short? Operation { get; set; }
+        public string? Fields { get; set; }
+        public string? OldValues { get; set; }
+        public string? NewValues { get; set; }
+        public string? RecordLabel { get; set; }
+        public string? Module { get; set; }
     }
 
     private sealed class OfferRow
