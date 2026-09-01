@@ -36,7 +36,10 @@ services:
     image: 'cloudflare/cloudflared:latest'
     container_name: ols-scoped-cloudflared
     # Tünel giden bağlantı kurar; hiçbir port yayınlamaz.
-    command: 'tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}'
+    # `:?` ile: token tanımlı değilse Compose HİÇBİR ŞEY BAŞLATMADAN açık bir
+    # hatayla durur. Aksi hâlde cloudflared boş token ile döngüye girip yardım
+    # metni basıyor ve sorunun ne olduğu anlaşılmıyor.
+    command: 'tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:?Zero Trust panelinden alinan tunel tokeni .env icine CLOUDFLARE_TUNNEL_TOKEN olarak yazilmali}'
     networks: [ols-scoped]
     restart: unless-stopped
     depends_on: [web]
