@@ -121,19 +121,20 @@ public sealed class AccountService : IAccountService
 
     public async Task<object> ListAsync(AccountListQuery query, CancellationToken cancellationToken = default)
     {
-        var isSuperAdmin = await IsSuperAdminAsync(query.UserId, cancellationToken);
-
         var accounts = _db.Accounts.AsNoTracking().Where(a => a.IsActive);
 
-        // Süper admin değilse yalnızca kendisine atanmış cariler görünür.
-        if (!isSuperAdmin)
-        {
-            var allowedIds = _db.UserAccountMappings
-                .Where(m => m.UserId == query.UserId)
-                .Select(m => (long)m.AccountId);
-
-            accounts = accounts.Where(a => allowedIds.Contains(a.Id));
-        }
+        // ATANMIŞ CARİ FİLTRESİ KALDIRILDI (bilinçli).
+        //
+        // Eskiden süper admin olmayan kullanıcı yalnızca user_account_mappings
+        // ile KENDİSİNE atanmış carileri görüyordu (olsold'dan gelen
+        // nesne-seviyesi kural). Ancak bu eşleme tablosu canlıda TAMAMEN BOŞ
+        // (0 satır), yani 7.443 carinin tamamı iki süper admin dışında
+        // HİÇ KİMSEYE görünmüyordu — ekip müşteri listesini boş buluyordu.
+        //
+        // Kural, kimsenin doldurmadığı bir tabloya dayandığı için pratikte
+        // "herkese kapalı" anlamına geliyordu. Cari listesi artık yetki
+        // sayfasıyla (account_management) korunuyor: okuma hakkı olan tüm
+        // carileri görür.
 
         if (query.AccountTypeId is { } typeId)
         {

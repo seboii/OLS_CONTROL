@@ -46,14 +46,21 @@ public sealed class AccountVisibilityTests
             .Should().Contain(a => a.GetProperty("name").GetString() == accountName);
     }
 
+    /// <summary>
+    /// Okuma yetkisi olan kullanıcı, kendisine cari ATANMAMIŞ olsa bile tüm
+    /// carileri görür.
+    ///
+    /// Eskiden kural tersineydi (yalnızca user_account_mappings ile atanmış
+    /// cariler görünürdü) ve bu test 0 bekliyordu. Ancak o eşleme tablosu
+    /// canlıda hiç doldurulmuyordu: 7.443 carinin tamamı iki süper admin
+    /// dışında kimseye görünmüyor, ekip müşteri listesini boş buluyordu.
+    /// Kural kaldırıldı; görünürlük artık yetki sayfasına dayanıyor.
+    /// </summary>
     [Fact]
-    public async Task RegularUser_WithReadPermissionButNoAccountMapping_SeesNoAccounts()
+    public async Task RegularUser_WithReadPermission_SeesAccountsWithoutMapping()
     {
         using var admin = await _factory.CreateAdminClientAsync();
 
-        // Görünür bir kontrol noktası: admin'e göre en az bir cari var (üstteki test
-        // veya bu testin kendisi tarafından oluşturulmuş olabilir; miktar önemli değil,
-        // önemli olan aşağıdaki kullanıcının 0 görmesi).
         var accountName = $"Baska Musteri {Guid.NewGuid():N}";
         using var form = await TestAccountHelper.MinimalAccountFormAsync(admin, accountName);
         (await admin.PostAsync("/api/v1/account", form)).EnsureSuccessStatusCode();
@@ -66,12 +73,16 @@ public sealed class AccountVisibilityTests
         var token = await _factory.LoginAsync(email, "Test!2026Pw");
         using var client = _factory.CreateAuthorizedClient(token);
 
-        var response = await client.GetAsync("/api/v1/account?per_page=50");
+        var response = await client.GetAsync(
+            $"/api/v1/account?search={Uri.EscapeDataString(accountName)}&per_page=50");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        body.GetProperty("data").GetProperty("total").GetInt32().Should().Be(0,
-            "eşlemesiz kullanıcı süper admin olmadığı sürece hiçbir cari görmemeli");
+
+        // Kendisine atanmamış cari de görünmeli.
+        body.GetProperty("data").GetProperty("data").EnumerateArray()
+            .Should().Contain(a => a.GetProperty("name").GetString() == accountName,
+                "eşlemesi olmayan kullanıcı da carileri görebilmeli");
     }
 
     [Fact]

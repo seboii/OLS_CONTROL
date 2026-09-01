@@ -105,7 +105,7 @@ public static class RoleCatalog
         new("muhasebe-finans", "Muhasebe & Finans",
             "Fatura üzerinde tam yetki; cari güncellenebilir, yük/sefer okunur.", false,
             Compose(
-                PagePermission.Full(Invoice), PagePermission.ReadWrite(Account),
+                PagePermission.Full(Invoice), PagePermission.Full(Account),
                 PagePermission.Full(Finance), PagePermission.Full(Accounting),
                 PagePermission.ReadOnly(Load), PagePermission.ReadOnly(Expedition),
                 PagePermission.ReadOnly(Car), PagePermission.Full(Support))),
@@ -113,7 +113,7 @@ public static class RoleCatalog
         new("idari-isler", "İdari İşler",
             "Araç üzerinde tam yetki; diğer iş modülleri okunur.", false,
             Compose(
-                PagePermission.Full(Car), PagePermission.ReadOnly(Account),
+                PagePermission.Full(Car), PagePermission.Full(Account),
                 PagePermission.ReadOnly(Load), PagePermission.ReadOnly(Expedition),
                 PagePermission.ReadOnly(Invoice), PagePermission.Full(Support))),
 
@@ -123,7 +123,9 @@ public static class RoleCatalog
         new("standart", "Standart Kullanıcı",
             "Departmanı tanımlı olmayan kullanıcılar. İş modülleri yalnızca okunur.", true,
             Compose(
-                PagePermission.ReadOnly(Account), PagePermission.ReadOnly(Load),
+                // Departmanı bilinmeyen kullanıcı da müşteri açabilmeli, ama
+                // SİLME hakkı verilmiyor: kimin hangi işi yaptığı belli değil.
+                PagePermission.ReadWrite(Account), PagePermission.ReadOnly(Load),
                 PagePermission.ReadOnly(Expedition), PagePermission.ReadOnly(Invoice),
                 PagePermission.ReadOnly(Car), PagePermission.Full(Support))),
     ];
@@ -148,7 +150,10 @@ public static class RoleCatalog
 
     private static IReadOnlyList<PagePermission> OperationsPages() => Compose(
         PagePermission.Full(Load), PagePermission.Full(Expedition),
-        PagePermission.ReadWrite(Car), PagePermission.ReadOnly(Account),
+        PagePermission.ReadWrite(Car),
+        // Cari TAM yetki: operasyon yeni müşteri açıyor ve kayıt düzeltiyor;
+        // salt-okunur bırakmak günlük işi bloke ediyordu.
+        PagePermission.Full(Account),
         PagePermission.ReadOnly(Invoice), PagePermission.ReadOnly(Finance),
         PagePermission.Full(Support));
 
