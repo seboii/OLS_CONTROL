@@ -110,13 +110,11 @@ public sealed class DirectLoadService : IDirectLoadService
         if (userId is not { } id)
             return false;
 
-        if (await _permissions.HasPermissionAsync(id, "super_admin", PermissionAction.Read, cancellationToken))
-            return true;
-
-        // Avrora ekibi: kapsamı Avrora'ya çözülen kullanıcı.
-        var visibility = await _companyScope.ResolveAsync(id, cancellationToken);
-        return string.Equals(visibility.OnlyCompanyId, CompanyScope.AvroraCompanyId,
-            StringComparison.OrdinalIgnoreCase);
+        // Karar tek yerde: teklifsiz yük açma, teklif modülünü KULLANMAYAN
+        // şirketin yoludur (Avrora). OLS'te her yük bir teklifin dönüşümü
+        // olduğu için bu düğme yoktur. Bkz. CompanyCapabilities.
+        var capabilities = await _companyScope.ResolveCapabilitiesAsync(id, cancellationToken);
+        return capabilities.CanCreateDirectLoad;
     }
 
     public async Task<LoadTransferWriteResult> CreateAsync(

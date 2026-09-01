@@ -9,12 +9,19 @@ interface NavItem {
   label: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
   permissionSlug?: string;
+  /**
+   * Yetkiye EK olarak şirketin bu iş akışını kullanıyor olmasını şart koşar.
+   * Teklifler ve Yükler aynı yetki sayfasını (load_management) paylaştığı
+   * için Teklifler'i yetkiyle gizlemek Yükler'i de gizlerdi.
+   */
+  requiresOfferModule?: boolean;
 }
 
 export const NAV_ITEMS: NavItem[] = [
   { path: "/panel", label: "Dashboard", icon: LayoutDashboard },
   { path: "/musteriler", label: "Müşteriler", icon: Users, permissionSlug: "account_management" },
-  { path: "/teklifler", label: "Teklifler", icon: FileText, permissionSlug: "load_management" },
+  // Avrora teklif kullanmıyor: yükü doğrudan Yükler ekranından açıyor.
+  { path: "/teklifler", label: "Teklifler", icon: FileText, permissionSlug: "load_management", requiresOfferModule: true },
   { path: "/yukler", label: "Yükler", icon: Package, permissionSlug: "load_management" },
   { path: "/seferler", label: "Seferler", icon: Truck, permissionSlug: "expedition_management" },
   { path: "/faturalar", label: "Faturalar", icon: Receipt, permissionSlug: "invoice_management" },
@@ -43,13 +50,17 @@ export function Sidebar({
   mobileOpen: boolean;
   onMobileClose: () => void;
 }) {
-  const { can, logout } = useAuth();
+  const { can, logout, capabilities } = useAuth();
 
   // Bilinmeyen/seed edilmemiş sayfa slug'ı varsayılan olarak REDDEDİLİR
   // (bkz. lib/auth.tsx can()) — bu yüzden hiç yetki satırı olmayan bir admin
   // hesabı hiçbir modülü göremez; seed admin kullanıcısı tüm sayfalarda tam
   // yetkiyle geldiği için bu satırlar normal kullanımda tüm menüyü gösterir.
-  const visibleItems = NAV_ITEMS.filter((item) => !item.permissionSlug || can(item.permissionSlug, "read"));
+  const visibleItems = NAV_ITEMS.filter(
+    (item) =>
+      (!item.permissionSlug || can(item.permissionSlug, "read")) &&
+      (!item.requiresOfferModule || capabilities.uses_offers),
+  );
 
   const content = (
     <div className="flex flex-col h-full" style={{ backgroundColor: "#0D1B2E" }}>

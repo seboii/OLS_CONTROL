@@ -1,5 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { AuthProvider } from "@/lib/auth";
+import { AuthProvider, useAuth } from "@/lib/auth";
 import { ToastProvider } from "@/components/ui/Toast";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
@@ -18,6 +18,23 @@ import { AccountingPage } from "@/pages/accounting/AccountingPage";
 import { AuditLogPage } from "@/pages/audit/AuditLogPage";
 import { ProfilePage } from "@/pages/ProfilePage";
 
+/**
+ * Teklif modülünü kullanmayan şirketin (Avrora) kullanıcısı adresi elle yazsa
+ * bile Teklifler ekranına giremesin. Menüde sekme zaten gizli; bu, gizli
+ * menünün yetki OLMADIĞI için gereken ikinci katman. Sunucu tarafı üçüncü
+ * katman (RequiresOfferModule) ve asıl karar orada.
+ */
+function OfferModuleRoute({ children }: { children: React.ReactNode }) {
+  const { loading, capabilities } = useAuth();
+
+  // Yetenekler gelmeden yönlendirme yapılmaz, aksi hâlde ilk karede
+  // herkes panele atılırdı.
+  if (loading) return null;
+  if (!capabilities.uses_offers) return <Navigate to="/yukler" replace />;
+
+  return <>{children}</>;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -29,7 +46,10 @@ export default function App() {
               <Route path="/" element={<Navigate to="/panel" replace />} />
               <Route path="/panel" element={<DashboardPage />} />
               <Route path="/musteriler" element={<CustomersPage />} />
-              <Route path="/teklifler" element={<QuotesPage />} />
+              <Route
+                path="/teklifler"
+                element={<OfferModuleRoute><QuotesPage /></OfferModuleRoute>}
+              />
               <Route path="/yukler" element={<LoadsPage />} />
               <Route path="/seferler" element={<TripsPage />} />
               <Route path="/faturalar" element={<InvoicesPage />} />

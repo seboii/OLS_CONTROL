@@ -38,22 +38,62 @@ interface RoleResponse {
 
 export type PermissionAction = "read" | "create" | "update" | "delete";
 
+/**
+ * Kullanıcının ŞİRKETİNE bağlı açık/kapalı iş akışları — yetkiden AYRI.
+ *
+ * OLS ve Avrora bu noktada iki ayrı şirket: yük açma yolları birbirini
+ * dışlıyor. Avrora teklif kullanmıyor (sekme hiç görünmez, yükü doğrudan
+ * açar); OLS teklifle çalışıyor (her yük bir teklifin dönüşümü, teklifsiz
+ * açma düğmesi yok).
+ *
+ * Yetkiyle ifade EDİLEMİYOR çünkü Teklifler ve Yükler ekranları aynı yetki
+ * sayfasını (load_management) paylaşıyor — Teklifler'i yetkiyle gizlemek
+ * Yükler'i de gizlerdi.
+ */
+export interface Capabilities {
+  uses_offers: boolean;
+  can_create_direct_load: boolean;
+}
+
 interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   permissions: Record<string, PermissionRow>;
+  capabilities: Capabilities;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   can: (slug: string, action: PermissionAction) => boolean;
   refresh: () => Promise<void>;
 }
 
+/**
+ * Yetenekler gelmeden önceki hâl. Teklif AÇIK varsayılır: kullanıcıların
+ * ezici çoğunluğu OLS tarafında (128/130) ve sekmenin bir an görünüp
+ * kaybolması, olması gerekirken hiç görünmemesinden iyidir.
+ */
+const DEFAULT_CAPABILITIES: Capabilities = {
+  uses_offers: true,
+  can_create_direct_load: false,
+};
+
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [permissions, setPermissions] = useState<Record<string, PermissionRow>>({});
+  const [capabilities, setCapabilities] = useState<Capabilities>(DEFAULT_CAPABILITIES);
   const [loading, setLoading] = useState(true);
+
+  const loadCapabilities = useCallback(async () => {
+    try {
+      const res = await api.get<{ data: Capabilities }>("/api/v1/capabilities");
+      setCapabilities(res.data);
+    } catch {
+      // Uç yanıt vermezse varsayılana dönülür; gerçek karar her durumda
+      // sunucuda (RequiresOfferModule) veriliyor.
+      setCapabilities(DEFAULT_CAPABILITIES);
+    }
+  }, []);
 
   const loadPermissions = useCallback(async (userId: number) => {
     try {
@@ -81,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const res = await api.get<{ data: AuthUser | null; authenticated: boolean }>("/api/v1/auth");
       if (res.authenticated && res.data) {
         setUser(res.data);
-        await loadPermissions(res.data.id);
+        await Promise.all([loadPermissions(res.data.id), loadCapabilities()]);
       } else {
         setUser(null);
       }
@@ -90,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false);
     }
-  }, [loadPermissions]);
+  }, [loadPermissions, loadCapabilities]);
 
   useEffect(() => {
     refresh();
@@ -105,9 +145,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
       setToken(res.data.token);
       setUser(res.data.user);
-      await loadPermissions(res.data.user.id);
+      await Promise.all([loadPermissions(res.data.user.id), loadCapabilities()]);
     },
-    [loadPermissions],
+    [loadPermissions, loadCapabilities],
   );
 
   const logout = useCallback(async () => {
@@ -119,6 +159,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearToken();
       setUser(null);
       setPermissions({});
+      setCapabilities(DEFAULT_CAPABILITIES);
     }
   }, []);
 
@@ -136,8 +177,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, permissions, login, logout, can, refresh }),
-    [user, loading, permissions, login, logout, can, refresh],
+    () => ({ user, loading, permissions, capabilities, login, logout, can, refresh }),
+    [user, loading, permissions, capabilities, login, logout, can, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

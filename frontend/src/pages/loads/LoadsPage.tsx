@@ -497,8 +497,9 @@ export function LoadsPage() {
   const { options: loadTransferTypes } = useLookupOptions("/api/v1/load_transfer_type");
   const { options: countries } = useLookupOptions("/api/v1/country");
 
-  // TEKLİFSİZ YÜK AÇMA — yalnızca Avrora ekibi ve yöneticiler görür.
-  // Yetkiyi sunucu belirliyor (bkz. DirectLoadService.CanCreateAsync); arayüz
+  // TEKLİFSİZ YÜK AÇMA — teklif modülünü KULLANMAYAN şirketin yolu (Avrora).
+  // OLS'te her yük bir teklifin dönüşümü olduğu için bu düğme görünmez.
+  // Kararı sunucu veriyor (bkz. DirectLoadService.CanCreateAsync); arayüz
   // kendi başına karar vermiyor, sadece uca soruyor.
   const [canDirect, setCanDirect] = useState(false);
   const [directOpen, setDirectOpen] = useState(false);
@@ -1244,7 +1245,7 @@ export function LoadsPage() {
             <div className="flex-1 max-w-md">
               <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: yük no, müşteri, durum..." />
             </div>
-            {/* Teklifsiz yük açma — yalnızca Avrora ekibi ve yöneticiler. */}
+            {/* Teklifsiz yük açma — teklif kullanmayan şirket (Avrora) ve yöneticiler. */}
             {canDirect && canCreate && (
               <Btn onClick={() => setDirectOpen(true)}>
                 <Plus size={14} />Teklifsiz Yük Aç

@@ -30,6 +30,9 @@ namespace OLS.API.Controllers.Front;
 /// </summary>
 [Authorize]
 [Route("api/v1/load")]
+// Teklif modülü şirkete bağlı: Avrora teklif kullanmıyor, yükü doğrudan açıyor.
+// Menüde sekme gizlense de uç kapatılmalı — bkz. RequiresOfferModuleAttribute.
+[RequiresOfferModule]
 public sealed class LoadController : ApiControllerBase
 {
     /// <summary>status_types tablosundaki "Olumsuz" satırı — bkz. LoadWriteService.</summary>

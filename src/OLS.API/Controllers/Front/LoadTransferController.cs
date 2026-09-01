@@ -102,6 +102,8 @@ public sealed class LoadTransferController : ApiControllerBase
     /// </summary>
     [HttpPost]
     [RequiresPermission(PermissionAction.Create, "load_management")]
+    // Teklifi yüke çevirmek teklif modülünün işi; Avrora bu yolu kullanmıyor.
+    [RequiresOfferModule]
     public async Task<IActionResult> ConvertOffer(
         [FromBody] ConvertOfferRequest request, CancellationToken cancellationToken)
     {
@@ -159,6 +161,9 @@ public sealed class LoadTransferController : ApiControllerBase
 
     /// <summary>
     /// Kullanıcı teklifsiz yük açabilir mi — arayüz düğmeyi buna göre gösterir.
+    ///
+    /// Şirkete bağlı: teklif modülünü kullanmayan şirket (Avrora) yükü doğrudan
+    /// açar, teklifle çalışan şirket (OLS) açamaz. Bkz. CompanyCapabilities.
     /// </summary>
     [HttpGet("direct/allowed")]
     [RequiresPermission(PermissionAction.Read, "load_management")]

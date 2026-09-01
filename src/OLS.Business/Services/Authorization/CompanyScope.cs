@@ -18,6 +18,9 @@ namespace OLS.Business.Services.Authorization;
 /// Neden rol değil ayrı bir alan: rol "ne yapabilir" (yetki şablonu), kapsam
 /// "ne görebilir" (veri filtresi). Rolle birleştirilseydi her rolün şirket
 /// başına kopyası gerekirdi (Satış-Avrora, Satış-OLS, Operasyon-Avrora…).
+///
+/// Şirket ayrımı yalnızca GÖRÜNÜRLÜK değil: iki şirketin yük açma yolu da
+/// farklı — bkz. <see cref="CompanyCapabilities"/>.
 /// </summary>
 public interface ICompanyScope
 {
@@ -26,7 +29,30 @@ public interface ICompanyScope
     /// yük/sefer olabildiği için şirket kimliğini seçen bir ifade alır.
     /// </summary>
     Task<CompanyVisibility> ResolveAsync(long? userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Kullanıcının şirketi hangi modülleri kullanıyor. Görünürlükten (hangi
+    /// kaydı görür) AYRI bir soru: burada "bu iş akışı bu şirkette var mı"
+    /// sorulur.
+    /// </summary>
+    Task<CompanyCapabilities> ResolveCapabilitiesAsync(
+        long? userId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Şirkete göre AÇIK/KAPALI iş akışları.
+///
+/// OLS ve Avrora bu noktada iki ayrı şirket gibi çalışıyor ve yük açma
+/// yolları BİRBİRİNİ DIŞLIYOR:
+///
+///   • Avrora teklif kullanmıyor. Teklif sekmesi hiç görünmez; yük doğrudan
+///     Yükler ekranından açılır.
+///   • OLS teklifle çalışır. Her yük bir teklifin dönüşümüdür, bu yüzden
+///     teklifsiz yük açma düğmesi yoktur.
+///
+/// Süper admin iki şirketi de yönettiği için her ikisine de erişir.
+/// </summary>
+public sealed record CompanyCapabilities(bool UsesOffers, bool CanCreateDirectLoad);
 
 /// <summary>Bir kullanıcının görünürlük kararı.</summary>
 public sealed record CompanyVisibility(bool SeesEverything, string? OnlyCompanyId, string? ExcludeCompanyId)
@@ -95,5 +121,21 @@ public sealed class CompanyScope : ICompanyScope
         return string.IsNullOrWhiteSpace(scoped)
             ? new CompanyVisibility(false, null, AvroraCompanyId)
             : new CompanyVisibility(false, scoped, null);
+    }
+
+    public async Task<CompanyCapabilities> ResolveCapabilitiesAsync(
+        long? userId, CancellationToken cancellationToken = default)
+    {
+        var visibility = await ResolveAsync(userId, cancellationToken);
+
+        // Süper admin (ve oturumsuz arka plan işi) iki şirketi de yönetir.
+        if (visibility.SeesEverything)
+            return new CompanyCapabilities(UsesOffers: true, CanCreateDirectLoad: true);
+
+        var isAvrora = string.Equals(visibility.OnlyCompanyId, AvroraCompanyId,
+            StringComparison.OrdinalIgnoreCase);
+
+        // Tam olarak birbirinin tersi: Avrora teklifsiz açar, OLS teklifle.
+        return new CompanyCapabilities(UsesOffers: !isAvrora, CanCreateDirectLoad: isAvrora);
     }
 }
