@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OLS.API.Filters;
@@ -64,12 +64,15 @@ public sealed class LoadTransferController : ApiControllerBase
         [FromQuery(Name = "case_type_id")] long? caseTypeId = null,
         [FromQuery(Name = "financial_item")] string? financialItem = null,
         [FromQuery] decimal? weight = null,
+        /// <summary>Siber'den silinmiş kayıtları da listeler.</summary>
+        [FromQuery(Name = "include_deleted")] bool includeDeleted = false,
         CancellationToken cancellationToken = default)
     {
         var result = await _transfers.ListAsync(
             new LoadTransferListQuery(
                 search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath,
-                customerId, senderId, receiverId, assignedUserId, statusId, caseTypeId, financialItem, weight),
+                customerId, senderId, receiverId, assignedUserId, statusId, caseTypeId, financialItem, weight,
+                includeDeleted),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");
@@ -319,12 +322,14 @@ public sealed class ExpeditionController : ApiControllerBase
         [FromQuery(Name = "expedition_type_id")] int? expeditionTypeId = null,
         [FromQuery(Name = "status_id")] int? statusId = null,
         [FromQuery(Name = "department_id")] int? departmentId = null,
+        /// <summary>Siber'den silinmiş kayıtları da listeler.</summary>
+        [FromQuery(Name = "include_deleted")] bool includeDeleted = false,
         CancellationToken cancellationToken = default)
     {
         var result = await _expeditions.ListAsync(
             new ExpeditionListQuery(
                 search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath,
-                expeditionTypeId, statusId, departmentId),
+                expeditionTypeId, statusId, departmentId, includeDeleted),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");

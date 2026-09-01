@@ -1,4 +1,5 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
+using OLS.Business.Common;
 using OLS.Business.Services.Accounts;
 
 namespace OLS.Business.Services.Loads;
@@ -68,6 +69,9 @@ public sealed class LoadArchiveDto
 
 public sealed class LoadDetailDto
 {
+    /// <summary>Siber izleri — kim açtı, kim son dokundu, silindi mi.</summary>
+    [JsonPropertyName("siber_audit")] public SiberAuditDto? SiberAudit { get; init; }
+
     [JsonPropertyName("id")] public long Id { get; init; }
     [JsonPropertyName("reservation_number")] public string? ReservationNumber { get; init; }
     [JsonPropertyName("load_number")] public string? LoadNumber { get; init; }

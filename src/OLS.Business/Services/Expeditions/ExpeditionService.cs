@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
@@ -23,7 +23,13 @@ public interface IExpeditionService
 
 public sealed record ExpeditionListQuery(
     string? Search, int? WorkTypeId, DateOnly? DateFrom, DateOnly? DateTo, int? PerPage, int Page, string Path,
-    int? ExpeditionTypeId = null, int? StatusId = null, int? DepartmentId = null);
+    int? ExpeditionTypeId = null, int? StatusId = null, int? DepartmentId = null,
+    /// <summary>
+    /// true ise Siber'den SİLİNMİŞ kayıtlar da listelenir. Varsayılan false:
+    /// silinen kayıt yerelde duruyor (geçmiş ve bağlı kayıtlar için) ama günlük
+    /// listede görünmemeli.
+    /// </summary>
+    bool IncludeDeleted = false);
 
 public sealed class ExpeditionListItemDto
 {
@@ -52,6 +58,9 @@ public sealed class ExpeditionArchiveDto
 
 public sealed class ExpeditionDetailDto
 {
+    /// <summary>Siber izleri — kim açtı, kim son dokundu, silindi mi.</summary>
+    [JsonPropertyName("siber_audit")] public SiberAuditDto? SiberAudit { get; init; }
+
     [JsonPropertyName("id")] public long Id { get; init; }
     [JsonPropertyName("expedition_id")] public string? ExpeditionId { get; init; }
     [JsonPropertyName("expedition_number")] public string? ExpeditionNumber { get; init; }
@@ -115,6 +124,9 @@ public sealed class ExpeditionService : IExpeditionService
         ExpeditionListQuery query, CancellationToken cancellationToken = default)
     {
         var expeditions = _db.Expeditions.AsNoTracking();
+
+        if (!query.IncludeDeleted)
+            expeditions = expeditions.Where(e => e.SiberDeletedAt == null);
 
         // ŞİRKET GÖRÜNÜRLÜĞÜ — yüklerdeki ile aynı kural (bkz. CompanyScope).
         var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
@@ -205,6 +217,8 @@ public sealed class ExpeditionService : IExpeditionService
         long id, CancellationToken cancellationToken = default)
     {
         var e = await _db.Expeditions.AsNoTracking()
+            .Include(x => x.SiberCreatedByUser)
+            .Include(x => x.SiberUpdatedByUser)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (e is null)
@@ -217,6 +231,10 @@ public sealed class ExpeditionService : IExpeditionService
 
         return new ExpeditionDetailDto
         {
+            SiberAudit = SiberAuditDto.From(
+                e.SiberCreatedBy, e.SiberCreatedByUser?.Name, e.SiberCreatedAt,
+                e.SiberUpdatedBy, e.SiberUpdatedByUser?.Name, e.SiberUpdatedAt,
+                e.SiberDeletedAt),
             Id = e.Id,
             ExpeditionId = e.ExpeditionId,
             ExpeditionNumber = e.ExpeditionNumber,

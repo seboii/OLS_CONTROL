@@ -1,4 +1,4 @@
-using System.Linq.Expressions;
+﻿using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
@@ -55,7 +55,13 @@ public sealed record LoadListQuery(
     /// Taslak mantığı: Yük İçeriği veya Finans sekmesi eksik bırakılmış, henüz
     /// Yük'e dönüşmemiş teklifler ("Taslaklar" menüsü — bkz. QuotesPage.tsx).
     /// </summary>
-    bool DraftOnly = false);
+    bool DraftOnly = false,
+    /// <summary>
+    /// true ise Siber'den SİLİNMİŞ kayıtlar da listelenir. Varsayılan false:
+    /// silinen kayıt yerelde duruyor (geçmiş ve bağlı kayıtlar için) ama günlük
+    /// listede görünmemeli.
+    /// </summary>
+    bool IncludeDeleted = false);
 
 public sealed record LoadDeleteResult(bool Success, string? BlockedByLoadNumber);
 
@@ -96,6 +102,11 @@ public sealed class LoadService : ILoadService
     public async Task<object> ListAsync(LoadListQuery query, CancellationToken cancellationToken = default)
     {
         var loads = _db.Loads.AsNoTracking();
+
+        // Siber'den silinen kayıtlar varsayılan olarak gizlenir; kayıt yerelde
+        // duruyor (bkz. Load.SiberDeletedAt) ama günlük listede yer almamalı.
+        if (!query.IncludeDeleted)
+            loads = loads.Where(l => l.SiberDeletedAt == null);
 
         // ŞİRKET GÖRÜNÜRLÜĞÜ (AVRORA / OLS) — yük ve seferdeki ile aynı kural.
         // Teklifler de kapsama alındı: yükler tekliften doğduğu için burası açık
@@ -295,6 +306,8 @@ public sealed class LoadService : ILoadService
     public async Task<LoadDetailDto?> SingleAsync(long id, CancellationToken cancellationToken = default)
     {
         var l = await _db.Loads.AsNoTracking()
+            .Include(x => x.SiberCreatedByUser)
+            .Include(x => x.SiberUpdatedByUser)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (l is null)
@@ -307,6 +320,10 @@ public sealed class LoadService : ILoadService
 
         return new LoadDetailDto
         {
+            SiberAudit = SiberAuditDto.From(
+                l.SiberCreatedBy, l.SiberCreatedByUser?.Name, l.SiberCreatedAt,
+                l.SiberUpdatedBy, l.SiberUpdatedByUser?.Name, l.SiberUpdatedAt,
+                l.SiberDeletedAt),
             Id = l.Id,
             ReservationNumber = l.ReservationNumber,
             LoadNumber = l.LoadNumber,

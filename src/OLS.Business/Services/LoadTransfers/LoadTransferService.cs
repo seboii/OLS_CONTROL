@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
@@ -29,7 +29,13 @@ public interface ILoadTransferService
 public sealed record LoadTransferListQuery(
     string? Search, int? WorkTypeId, DateOnly? DateFrom, DateOnly? DateTo, int? PerPage, int Page, string Path,
     int? CustomerId = null, int? SenderId = null, int? ReceiverId = null, int? AssignedUserId = null,
-    int? StatusId = null, long? CaseTypeId = null, string? FinancialItem = null, decimal? Weight = null);
+    int? StatusId = null, long? CaseTypeId = null, string? FinancialItem = null, decimal? Weight = null,
+    /// <summary>
+    /// true ise Siber'den SİLİNMİŞ kayıtlar da listelenir. Varsayılan false:
+    /// silinen kayıt yerelde duruyor (geçmiş ve bağlı kayıtlar için) ama günlük
+    /// listede görünmemeli.
+    /// </summary>
+    bool IncludeDeleted = false);
 
 /// <summary>
 /// Liste yanıtı. olsold yalnızca beş sütun seçip üç ilişkiyi yüklüyordu;
@@ -86,6 +92,9 @@ public sealed class SiberArchiveFileDto
 
 public sealed class LoadTransferDetailDto
 {
+    /// <summary>Siber izleri — kim açtı, kim son dokundu, silindi mi.</summary>
+    [JsonPropertyName("siber_audit")] public SiberAuditDto? SiberAudit { get; init; }
+
     [JsonPropertyName("id")] public long Id { get; init; }
     [JsonPropertyName("load_transfer_id")] public string? LoadTransferId { get; init; }
     [JsonPropertyName("load_number")] public string? LoadNumber { get; init; }
@@ -265,6 +274,9 @@ public sealed class LoadTransferService : ILoadTransferService
         LoadTransferListQuery query, CancellationToken cancellationToken = default)
     {
         var transfers = _db.LoadTransfers.AsNoTracking();
+
+        if (!query.IncludeDeleted)
+            transfers = transfers.Where(t => t.SiberDeletedAt == null);
 
         // ŞİRKET GÖRÜNÜRLÜĞÜ (AVRORA / OLS). Filtre listede uygulanır ki Avrora
         // kayıtları yetkisiz kullanıcının listesinde HİÇ görünmesin; detay ucu da
@@ -454,6 +466,8 @@ public sealed class LoadTransferService : ILoadTransferService
         long id, CancellationToken cancellationToken = default)
     {
         var t = await _db.LoadTransfers.AsNoTracking()
+            .Include(x => x.SiberCreatedByUser)
+            .Include(x => x.SiberUpdatedByUser)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (t is null)
@@ -476,6 +490,10 @@ public sealed class LoadTransferService : ILoadTransferService
 
         return new LoadTransferDetailDto
         {
+            SiberAudit = SiberAuditDto.From(
+                t.SiberCreatedBy, t.SiberCreatedByUser?.Name, t.SiberCreatedAt,
+                t.SiberUpdatedBy, t.SiberUpdatedByUser?.Name, t.SiberUpdatedAt,
+                t.SiberDeletedAt),
             Id = t.Id,
             LoadTransferId = t.LoadTransferId,
             LoadNumber = t.LoadNumber,

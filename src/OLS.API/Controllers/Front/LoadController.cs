@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OLS.API.Filters;
@@ -81,6 +81,8 @@ public sealed class LoadController : ApiControllerBase
         [FromQuery(Name = "assigned_user_id")] int? assignedUserId = null,
         [FromQuery(Name = "work_type_id")] int? workTypeId = null,
         [FromQuery(Name = "is_draft")] int? isDraft = null,
+        /// <summary>Siber'den silinmiş kayıtları da listeler.</summary>
+        [FromQuery(Name = "include_deleted")] bool includeDeleted = false,
         CancellationToken cancellationToken = default)
     {
         if (_currentUser.Id is not { } userId)
@@ -89,7 +91,8 @@ public sealed class LoadController : ApiControllerBase
         var result = await _loads.ListAsync(
             new LoadListQuery(
                 userId, search, statusTypeId, timeout is 1, dateFrom, dateTo, perPage, page, CurrentPath,
-                customerId, senderId, receiverId, agentId, assignedUserId, workTypeId, isDraft is 1),
+                customerId, senderId, receiverId, agentId, assignedUserId, workTypeId, isDraft is 1,
+                includeDeleted),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");
