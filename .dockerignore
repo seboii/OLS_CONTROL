@@ -1,0 +1,35 @@
+# Docker derleme bağlamından dışlananlar.
+#
+# KRİTİK — bin/ ve obj/: ana bilgisayarın derleme çıktısı konteynere
+# kopyalanırsa, içindeki project.assets.json WINDOWS yollarını gösterir ve
+# konteynerdeki `dotnet restore` çıktısını EZER. Sonuç:
+#   "error NETSDK1064: Package ... was not found. It might have been deleted
+#    since NuGet restore."
+# API imajı bunu fark ettirmiyordu çünkü `dotnet publish` kendi restore'unu
+# yapıp durumu kurtarıyor; `--no-restore` kullanan test imajı ise patlıyor.
+#
+# Ayrıca bağlamı küçülterek tüm derlemeleri hızlandırır.
+
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+
+# Sürüm kontrolü ve editör
+.git/
+.gitignore
+.vs/
+.vscode/
+.idea/
+**/*.user
+
+# Yerel çalışma dosyaları — imaja girmemeli
+.env
+docs/
+storage/backups/
+storage/app/public/*
+!storage/app/public/.gitkeep
+
+# Test çıktıları
+**/TestResults/
+**/*.trx

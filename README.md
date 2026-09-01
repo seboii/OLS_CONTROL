@@ -57,13 +57,15 @@ devreye girmez, ve tünel tek bir upstream'e bağlanır.
 | api | — | 127.0.0.1:8106 |
 | postgres | — | 127.0.0.1:5443 |
 | siber-mock | — | 127.0.0.1:1444 |
+| test | — | — | (hiç port açmaz) |
 
 Dağıtım dosyalarının tamamı `infra/` altındadır; ayrıntı için [infra/README.md](infra/README.md).
 
 ### Geliştirme
 
-Entegrasyon testleri `localhost:5443`'teki Postgres'e ihtiyaç duyar ve ana yığın o portu **açmaz**.
-Yerelde çalışırken override'ı ekleyin:
+Testleri Docker içinde koşarsanız hiç port açmanız gerekmez (bkz. [Testler](#testler)). Ana
+bilgisayardan `dotnet test` çalıştırmak ya da pgAdmin gibi araçlarla bağlanmak isterseniz
+override'ı ekleyin:
 
 ```bash
 docker compose -f docker-compose.yml -f infra/compose/dev.yml up -d --build
@@ -236,6 +238,14 @@ referanslarıyla çalıştığı için `tsc --noEmit` hiçbir dosyayı denetleme
 
 ## Testler
 
+Docker içinde — hiçbir port açmadan, önerilen yol:
+
+```bash
+docker compose -f docker-compose.yml -f infra/compose/test.yml run --rm --build test
+```
+
+Ana bilgisayardan (dev override'ı açık olmalı, `localhost:5443` gerekir):
+
 ```bash
 dotnet test
 ```
@@ -244,7 +254,9 @@ dotnet test
 `tests/OLS.API.IntegrationTests` altında 118 entegrasyon testi (Postgres gerekir).
 
 Entegrasyon testleri her çalıştırmada rastgele adlı izole bir veritabanı (`ols_scoped_inttest_*`)
-oluşturup siler; geliştirme veritabanını etkilemez.
+oluşturup siler; geliştirme veritabanını etkilemez. Bağlantı bilgisi `TEST_DB_HOST`/`TEST_DB_PORT`
+ortam değişkenlerinden okunur (varsayılan `localhost:5443`), böylece aynı testler hem ana
+bilgisayardan hem Docker ağı içinden koşabiliyor.
 
 ## Mimari
 

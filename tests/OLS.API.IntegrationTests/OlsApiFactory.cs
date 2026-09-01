@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -46,14 +46,38 @@ namespace OLS.API.IntegrationTests;
 /// </summary>
 public sealed class OlsApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private const string MaintenanceConnectionString =
-        "Host=localhost;Port=5443;Database=postgres;Username=postgres;Password=secret";
+    // Bağlantı bilgisi ORTAM DEĞİŞKENİNDEN okunur, varsayılanı localhost:5443.
+    //
+    // Testler iki yerden çalışabiliyor:
+    //   * ana bilgisayardan  -> localhost:5443 (dev override'ı bu portu açar)
+    //   * Docker içinden     -> postgres:5432  (hiç port açmaya gerek yok)
+    //
+    // Varsayılanların korunması şart: sabit kodlanmış hâliyle çalışan mevcut
+    // geliştirici akışı (dotnet test) hiçbir ayar yapmadan çalışmaya devam etsin.
+    private static string DbHost =>
+        Environment.GetEnvironmentVariable("TEST_DB_HOST") ?? "localhost";
+
+    private static string DbPort =>
+        Environment.GetEnvironmentVariable("TEST_DB_PORT") ?? "5443";
+
+    private static string DbUser =>
+        Environment.GetEnvironmentVariable("TEST_DB_USERNAME") ?? "postgres";
+
+    private static string DbPassword =>
+        Environment.GetEnvironmentVariable("TEST_DB_PASSWORD") ?? "secret";
+
+    /// <summary>
+    /// Test veritabanını AÇIP SİLMEK için kullanılan bağlantı. Bakım işlemleri
+    /// silinecek veritabanına bağlıyken yapılamaz, bu yüzden "postgres"e bağlanır.
+    /// </summary>
+    private static string MaintenanceConnectionString =>
+        $"Host={DbHost};Port={DbPort};Database=postgres;Username={DbUser};Password={DbPassword}";
 
     private static readonly string TestDatabaseName =
         $"ols_scoped_inttest_{Guid.NewGuid():N}";
 
     private static string TestConnectionString =>
-        $"Host=localhost;Port=5443;Database={TestDatabaseName};Username=postgres;Password=secret";
+        $"Host={DbHost};Port={DbPort};Database={TestDatabaseName};Username={DbUser};Password={DbPassword}";
 
     private string? _adminToken;
     private readonly SemaphoreSlim _adminTokenLock = new(1, 1);

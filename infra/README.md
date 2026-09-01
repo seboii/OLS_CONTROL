@@ -7,9 +7,11 @@ yapılandırması, sahte Siber şeması ve ortam override'ları.
 infra/
   compose/
     dev.yml            geliştirme: veritabanı ve API portlarını yerele açar
+    test.yml           testleri Docker içinde çalıştırır, port açmadan
     cloudflared.yml    yayın: Cloudflare tüneli, gelen port açmadan
   docker/
     api/Dockerfile     ASP.NET Core 9 derleme + çalıştırma
+    test/Dockerfile    çözümü derler ve dotnet test koşar
     web/Dockerfile     React derleme + nginx ile servis
     web/nginx.conf     TEK giriş noktası: statik + /api + /storage
     siber-mock/*.sql   yerel sahte Siber şeması ve örnek verisi
@@ -54,13 +56,34 @@ docker compose up -d --build
 docker compose -f docker-compose.yml -f infra/compose/dev.yml up -d --build
 ```
 
-Entegrasyon testleri `localhost:5443`'teki Postgres'e ihtiyaç duyar, bu yüzden
-`dotnet test` çalıştırmadan önce dev override'ı kullanın. Her seferinde
-yazmamak için `.env` dosyanıza ekleyin:
+Bu override yalnızca ana bilgisayardan `dotnet test` / pgAdmin gibi araçlarla
+çalışmak istediğinizde gerekir. Testleri Docker içinde koşarsanız (aşağıya
+bakın) hiç port açmanız gerekmez. Her seferinde yazmamak için `.env` dosyanıza
+ekleyin:
 
 ```
 COMPOSE_FILE=docker-compose.yml:infra/compose/dev.yml
 ```
+
+**Testler (Docker içinde, port açmadan):**
+
+```bash
+docker compose -f docker-compose.yml -f infra/compose/test.yml run --rm --build test
+```
+
+Test konteyneri aynı Docker ağına katılır ve `postgres:5432` adresine doğrudan
+erişir; hiçbir port yayınlanmaz. Her koşuda rastgele adlı izole bir veritabanı
+(`ols_scoped_inttest_*`) açılıp silinir, geliştirme veritabanına dokunulmaz.
+
+Belirli bir testi koşmak için filtre eklenebilir:
+
+```bash
+docker compose -f docker-compose.yml -f infra/compose/test.yml run --rm test --filter "FullyQualifiedName~FinanceLedgerTests"
+```
+
+Ana bilgisayardan `dotnet test` de çalışmaya devam eder; o yol `localhost:5443`
+kullandığı için dev override'ı gerektirir. Bağlantı bilgisi `TEST_DB_HOST` /
+`TEST_DB_PORT` ortam değişkenlerinden okunur, varsayılanları `localhost:5443`.
 
 **Cloudflare ile yayın:**
 
@@ -79,6 +102,7 @@ başındaki açıklamaya bakın.
 | api | — | 127.0.0.1:8106 | Doğrudan curl/Swagger |
 | postgres | — | 127.0.0.1:5443 | Entegrasyon testleri |
 | siber-mock | — | 127.0.0.1:1444 | sqlcmd ile inceleme |
+| test | — | — | Hiç port açmaz; ağdan `postgres:5432` |
 
 Dev portları bilerek `127.0.0.1`'e bağlı: geliştiricinin kendi makinesi
 içindir, ağa açılmaları gerekmez.

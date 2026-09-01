@@ -1,0 +1,35 @@
+# Test override'ı — testleri DOCKER İÇİNDE, port açmadan çalıştırır.
+#
+# Kullanım:
+#   docker compose -f docker-compose.yml -f infra/compose/test.yml run --rm --build test
+#
+# NEDEN: entegrasyon testleri bir PostgreSQL'e ihtiyaç duyuyor. Ana
+# bilgisayardan koşulduğunda bu, veritabanı portunun dışarı açılmasını
+# (infra/compose/dev.yml) gerektiriyordu. Test konteyneri aynı Docker ağına
+# katıldığı için `postgres:5432` adresine doğrudan erişir — hiçbir port
+# yayınlanmaz, yığının "tek açık port" kuralı bozulmaz.
+#
+# Testler her koşuda rastgele adlı izole bir veritabanı (ols_scoped_inttest_*)
+# açıp siler; geliştirme veritabanına (ols_scoped) dokunmaz.
+#
+# Belirli bir testi koşmak için filtre ekleyin:
+#   docker compose -f docker-compose.yml -f infra/compose/test.yml \
+#     run --rm test --filter 'FullyQualifiedName~FinanceLedgerTests'
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: infra/docker/test/Dockerfile
+    container_name: ols-scoped-test
+    environment:
+      TEST_DB_HOST: 'postgres'
+      TEST_DB_PORT: '5432'
+      TEST_DB_USERNAME: '${DB_USERNAME:-postgres}'
+      TEST_DB_PASSWORD: '${DB_PASSWORD:-secret}'
+    networks: [ols-scoped]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Testler koşup çıkar; yeniden başlatılmamalı.
+    restart: 'no'
