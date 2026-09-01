@@ -83,10 +83,10 @@ public static class RoleCatalog
             ManagementPages()),
 
         new("satis-pazarlama", "Satış & Pazarlama",
-            "Cari ve teklif/yük üzerinde tam yetki; sefer, fatura ve araç okunur.", false,
+            "Cari, teklif/yük ve sefer üzerinde tam yetki; fatura ve araç okunur.", false,
             Compose(
                 PagePermission.Full(Account), PagePermission.Full(Load),
-                PagePermission.ReadOnly(Expedition), PagePermission.ReadOnly(Invoice),
+                PagePermission.Full(Expedition), PagePermission.ReadOnly(Invoice),
                 PagePermission.ReadOnly(Finance),
                 PagePermission.ReadOnly(Car), PagePermission.Full(Support))),
 
@@ -103,30 +103,30 @@ public static class RoleCatalog
             OperationsPages()),
 
         new("muhasebe-finans", "Muhasebe & Finans",
-            "Fatura üzerinde tam yetki; cari güncellenebilir, yük/sefer okunur.", false,
+            "Fatura, cari, yük ve sefer üzerinde tam yetki; araç okunur.", false,
             Compose(
                 PagePermission.Full(Invoice), PagePermission.Full(Account),
                 PagePermission.Full(Finance), PagePermission.Full(Accounting),
-                PagePermission.ReadOnly(Load), PagePermission.ReadOnly(Expedition),
+                PagePermission.Full(Load), PagePermission.Full(Expedition),
                 PagePermission.ReadOnly(Car), PagePermission.Full(Support))),
 
         new("idari-isler", "İdari İşler",
-            "Araç üzerinde tam yetki; diğer iş modülleri okunur.", false,
+            "Araç, cari, yük ve sefer üzerinde tam yetki; fatura okunur.", false,
             Compose(
                 PagePermission.Full(Car), PagePermission.Full(Account),
-                PagePermission.ReadOnly(Load), PagePermission.ReadOnly(Expedition),
+                PagePermission.Full(Load), PagePermission.Full(Expedition),
                 PagePermission.ReadOnly(Invoice), PagePermission.Full(Support))),
 
         // Departmanı olmayan kullanıcılar buraya düşer. Yalnızca okuma:
         // yetkisiz bırakmak ekranları tamamen boş gösterirdi, yazma vermek ise
         // hangi işi yaptığı bilinmeyen 26 kullanıcıya fazla yetki olurdu.
         new("standart", "Standart Kullanıcı",
-            "Departmanı tanımlı olmayan kullanıcılar. İş modülleri yalnızca okunur.", true,
+            "Departmanı tanımlı olmayan kullanıcılar. Cari/yük/sefer eklenip güncellenebilir, silinemez.", true,
             Compose(
                 // Departmanı bilinmeyen kullanıcı da müşteri açabilmeli, ama
                 // SİLME hakkı verilmiyor: kimin hangi işi yaptığı belli değil.
-                PagePermission.ReadWrite(Account), PagePermission.ReadOnly(Load),
-                PagePermission.ReadOnly(Expedition), PagePermission.ReadOnly(Invoice),
+                PagePermission.ReadWrite(Account), PagePermission.ReadWrite(Load),
+                PagePermission.ReadWrite(Expedition), PagePermission.ReadOnly(Invoice),
                 PagePermission.ReadOnly(Car), PagePermission.Full(Support))),
     ];
 
