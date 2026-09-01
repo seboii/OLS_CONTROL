@@ -86,6 +86,54 @@ public sealed class SiberDeletionMarkTests
     }
 
     [Fact]
+    public async Task OnlyDeleted_YalnizcaSilinmisKayitlariDoner()
+    {
+        var (_, number) = await SeedDeletedTransferAsync();
+        var admin = await _factory.CreateAdminClientAsync();
+
+        // only_deleted, include_deleted'dan farklıdır: silinenleri normal
+        // listeye katmaz, YALNIZCA onları getirir ("ne silinmiş?" sorusu).
+        var data = (await (await admin.GetAsync(
+                $"/api/v1/load_transfer?search={number}&only_deleted=true&per_page=25"))
+            .Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        data.GetProperty("total").GetInt32().Should().Be(1);
+        data.GetProperty("data")[0].GetProperty("siber_deleted_at").GetString()
+            .Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task SilenBilgisi_VarsaDetaydaDoner()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+
+        var transfer = new LoadTransfer
+        {
+            LoadTransferId = Guid.NewGuid().ToString(),
+            LoadNumberWorkType = $"SLN{Guid.NewGuid():N}"[..14],
+            SiberDeletedAt = new DateTime(2026, 9, 1, 8, 34, 0),
+            // Siber günlüğünden gelen gerçek silme; fark edilme anından FARKLI.
+            SiberDeletedBy = "ASLIY",
+            SiberDeletedOn = new DateTime(2026, 8, 19, 14, 42, 59),
+        };
+        db.LoadTransfers.Add(transfer);
+        await db.SaveChangesAsync();
+
+        var admin = await _factory.CreateAdminClientAsync();
+
+        var audit = (await (await admin.GetAsync($"/api/v1/load_transfer/{transfer.Id}"))
+            .Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("siber_audit");
+
+        audit.GetProperty("deleted_by_code").GetString().Should().Be("ASLIY");
+        audit.GetProperty("deleted_on").GetDateTime().Should().Be(new DateTime(2026, 8, 19, 14, 42, 59));
+        // İki damga karıştırılmamalı: biri gerçek silme, diğeri fark edilme.
+        audit.GetProperty("deleted_at").GetDateTime().Should().NotBe(
+            audit.GetProperty("deleted_on").GetDateTime());
+    }
+
+    [Fact]
     public async Task SilinmemisKayit_IsaretsizDoner()
     {
         using var scope = _factory.Services.CreateScope();
