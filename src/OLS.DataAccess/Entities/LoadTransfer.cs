@@ -108,6 +108,41 @@ public partial class LoadTransfer
 
     public DateTime? UpdatedAt { get; set; }
 
+    // ------------------------------------------------------------------
+    // Siber izleri — kaydı kim açtı, kim son dokundu, Siber'den silindi mi.
+    //
+    // Siber bu bilgiyi KULLANICI KODU olarak tutuyor (insuser/kayitgiren,
+    // upduser). Kod hem ham hâliyle hem çözümlenmiş kullanıcı kimliğiyle
+    // saklanıyor: ayrılmış personelin kodu yerel users tablosunda karşılık
+    // bulmuyor (91 koddan 3'ü) ve o durumda ekranda hiç olmazsa kod görünsün.
+    // ------------------------------------------------------------------
+
+    /// <summary>Kaydı Siber'de açan kullanıcının kodu.</summary>
+    public string? SiberCreatedBy { get; set; }
+
+    public long? SiberCreatedByUserId { get; set; }
+
+    /// <summary>Siber'in kendi kayıt tarihi (yerel CreatedAt'ten farklı).</summary>
+    public DateTime? SiberCreatedAt { get; set; }
+
+    /// <summary>Kayda Siber'de EN SON dokunan kullanıcının kodu.</summary>
+    public string? SiberUpdatedBy { get; set; }
+
+    public long? SiberUpdatedByUserId { get; set; }
+
+    public DateTime? SiberUpdatedAt { get; set; }
+
+    /// <summary>
+    /// Kayıt Siber'de artık yoksa, silindiğinin FARK EDİLDİĞİ an. Kayıt
+    /// yerelden SİLİNMEZ: geçmiş, bağlı finans kayıtları ve denetim izi
+    /// korunmalı. Kayıt Siber'de yeniden görünürse bu alan temizlenir.
+    /// </summary>
+    public DateTime? SiberDeletedAt { get; set; }
+
+    public virtual User? SiberCreatedByUser { get; set; }
+
+    public virtual User? SiberUpdatedByUser { get; set; }
+
     public virtual ICollection<LoadTransferInvoiceMap> LoadTransferInvoiceMaps { get; set; } = new List<LoadTransferInvoiceMap>();
 
     public virtual ICollection<LoadTransferMovement> LoadTransferMovements { get; set; } = new List<LoadTransferMovement>();
