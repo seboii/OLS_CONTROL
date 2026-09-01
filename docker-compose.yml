@@ -162,7 +162,13 @@ services:
       # Yığındaki TEK yayınlanan port. Cloudflared kullanıldığında bu satır
       # da kaldırılabilir (bkz. infra/compose/cloudflared.yml).
       - '${WEB_BIND_HOST:-0.0.0.0}:${WEB_PORT:-8105}:80'
-    networks: [ols-scoped]
+    networks:
+      ols-scoped:
+        # `nginx` takma adı BİLİNÇLİ: Cloudflare tünelinde origin adresi
+        # elle yazılıyor ve servisin nginx olduğunu bilen herkes doğal olarak
+        # `http://nginx:80` yazıyor. Takma ad olmadan tünel
+        # "lookup nginx: no such host" ile 502 veriyor. Her iki ad da çalışır.
+        aliases: [nginx]
     restart: unless-stopped
     depends_on: [api]
 

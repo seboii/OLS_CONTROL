@@ -91,6 +91,14 @@ kullandığı için dev override'ı gerektirir. Bağlantı bilgisi `TEST_DB_HOST
 docker compose -f docker-compose.yml -f infra/compose/cloudflared.yml up -d --build
 ```
 
+Panelde **Public Hostname** eklerken servis adresi `http://web:80` olmalıdır.
+`nginx:80` de çalışır — `web` servisine bu takma ad bilinçli olarak verildi,
+çünkü servisin nginx olduğunu bilen herkes doğal olarak onu yazıyor ve takma ad
+olmadan tünel `lookup nginx: no such host` ile 502 döndürüyor.
+
+`localhost` YAZMAYIN: cloudflared ayrı bir konteynerdir, kendi localhost'unda
+hiçbir şey dinlemez.
+
 Ayrıntı ve gerekli `.env` girdileri için `infra/compose/cloudflared.yml`
 başındaki açıklamaya bakın.
 
