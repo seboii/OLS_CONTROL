@@ -80,7 +80,6 @@ public sealed record LoadReferenceIds(
 public sealed class LoadService : ILoadService
 {
     private readonly OlsDbContext _db;
-    private readonly IAccountService _accounts;
     private readonly IClock _clock;
     private readonly ISiberReservationRepository _reservations;
 
@@ -92,12 +91,11 @@ public sealed class LoadService : ILoadService
     private readonly ICurrentUser _currentUser;
 
     public LoadService(
-        OlsDbContext db, IAccountService accounts, IClock clock,
+        OlsDbContext db, IClock clock,
         ISiberReservationRepository reservations, ISiberArchiveRepository archive,
         ICompanyScope companyScope, ICurrentUser currentUser)
     {
         _db = db;
-        _accounts = accounts;
         _clock = clock;
         _reservations = reservations;
         _archive = archive;
@@ -129,22 +127,23 @@ public sealed class LoadService : ILoadService
                                    l.SiberCompanyId != visibility.ExcludeCompanyId);
         }
 
-        // Süper admin değilse: ya yüke görevli atanmış olmalı, ya da yükün
-        // müşterisi kendisine atanmış carilerden biri olmalı.
-        if (!await _accounts.IsSuperAdminAsync(query.UserId, cancellationToken))
-        {
-            var chargedLoadIds = _db.LoadChargePeople
-                .Where(p => p.UserId == (int)query.UserId)
-                .Select(p => (long)(p.LoadId ?? 0));
-
-            var mappedAccountIds = _db.UserAccountMappings
-                .Where(m => m.UserId == (int)query.UserId)
-                .Select(m => m.AccountId);
-
-            loads = loads.Where(l =>
-                chargedLoadIds.Contains(l.Id) ||
-                (l.CustomerId != null && mappedAccountIds.Contains(l.CustomerId.Value)));
-        }
+        // KİŞİSEL FİLTRE KALDIRILDI (bilinçli).
+        //
+        // Eskiden süper admin olmayan kullanıcı yalnızca KENDİSİNE görevli
+        // atanmış ya da KENDİ carisine ait teklifleri görüyordu (olsold'dan
+        // gelen nesne-seviyesi kural). Sonuç: OLS kapsamındaki 19.233 teklifin
+        // yalnızca 896'sı görünüyordu ve ekip "teklif bulunamadı" ile
+        // karşılaşıyordu — özellikle Siber'den senkronlanmış eski kayıtlarda,
+        // çünkü onlarda görevli ataması (LoadChargePerson) hiç yok.
+        //
+        // Yük ve sefer listelerinde böyle bir kural zaten yoktu; teklifin
+        // farklı davranması tutarsızlıktı. Görünürlük artık tek kurala
+        // dayanıyor: ŞİRKET KAPSAMI (yukarıda). Avrora ekibi Avrora
+        // tekliflerinin tamamını, diğerleri Avrora dışındakilerin tamamını
+        // görür.
+        //
+        // Cari bazlı nesne-seviyesi kural CARİ listesinde duruyor
+        // (AccountService.IsVisibleToUserAsync) — orada kaldırılmadı.
 
         if (query.StatusTypeId is { } statusId)
             loads = loads.Where(l => l.StatusTypeId == statusId);
