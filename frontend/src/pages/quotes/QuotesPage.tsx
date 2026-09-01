@@ -18,6 +18,7 @@ import { FinancialItemPicker, type FinancialItemOption } from "@/components/shar
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
 import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
 import { BusyLabel, FullScreenBusy } from "@/components/ui/Busy";
+import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 
 interface NamedRef {
   id: number;
@@ -83,6 +84,7 @@ interface LoadFileDetail {
 }
 
 interface LoadDetail {
+  siber_audit?: SiberAuditInfo | null;
   id: number;
   reservation_number: string | null;
   load_number: string | null;
@@ -687,8 +689,8 @@ export function QuotesPage() {
   // aynı mantık (row.siber_id && canCreate).
   const [detailMeta, setDetailMeta] = useState<{
     siberId: string | null; reservationNumber: string | null; loadNumber: string | null;
-    approvalDate: string | null;
-  }>({ siberId: null, reservationNumber: null, loadNumber: null, approvalDate: null });
+    approvalDate: string | null; siberAudit: SiberAuditInfo | null;
+  }>({ siberId: null, reservationNumber: null, loadNumber: null, approvalDate: null, siberAudit: null });
 
   const [form, setForm] = useState({
     work_type_id: "", loading_type_id: "", payment_type_id: "", status_type_id: "",
@@ -890,7 +892,7 @@ export function QuotesPage() {
     setEmailTo([]);
     setEmailCc([]);
     setErrors({});
-    setDetailMeta({ siberId: null, reservationNumber: null, loadNumber: null, approvalDate: null });
+    setDetailMeta({ siberId: null, reservationNumber: null, loadNumber: null, approvalDate: null, siberAudit: null });
   }
 
   /**
@@ -1004,7 +1006,7 @@ export function QuotesPage() {
     restoringDraftRef.current = true;
     setEditingId(null);
     setErrors({});
-    setDetailMeta({ siberId: null, reservationNumber: null, loadNumber: null, approvalDate: null });
+    setDetailMeta({ siberId: null, reservationNumber: null, loadNumber: null, approvalDate: null, siberAudit: null });
     setForm(d.form as typeof form);
     setCustomer(d.customer);
     setSender(d.sender);
@@ -1042,7 +1044,7 @@ export function QuotesPage() {
     try {
       const res = await api.get<DataMessage<LoadDetail>>(`/api/v1/load/${id}`);
       const d = res.data;
-      setDetailMeta({ siberId: d.siber_id, reservationNumber: d.reservation_number, loadNumber: d.load_number, approvalDate: d.approval_date });
+      setDetailMeta({ siberId: d.siber_id, reservationNumber: d.reservation_number, loadNumber: d.load_number, approvalDate: d.approval_date, siberAudit: d.siber_audit ?? null });
       setSiberArchive(d.siber_archive ?? []);
       setForm({
         work_type_id: d.work_type_id ? String(d.work_type_id.id) : "",
@@ -1599,6 +1601,12 @@ export function QuotesPage() {
           ) : undefined
         }
       >
+        {editingId !== null && detailMeta.siberAudit && (
+          <div className="px-6 pt-4">
+            <SiberAuditPanel audit={detailMeta.siberAudit} />
+          </div>
+        )}
+
         <Tabs tabs={TABS} active={tab} onChange={setTab} className="px-6" />
 
         {detailLoading ? (

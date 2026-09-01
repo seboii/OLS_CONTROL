@@ -15,6 +15,7 @@ import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerMod
 import { CarPicker } from "@/components/shared/CarPicker";
 import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
 import { BusyLabel } from "@/components/ui/Busy";
+import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 
 /**
  * Kaydedilmemiş "Yeni Sefer" otomatik taslağı — Teklif'teki (QuotesPage) ile aynı
@@ -68,6 +69,7 @@ interface ExpeditionItem {
 }
 
 interface ExpeditionDetail extends ExpeditionItem {
+  siber_audit?: SiberAuditInfo | null;
   /** Seferin KENDİ Siber arşiv evrakları. */
   siber_archive: SiberArchiveFile[];
   release_date: string | null;
@@ -1000,6 +1002,12 @@ export function TripsPage() {
           ) : undefined
         }
       >
+        {detail?.siber_audit && (
+          <div className="px-6 pt-4">
+            <SiberAuditPanel audit={detail.siber_audit} />
+          </div>
+        )}
+
         <Tabs tabs={DETAIL_TABS} active={detailTab} onChange={setDetailTab} className="px-6" />
         {detailLoading ? (
           <div className="p-10 text-center text-sm text-gray-400">Yükleniyor...</div>

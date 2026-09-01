@@ -17,6 +17,7 @@ import { FinancialItemManagerModal } from "@/components/shared/FinancialItemMana
 import { FinancialItemPicker, type FinancialItemOption } from "@/components/shared/FinancialItemPicker";
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
 import { BusyLabel } from "@/components/ui/Busy";
+import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 
 interface NamedRef {
   id: number;
@@ -65,6 +66,7 @@ interface InvoiceItemDetail {
 }
 
 interface LoadTransferDetail extends LoadTransferItem {
+  siber_audit?: SiberAuditInfo | null;
   receiver_id: NamedRef | null;
   romork_type_id: NamedRef | null;
   department_id: NamedRef | null;
@@ -1444,6 +1446,12 @@ export function LoadsPage() {
           ) : undefined
         }
       >
+        {detail?.siber_audit && (
+          <div className="px-6 pt-4">
+            <SiberAuditPanel audit={detail.siber_audit} />
+          </div>
+        )}
+
         <Tabs tabs={TABS} active={tab} onChange={setTab} className="px-6" />
         {detailLoading ? (
           <div className="p-10 text-center text-sm text-gray-400">Yükleniyor...</div>
