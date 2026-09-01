@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using OLS.Business.Services.Authentication;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
+using OLS.Business.Services.Authorization;
 
 namespace OLS.Business.Seed;
 
@@ -209,50 +210,15 @@ public static class DbSeeder
     }
 
     // ------------------------------------------------------------------
-    // Yetki sayfaları — 8 modül + ortak altyapının kullandığı TÜM slug'lar.
-    // Eksik bir slug varsayılan-reddet davranışına düşer (PermissionService),
-    // yani burada listelenmeyen bir sayfa "izin ver" değil "reddet" olur.
+    // Yetki sayfaları — tek kaynak: PermissionPages.All.
+    // Eksik bir slug arayüzde varsayılan-reddet davranışına düşer, yani
+    // listelenmeyen bir modül menüde HİÇ görünmez.
     // ------------------------------------------------------------------
     private static async Task SeedPermissionPagesAsync(OlsDbContext db, CancellationToken ct)
     {
-        (string Slug, string Name)[] pages =
-        [
-            // AccountService.IsSuperAdminAsync bu slug'ı arar: Read=1 olan
-            // kullanıcı tüm carileri görür, aksi halde yalnızca kendisine
-            // user_account_mappings ile atanmış carileri görür (object-level
-            // kural, olsold'dan birebir). Seed edilmezse KİMSE süper admin
-            // olamaz ve hiçbir cari hiçbir yeni kullanıcıya görünmez.
-            ("super_admin", "Süper Admin"),
-            // Denetim kaydı sayfası — yalnızca Yönetim rolüne verilir (RoleCatalog).
-            ("audit_log_management", "Denetim Kaydı"),
-            ("account_management", "Cari Yönetimi"),
-            ("account_type_management", "Müşteri Tipi Yönetimi"),
-            ("load_management", "Yük/Teklif Yönetimi"),
-            ("expedition_management", "Sefer Yönetimi"),
-            ("invoice_management", "Fatura Yönetimi"),
-            ("invoice_type_management", "Fatura Tipi/Durumu Yönetimi"),
-            ("car_management", "Araç Yönetimi"),
-            ("case_type_management", "Kap Tipi Yönetimi"),
-            ("payment_management", "Ödeme Tipi Yönetimi"),
-            ("transport_type_management", "Taşıma Tipi Yönetimi"),
-            ("loading_type_management", "Yükleme Tipi Yönetimi"),
-            ("work_type_management", "İş Tipi Yönetimi"),
-            ("status_type_management", "Durum Tipi Yönetimi"),
-            ("department_management", "Departman Yönetimi"),
-            ("product_type_management", "Ürün Tipi Yönetimi"),
-            ("financial_item_management", "Mali Kalem Yönetimi"),
-            ("financial_item_type_management", "Mali Kalem Tipi Yönetimi"),
-            ("movement_type_management", "Hareket Tipi Yönetimi"),
-            ("currency_management", "Para Birimi Yönetimi"),
-            ("user_management", "Kullanıcı Yönetimi"),
-            ("role_management", "Rol/Yetki Yönetimi"),
-            ("support_request_management", "Destek Talebi Yönetimi"),
-            ("report_management", "Raporlama Yönetimi"),
-            // Finans ve muhasebe AYRI sayfalar: operasyonun cari bakiyeyi
-            // görmesi gerekir ama yevmiye defterini görmesi gerekmez.
-            ("finance_management", "Finans Yönetimi"),
-            ("accounting_management", "Muhasebe Yönetimi"),
-        ];
+        // Liste PermissionPages.All'da — silme koruması da (PermissionPageService)
+        // aynı listeyi kullanıyor, ikisi ayrışmasın diye tek kaynak.
+        var pages = PermissionPages.All;
 
         var existingSlugs = await db.UserPermissionPages
             .Select(p => p.PermissionPageSlug)

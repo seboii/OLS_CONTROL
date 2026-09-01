@@ -14,12 +14,26 @@ namespace OLS.Business.Services.Authorization;
 /// Yani yeni bir modül eklendiğinde kimse kilitlenmesin diye açık başlar;
 /// kısıtlama sonradan kullanıcı yetki ekranından yapılır.
 ///
-/// Bu uç geliştirici aracıdır — arayüzde çağıran bir ekran yok.
+/// Sayfa AÇMAK geliştirici işidir: bir slug ancak kod onu kontrol ediyorsa
+/// anlam taşır, kimsenin bakmadığı sayfa hiçbir şey yapmaz. Silme ise
+/// yönetilebilir olmalı — elle açılmış artık sayfalar aksi hâlde ekranda
+/// sonsuza kadar kalıyordu (canlıda "test_sayfa_canli" tam olarak öyle kaldı).
 /// </summary>
 public interface IPermissionPageService
 {
     Task<PermissionPageResult> CreateAsync(
         string pageName, string pageSlug, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Yetki sayfasını ve ona bağlı tüm kullanıcı yetki satırlarını siler.
+    ///
+    /// PROGRAMIN KULLANDIĞI sayfa SİLİNEMEZ (bkz. <see cref="PermissionPages"/>).
+    /// Sebep ters yönde ve sessiz: <c>PermissionService</c> bulunamayan bir slug
+    /// için <b>true</b> döner, yani sayfayı silmek modülü kilitlemez — HERKESE
+    /// AÇAR. Silme yalnızca elle açılmış, kodun hiç bakmadığı sayfalar içindir.
+    /// </summary>
+    Task<PermissionPageResult> DeleteAsync(
+        string pageSlug, CancellationToken cancellationToken = default);
 }
 
 public sealed record PermissionPageResult(bool Success, string Message);
@@ -80,5 +94,36 @@ public sealed class PermissionPageService : IPermissionPageService
         await _db.SaveChangesAsync(cancellationToken);
 
         return new PermissionPageResult(true, "Yetki sayfası başarıyla oluşturuldu.");
+    }
+    public async Task<PermissionPageResult> DeleteAsync(
+        string pageSlug, CancellationToken cancellationToken = default)
+    {
+        // Kimlik değil SLUG ile: yetki ekranını besleyen uç
+        // (UserPermissionService.GetAsync) satırın user_permissions kimliğini
+        // veriyor, sayfa kimliğini HİÇ döndürmüyor. Slug hem o veride var hem
+        // de ortamdan ortama değişmiyor.
+        var page = await _db.UserPermissionPages
+            .FirstOrDefaultAsync(p => p.PermissionPageSlug == pageSlug, cancellationToken);
+
+        if (page is null)
+            return new PermissionPageResult(false, "Yetki sayfası bulunamadı.");
+
+        // Programın kullandığı sayfa silinirse o modül yetkisiz kalmaz,
+        // YETKİSİZ AÇILIR — bkz. PermissionPages.
+        if (PermissionPages.IsUsedByProgram(page.PermissionPageSlug))
+            return new PermissionPageResult(false,
+                $"\"{page.PermissionPageName}\" programın kullandığı bir yetki sayfası; " +
+                "silinemez. Silinseydi bu modül yetki kontrolü olmadan herkese açılırdı.");
+
+        var rows = await _db.UserPermissions
+            .Where(p => p.UserPermissionPageId == page.Id)
+            .ToListAsync(cancellationToken);
+
+        _db.UserPermissions.RemoveRange(rows);
+        _db.UserPermissionPages.Remove(page);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return new PermissionPageResult(true,
+            $"\"{page.PermissionPageName}\" silindi ({rows.Count} kullanıcı yetki satırı).");
     }
 }

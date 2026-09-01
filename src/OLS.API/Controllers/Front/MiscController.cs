@@ -156,6 +156,21 @@ public sealed class PermissionPageController : ApiControllerBase
             : BadRequest(new Dictionary<string, object?> { ["message"] = result.Message });
     }
 
+    /// <summary>
+    /// Elle açılmış, kodun hiç bakmadığı bir yetki sayfasını kaldırır.
+    /// Programın kullandığı sayfalar servis tarafından reddedilir.
+    /// </summary>
+    [HttpDelete("{slug}")]
+    [RequiresPermission(PermissionAction.Delete, "role_management")]
+    public async Task<IActionResult> Delete(string slug, CancellationToken cancellationToken)
+    {
+        var result = await _pages.DeleteAsync(slug, cancellationToken);
+
+        return result.Success
+            ? base.Ok(new Dictionary<string, object?> { ["message"] = result.Message })
+            : BadRequest(new Dictionary<string, object?> { ["message"] = result.Message });
+    }
+
     public sealed class PermissionPageRequest
     {
         [JsonPropertyName("permission_page_name")] public string? PageName { get; set; }
