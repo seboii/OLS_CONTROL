@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using OLS.Business.Common;
 using OLS.Business.Services.Accounts;
 using OLS.Business.Services.Authentication;
+using OLS.Business.Services.Auditing;
 using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Cars;
 using OLS.Business.Services.Dashboard;
@@ -100,6 +101,7 @@ public static class DependencyInjection
 
         services.AddScoped<ISiberImportService, SiberImportService>();
         services.AddScoped<ISiberSyncService, SiberSyncService>();
+        services.AddScoped<IRecordHistoryService, RecordHistoryService>();
         services.AddScoped<IFinanceSyncService, FinanceSyncService>();
         services.AddScoped<ILedgerService, LedgerService>();
         services.AddScoped<IFinanceDocumentService, FinanceDocumentService>();
