@@ -85,10 +85,10 @@ uygulama bunu her kaydın detayında gösterir. "Kaydı açan" üç modülde de 
 veri yoksa hiç gösterilmez. Kullanıcı Siber'de kodla tutulduğundan (91 koddan 88'i yerel
 bir kullanıcıya karşılık geliyor), eşleşme yoksa kodun kendisi gösterilir.
 
-**İşlem geçmişi.** Teklif, yük ve sefer detaylarında ayrı bir "İşlem Geçmişi" sekmesi
-kaydın tüm değişikliklerini listeler: her işlem için kim, ne zaman ve hangi alanın hangi
-değerden hangi değere geçtiği. Kaynak Siber'in kendi değişiklik günlüğüdür — üç modül için
-86 binden fazla işlem kaydı taşınmıştır. Değerler alan adlarıyla eşleştirilemediğinde
+**İşlem geçmişi.** Teklif, yük, sefer, fatura ve cari detaylarında ayrı bir "İşlem Geçmişi"
+sekmesi kaydın tüm değişikliklerini listeler: her işlem için kim, ne zaman ve hangi alanın
+hangi değerden hangi değere geçtiği. Kaynak Siber'in kendi değişiklik günlüğüdür — bu altı
+tablo için 253 binden fazla işlem kaydı taşınmıştır. Değerler alan adlarıyla eşleştirilemediğinde
 (çok satırlı bir metin alanı hizalamayı bozduğunda) yanlış bir eşleşme göstermek yerine
 yalnızca değişen alan adları listelenir.
 
