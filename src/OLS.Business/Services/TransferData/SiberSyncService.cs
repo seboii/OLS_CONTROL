@@ -1,6 +1,7 @@
-using System.Data;
+﻿using System.Data;
 using Dapper;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using OLS.Business.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
@@ -109,12 +110,18 @@ public sealed class SiberSyncService : ISiberSyncService
     private readonly OlsDbContext _db;
     private readonly ISiberConnectionFactory _siber;
     private readonly ISiberImportService _import;
+    private readonly ILogger<SiberSyncService> _logger;
 
-    public SiberSyncService(OlsDbContext db, ISiberConnectionFactory siber, ISiberImportService import)
+    public SiberSyncService(
+        OlsDbContext db,
+        ISiberConnectionFactory siber,
+        ISiberImportService import,
+        ILogger<SiberSyncService> logger)
     {
         _db = db;
         _siber = siber;
         _import = import;
+        _logger = logger;
     }
 
     private async Task<IDbConnection> OpenAsync(CancellationToken cancellationToken)
@@ -259,6 +266,147 @@ public sealed class SiberSyncService : ISiberSyncService
     // pozisyonel record constructor eşleştirmesi canlıda tutarsız davrandı (bazı satırlar
     // "uygun constructor yok" hatasıyla materialize edilemedi, bkz. bu değişikliğin
     // commit notu). Property tabanlı sınıflar Dapper'ın en güvenilir, standart yolu.
+
+    /// <summary>
+    /// Siber kullanıcı kodu → yerel kullanıcı kimliği. Kod ham hâliyle de
+    /// saklandığı için eşleşmeyen kod (ayrılmış personel; 91 koddan 3'ü)
+    /// bilgiyi kaybettirmez, yalnızca bağlantısız kalır.
+    /// </summary>
+    private async Task<Dictionary<string, long>> SiberUserCodeMapAsync(
+        CancellationToken cancellationToken)
+    {
+        var rows = await _db.Users.AsNoTracking()
+            .Where(u => u.SiberCode != null && u.SiberCode != "")
+            .Select(u => new { u.Id, u.SiberCode })
+            .ToListAsync(cancellationToken);
+
+        var map = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in rows)
+            map[row.SiberCode!.Trim()] = row.Id;
+
+        return map;
+    }
+
+    /// <summary>
+    /// Siber'in denetim alanlarını kayda işler.
+    ///
+    /// "Kim açtı" Siber'de üç tabloda da %100 dolu; "kim son dokundu" teklifte
+    /// %81, yükte %85, seferde %30 dolu — bu yüzden güncelleme alanları boş
+    /// gelirse MEVCUT değer korunur, null'a çekilmez.
+    /// </summary>
+    private static void ApplySiberAudit(
+        string? insUser, DateTime? insTime, string? updUser, DateTime? updTime,
+        IReadOnlyDictionary<string, long> userCodes,
+        Action<string?, long?, DateTime?> setCreated,
+        Action<string?, long?, DateTime?> setUpdated)
+    {
+        if (!string.IsNullOrWhiteSpace(insUser))
+        {
+            var code = insUser.Trim();
+            setCreated(code, userCodes.TryGetValue(code, out var id) ? id : null, insTime);
+        }
+        else if (insTime is not null)
+        {
+            setCreated(null, null, insTime);
+        }
+
+        if (!string.IsNullOrWhiteSpace(updUser))
+        {
+            var code = updUser.Trim();
+            setUpdated(code, userCodes.TryGetValue(code, out var id) ? id : null, updTime);
+        }
+    }
+
+    /// <summary>
+    /// Silme kontrolünün çalışması için Siber'den gelmesi gereken asgari oran.
+    /// Altında kalırsa çekim eksik sayılır ve hiçbir kayıt işaretlenmez.
+    /// </summary>
+    private const double MinimumFetchRatioForDeletionCheck = 0.5;
+
+    /// <summary>
+    /// Silme kontrolü güvenli mi? Siber'den gelen kayıt sayısı, yerelde bilinen
+    /// sayının yarısının altındaysa çekim EKSİK sayılır ve hiçbir kayıt
+    /// işaretlenmez.
+    ///
+    /// Bu eşik olmadan, yarım dönen ya da hataya düşen tek bir çekim tüm tabloyu
+    /// "Siber'de silinmiş" diye damgalar; kullanıcı ertesi gün listelerini boş
+    /// bulurdu. Yanlış işaretlemenin bedeli, birkaç turluk gecikmenin bedelinden
+    /// çok daha yüksek.
+    /// </summary>
+    public static bool ShouldSkipDeletionCheck(int fetchedCount, int localCount) =>
+        localCount > 0 && fetchedCount < localCount * MinimumFetchRatioForDeletionCheck;
+
+
+    /// <summary>
+    /// Siber'den SİLİNMİŞ kayıtları işaretler.
+    ///
+    /// Uygulama dışında (doğrudan Siber ekranından) silinen bir yük/teklif/sefer,
+    /// bu kontrol olmadan yerelde sonsuza kadar canlı görünüyordu. Ölçüm: 6 teklif,
+    /// 27 yük ve 6 sefer bu durumdaydı.
+    ///
+    /// Kayıt SİLİNMEZ, yalnızca işaretlenir: bağlı finans kayıtları, evrak arşivi
+    /// ve denetim izi korunmalı; ayrıca Siber'de yanlışlıkla silinip geri alınan
+    /// bir kaydın yerel geçmişi de kaybolmamalı (kayıt yeniden görünürse işaret
+    /// senkron sırasında temizleniyor).
+    ///
+    /// GÜVENLİK EŞİĞİ: Siber'den gelen küme, yerelde bilinen kayıt sayısının
+    /// <see cref="MinimumFetchRatioForDeletionCheck"/> oranından azsa HİÇBİR ŞEY
+    /// işaretlenmez. Yarım dönen ya da hataya düşen bir çekim, aksi hâlde tüm
+    /// tabloyu "silindi" diye damgalardı — bu, sessizce en pahalı hata olurdu.
+    /// </summary>
+    private async Task<string?> MarkMissingAsDeletedAsync<TEntity>(
+        string label,
+        IQueryable<TEntity> localRows,
+        Func<TEntity, string?> keySelector,
+        Action<TEntity, DateTime?> setDeleted,
+        Func<TEntity, DateTime?> getDeleted,
+        IReadOnlyCollection<string> siberKeys,
+        CancellationToken cancellationToken)
+        where TEntity : class
+    {
+        var local = await localRows.ToListAsync(cancellationToken);
+        if (local.Count == 0)
+            return null;
+
+        if (ShouldSkipDeletionCheck(siberKeys.Count, local.Count))
+        {
+            _logger.LogWarning(
+                "{Label}: Siber'den {Fetched} kayıt geldi ama yerelde {Local} var — " +
+                "silme kontrolü GÜVENLİK EŞİĞİ nedeniyle atlandı.",
+                label, siberKeys.Count, local.Count);
+
+            return $"{label}: silme kontrolü atlandı (Siber'den beklenenden az kayıt geldi).";
+        }
+
+        var present = new HashSet<string>(siberKeys, StringComparer.OrdinalIgnoreCase);
+        var now = DateTime.Now;
+        var marked = 0;
+
+        foreach (var entity in local)
+        {
+            var key = keySelector(entity);
+            if (key is null || present.Contains(key))
+                continue;
+
+            if (getDeleted(entity) is not null)
+                continue;
+
+            setDeleted(entity, now);
+            marked++;
+        }
+
+        if (marked == 0)
+            return null;
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        _logger.LogWarning(
+            "{Label}: Siber'de bulunmayan {Count} kayıt 'silindi' olarak işaretlendi.",
+            label, marked);
+
+        return $"{label}: {marked} kayıt Siber'de bulunamadı, silindi olarak işaretlendi.";
+    }
+
     private sealed class OfferRow
     {
         public string Rezervasyonid { get; set; } = string.Empty;
@@ -299,7 +447,13 @@ public sealed class SiberSyncService : ISiberSyncService
         /// yük riski). Canlıda doğrulandı: 25 teklif bu durumdaydı.
         /// </summary>
         public string? Yukid { get; set; }
-    }
+    
+        // Siber denetim izleri — kim açtı / kim son dokundu.
+        public string? InsUser { get; set; }
+        public DateTime? InsTime { get; set; }
+        public string? UpdUser { get; set; }
+        public DateTime? UpdTime { get; set; }
+}
 
     /// <summary>
     /// olsold/TransferSiberService ile AYNI 18 kolon (bkz. SiberLoadRepository.
@@ -330,12 +484,15 @@ public sealed class SiberSyncService : ISiberSyncService
                        LTRIM(RTRIM(CAST(aciklama AS NVARCHAR(MAX)))) AS Aciklama,
                        CAST(yuklemeulkeid AS VARCHAR(64)) AS Yuklemeulkeid, CAST(bosaltmaulkeid AS VARCHAR(64)) AS Bosaltmaulkeid,
                        calismasekli AS Calismasekli, CAST(acenteid AS VARCHAR(64)) AS Acenteid,
-                       LOWER(CAST(yukid AS VARCHAR(64))) AS Yukid
+                       LOWER(CAST(yukid AS VARCHAR(64))) AS Yukid,
+                       LTRIM(RTRIM(insuser)) AS InsUser, instime AS InsTime,
+                       LTRIM(RTRIM(upduser)) AS UpdUser, updtime AS UpdTime
                 FROM skn_rezervasyon
                 """,
                 cancellationToken: cancellationToken))).ToList();
 
         var workTypes = ByCode(await _db.WorkTypes.AsNoTracking().ToListAsync(cancellationToken), w => w.Code, w => w.Id);
+        var userCodes = await SiberUserCodeMapAsync(cancellationToken);
         var instructions = ByCode(await _db.Instructions.AsNoTracking().ToListAsync(cancellationToken), i => i.Code, i => i.Id);
         var romorkTypes = ByCode(await _db.RomorkTypes.AsNoTracking().ToListAsync(cancellationToken), r => r.Code, r => r.Id);
         var loadingTypes = ByCode(await _db.LoadingTypes.AsNoTracking().ToListAsync(cancellationToken), t => t.Code, t => t.Id);
@@ -394,6 +551,13 @@ public sealed class SiberSyncService : ISiberSyncService
                 load.OfferValidityDate = row.Gecerliliktarih is { } gd ? DateOnly.FromDateTime(gd) : load.OfferValidityDate;
                 load.ApprovalDate = row.Onaytarih is { } od ? DateOnly.FromDateTime(od) : load.ApprovalDate;
                 load.SiberCompanyId = row.Sirketid ?? load.SiberCompanyId;
+
+                // Siber'de kayıt yeniden göründüyse silindi işareti kalkar.
+                load.SiberDeletedAt = null;
+
+                ApplySiberAudit(row.InsUser, row.InsTime, row.UpdUser, row.UpdTime, userCodes,
+                    (code, id, at) => { load.SiberCreatedBy = code; load.SiberCreatedByUserId = id; load.SiberCreatedAt = at; },
+                    (code, id, at) => { load.SiberUpdatedBy = code; load.SiberUpdatedByUserId = id; load.SiberUpdatedAt = at; });
                 load.MarketingNotificationDate = row.Pazarlamabildirimtarih is { } pbd ? DateOnly.FromDateTime(pbd) : load.MarketingNotificationDate;
                 load.Description = row.Aciklama;
                 load.FrontTransportationByUs = row.Ontasimatarafimizdanyapilir ?? load.FrontTransportationByUs;
@@ -423,7 +587,20 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return new SiberImportSummary(created, updated, errors);
+
+        var deletionNote = await MarkMissingAsDeletedAsync(
+            "Teklif",
+            _db.Loads.Where(l => l.SiberId != null),
+            l => l.SiberId,
+            (l, at) => l.SiberDeletedAt = at,
+            l => l.SiberDeletedAt,
+            rows.Select(r => r.Rezervasyonid).ToList(),
+            cancellationToken);
+
+        return new SiberImportSummary(created, updated, errors)
+        {
+            Notes = deletionNote is null ? [] : [deletionNote],
+        };
     }
 
     private sealed class OfferContentRow
@@ -689,7 +866,13 @@ public sealed class SiberSyncService : ISiberSyncService
         public DateTime? Istenenvaristarihi { get; set; }
         public DateTime? Hazirolmatarih { get; set; }
         public DateTime? Musteridenalinistarih { get; set; }
-    }
+    
+        // Siber denetim izleri — kim açtı / kim son dokundu.
+        public string? InsUser { get; set; }
+        public DateTime? InsTime { get; set; }
+        public string? UpdUser { get; set; }
+        public DateTime? UpdTime { get; set; }
+}
 
     /// <summary>
     /// skn_yuk — WRITE tarafıyla (SiberLoadRepository.InsertYukWithLockedNumberAsync) AYNI
@@ -746,12 +929,15 @@ public sealed class SiberSyncService : ISiberSyncService
                        TRY_CAST(ontasimatarafimizdanyapilir AS INT) AS Ontasimatarafimizdanyapilir,
                        TRY_CAST(sontasimatarafimizdanyapilir AS INT) AS Sontasimatarafimizdanyapilir,
                        talimatgelistarihi AS Talimatgelistarihi, istenenvaristarihi AS Istenenvaristarihi,
-                       hazirolmatarih AS Hazirolmatarih, musteridenalinistarih AS Musteridenalinistarih
+                       hazirolmatarih AS Hazirolmatarih, musteridenalinistarih AS Musteridenalinistarih,
+                       LTRIM(RTRIM(kayitgiren)) AS InsUser, kayitgiristarih AS InsTime,
+                       LTRIM(RTRIM(upduser)) AS UpdUser, updtime AS UpdTime
                 FROM skn_yuk
                 """,
                 cancellationToken: cancellationToken))).ToList();
 
         var workTypes = ByCode(await _db.WorkTypes.AsNoTracking().ToListAsync(cancellationToken), w => w.Code, w => w.Id);
+        var userCodes = await SiberUserCodeMapAsync(cancellationToken);
         var instructions = ByCode(await _db.Instructions.AsNoTracking().ToListAsync(cancellationToken), i => i.Code, i => i.Id);
         var romorkTypes = ByCode(await _db.RomorkTypes.AsNoTracking().ToListAsync(cancellationToken), r => r.Code, r => r.Id);
         var loadingTypes = ByCode(await _db.LoadingTypes.AsNoTracking().ToListAsync(cancellationToken), t => t.Code, t => t.Id);
@@ -797,6 +983,12 @@ public sealed class SiberSyncService : ISiberSyncService
                 // 39'u eşleşiyordu). Artık iki taraf da küçük harf.
                 transfer.LoadTransferId = row.Yukid;
                 transfer.SiberCompanyId = row.Sirketid ?? transfer.SiberCompanyId;
+
+                transfer.SiberDeletedAt = null;
+
+                ApplySiberAudit(row.InsUser, row.InsTime, row.UpdUser, row.UpdTime, userCodes,
+                    (code, id, at) => { transfer.SiberCreatedBy = code; transfer.SiberCreatedByUserId = id; transfer.SiberCreatedAt = at; },
+                    (code, id, at) => { transfer.SiberUpdatedBy = code; transfer.SiberUpdatedByUserId = id; transfer.SiberUpdatedAt = at; });
 
                 transfer.LoadNumber = row.Yukno?.ToString();
                 // olsold ETL: 'connected_load_number' => $sqlLoad->bagliyukno (yukno DEĞİL —
@@ -879,7 +1071,20 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return new SiberImportSummary(created, updated, errors);
+
+        var deletionNote = await MarkMissingAsDeletedAsync(
+            "Yük",
+            _db.LoadTransfers.Where(t => t.LoadTransferId != null),
+            t => t.LoadTransferId,
+            (t, at) => t.SiberDeletedAt = at,
+            t => t.SiberDeletedAt,
+            rows.Select(r => r.Yukid).ToList(),
+            cancellationToken);
+
+        return new SiberImportSummary(created, updated, errors)
+        {
+            Notes = deletionNote is null ? [] : [deletionNote],
+        };
     }
 
     private sealed class LoadTransferPackageRow
@@ -1325,7 +1530,13 @@ public sealed class SiberSyncService : ISiberSyncService
 
         /// <summary>Seferin ait olduğu Siber şirketi — görünürlük ayrımı.</summary>
         public string? Sirketid { get; set; }
-    }
+    
+        // Siber denetim izleri — kim açtı / kim son dokundu.
+        public string? InsUser { get; set; }
+        public DateTime? InsTime { get; set; }
+        public string? UpdUser { get; set; }
+        public DateTime? UpdTime { get; set; }
+}
 
     /// <summary>
     /// skn_pozisyon + skn_sefer (LEFT JOIN seferid) — bu oturumun önceki ETL çalışmasında
@@ -1352,13 +1563,16 @@ public sealed class SiberSyncService : ISiberSyncService
                        LTRIM(RTRIM(p.romorkplakano)) AS Romorkplakano,
                        CAST(p.romorkid AS VARCHAR(64)) AS Romorkid,
                        CAST(p.sirketid AS VARCHAR(64)) AS Sirketid,
-                       p.yuklemetarih AS Yuklemetarih
+                       p.yuklemetarih AS Yuklemetarih,
+                       LTRIM(RTRIM(p.kayitgiren)) AS InsUser, p.kayitgiristarih AS InsTime,
+                       LTRIM(RTRIM(p.upduser)) AS UpdUser, p.updtime AS UpdTime
                 FROM skn_pozisyon p
                 LEFT JOIN skn_sefer s ON s.seferid = p.seferid
                 """,
                 cancellationToken: cancellationToken))).ToList();
 
         var workTypes = ByCode(await _db.WorkTypes.AsNoTracking().ToListAsync(cancellationToken), w => w.Code, w => w.Id);
+        var userCodes = await SiberUserCodeMapAsync(cancellationToken);
         var departments = BySiberId(await _db.Departments.AsNoTracking().ToListAsync(cancellationToken), d => d.SiberId, d => d.Id);
         // DİKKAT: skn_pozisyon.seferturid gerçek Siber'de tinyint (10, 11, ...) — GUID
         // DEĞİL. ExpeditionType.SiberId (GUID) değil Code (sayısal kod) ile eşleşir.
@@ -1400,6 +1614,12 @@ public sealed class SiberSyncService : ISiberSyncService
                 expedition ??= new Expedition { ExpeditionId = row.Pozisyonid, CreatedAt = DateTime.Now };
 
                 expedition.SiberCompanyId = row.Sirketid ?? expedition.SiberCompanyId;
+
+                expedition.SiberDeletedAt = null;
+
+                ApplySiberAudit(row.InsUser, row.InsTime, row.UpdUser, row.UpdTime, userCodes,
+                    (code, id, at) => { expedition.SiberCreatedBy = code; expedition.SiberCreatedByUserId = id; expedition.SiberCreatedAt = at; },
+                    (code, id, at) => { expedition.SiberUpdatedBy = code; expedition.SiberUpdatedByUserId = id; expedition.SiberUpdatedAt = at; });
                 expedition.ExpeditionNumber = row.Seferno;
                 expedition.SeferId = row.Seferid;
                 expedition.WorkType = row.Isturu is { } wt && workTypes.TryGetValue(wt, out var wtId) ? (int)wtId : expedition.WorkType;
@@ -1438,7 +1658,20 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return new SiberImportSummary(created, updated, errors);
+
+        var deletionNote = await MarkMissingAsDeletedAsync(
+            "Sefer",
+            _db.Expeditions.Where(e => e.ExpeditionId != null),
+            e => e.ExpeditionId,
+            (e, at) => e.SiberDeletedAt = at,
+            e => e.SiberDeletedAt,
+            rows.Select(r => r.Pozisyonid).ToList(),
+            cancellationToken);
+
+        return new SiberImportSummary(created, updated, errors)
+        {
+            Notes = deletionNote is null ? [] : [deletionNote],
+        };
     }
 
     private sealed class YukAktarmaRow
