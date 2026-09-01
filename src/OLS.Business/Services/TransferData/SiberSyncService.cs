@@ -326,6 +326,9 @@ public sealed class SiberSyncService : ISiberSyncService
     /// </summary>
     private const double MinimumFetchRatioForDeletionCheck = 0.5;
 
+    /// <summary>Siber <c>sbr_log.yapilanislem</c> silme kodu.</summary>
+    private const short SiberDeleteOperation = 3;
+
     /// <summary>
     /// Silme kontrolü güvenli mi? Siber'den gelen kayıt sayısı, yerelde bilinen
     /// sayının yarısının altındaysa çekim EKSİK sayılır ve hiçbir kayıt
@@ -359,10 +362,13 @@ public sealed class SiberSyncService : ISiberSyncService
     /// </summary>
     private async Task<string?> MarkMissingAsDeletedAsync<TEntity>(
         string label,
+        string siberTableName,
         IQueryable<TEntity> localRows,
         Func<TEntity, string?> keySelector,
+        Func<TEntity, string?> labelSelector,
         Action<TEntity, DateTime?> setDeleted,
         Func<TEntity, DateTime?> getDeleted,
+        Action<TEntity, string?, long?, DateTime?> setDeletedBy,
         IReadOnlyCollection<string> siberKeys,
         CancellationToken cancellationToken)
         where TEntity : class
@@ -383,25 +389,73 @@ public sealed class SiberSyncService : ISiberSyncService
 
         var present = new HashSet<string>(siberKeys, StringComparer.OrdinalIgnoreCase);
         var now = DateTime.Now;
+
+        var missing = local
+            .Select(e => new { Entity = e, Key = keySelector(e) })
+            .Where(x => x.Key is not null && !present.Contains(x.Key) && getDeleted(x.Entity) is null)
+            .ToList();
+
+        if (missing.Count == 0)
+            return null;
+
+        // SILENI BUL: Siber kendi gunlugunde (sbr_log) silme kaydi tutuyor.
+        // Varsa kimin ne zaman sildigi oradan gelir; yoksa yalnizca "fark
+        // edildi" damgasi kalir (uygulamanin acip Siber ekranindan gecmemis
+        // kayitlarda gunluk satiri olusmuyor).
+        var missingKeys = missing.Select(x => x.Key!).ToList();
+
+        var deletionLogs = await _db.SiberChangeLogs.AsNoTracking()
+            .Where(l => l.TableName == siberTableName &&
+                        l.Operation == SiberDeleteOperation &&
+                        missingKeys.Contains(l.RecordId))
+            .Select(l => new { l.RecordId, l.UserCode, l.UserId, l.ChangedAt })
+            .ToListAsync(cancellationToken);
+
+        var deletionByKey = deletionLogs
+            .GroupBy(l => l.RecordId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(x => x.ChangedAt).First(),
+                StringComparer.OrdinalIgnoreCase);
+
         var marked = 0;
+        var withDeleter = 0;
 
-        foreach (var entity in local)
+        foreach (var item in missing)
         {
-            var key = keySelector(entity);
-            if (key is null || present.Contains(key))
-                continue;
+            setDeleted(item.Entity, now);
 
-            if (getDeleted(entity) is not null)
-                continue;
+            deletionByKey.TryGetValue(item.Key!, out var log);
 
-            setDeleted(entity, now);
+            if (log is not null)
+            {
+                setDeletedBy(item.Entity, log.UserCode, log.UserId, log.ChangedAt);
+                withDeleter++;
+            }
+
+            // DENETIM KAYDINA DUS: silinme, yoneticinin izledigi akista
+            // gorunmeli. Arka plan senkronunun HttpContext'i olmadigi icin
+            // AuditSaveChangesInterceptor bunu yakalamiyor, satir elle yazilir.
+            _db.AuditLogs.Add(new AuditLog
+            {
+                UserId = log?.UserId,
+                UserName = log?.UserCode ?? "Siber",
+                Action = "deleted",
+                EntityType = label,
+                EntityId = item.Key,
+                EntityLabel = labelSelector(item.Entity),
+                CreatedAt = now,
+            });
+
             marked++;
         }
 
-        if (marked == 0)
-            return null;
-
         await _db.SaveChangesAsync(cancellationToken);
+
+        if (withDeleter > 0)
+            _logger.LogInformation(
+                "{Label}: {Count} silinen kaydin {WithDeleter} tanesinde silen kullanici Siber gunlugunden bulundu.",
+                label, marked, withDeleter);
 
         _logger.LogWarning(
             "{Label}: Siber'de bulunmayan {Count} kayıt 'silindi' olarak işaretlendi.",
@@ -735,10 +789,13 @@ public sealed class SiberSyncService : ISiberSyncService
 
         var deletionNote = await MarkMissingAsDeletedAsync(
             "Teklif",
+            "skn_rezervasyon",
             _db.Loads.Where(l => l.SiberId != null),
             l => l.SiberId,
+            l => l.ReservationNumber,
             (l, at) => l.SiberDeletedAt = at,
             l => l.SiberDeletedAt,
+            (l, code, id, at) => { l.SiberDeletedBy = code; l.SiberDeletedByUserId = id; l.SiberDeletedOn = at; },
             rows.Select(r => r.Rezervasyonid).ToList(),
             cancellationToken);
 
@@ -1219,10 +1276,13 @@ public sealed class SiberSyncService : ISiberSyncService
 
         var deletionNote = await MarkMissingAsDeletedAsync(
             "Yük",
+            "skn_yuk",
             _db.LoadTransfers.Where(t => t.LoadTransferId != null),
             t => t.LoadTransferId,
+            t => t.LoadNumberWorkType,
             (t, at) => t.SiberDeletedAt = at,
             t => t.SiberDeletedAt,
+            (t, code, id, at) => { t.SiberDeletedBy = code; t.SiberDeletedByUserId = id; t.SiberDeletedOn = at; },
             rows.Select(r => r.Yukid).ToList(),
             cancellationToken);
 
@@ -1806,10 +1866,13 @@ public sealed class SiberSyncService : ISiberSyncService
 
         var deletionNote = await MarkMissingAsDeletedAsync(
             "Sefer",
+            "skn_pozisyon",
             _db.Expeditions.Where(e => e.ExpeditionId != null),
             e => e.ExpeditionId,
+            e => e.ExpeditionNumber,
             (e, at) => e.SiberDeletedAt = at,
             e => e.SiberDeletedAt,
+            (e, code, id, at) => { e.SiberDeletedBy = code; e.SiberDeletedByUserId = id; e.SiberDeletedOn = at; },
             rows.Select(r => r.Pozisyonid).ToList(),
             cancellationToken);
 
