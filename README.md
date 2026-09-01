@@ -85,6 +85,13 @@ uygulama bunu her kaydın detayında gösterir. "Kaydı açan" üç modülde de 
 veri yoksa hiç gösterilmez. Kullanıcı Siber'de kodla tutulduğundan (91 koddan 88'i yerel
 bir kullanıcıya karşılık geliyor), eşleşme yoksa kodun kendisi gösterilir.
 
+**İşlem geçmişi.** Teklif, yük ve sefer detaylarında ayrı bir "İşlem Geçmişi" sekmesi
+kaydın tüm değişikliklerini listeler: her işlem için kim, ne zaman ve hangi alanın hangi
+değerden hangi değere geçtiği. Kaynak Siber'in kendi değişiklik günlüğüdür — üç modül için
+86 binden fazla işlem kaydı taşınmıştır. Değerler alan adlarıyla eşleştirilemediğinde
+(çok satırlı bir metin alanı hizalamayı bozduğunda) yanlış bir eşleşme göstermek yerine
+yalnızca değişen alan adları listelenir.
+
 **Program dışı silmeler.** Doğrudan Siber ekranından silinen bir kayıt, uygulamada canlı
 görünmeye devam ediyordu. Artık her tam senkronda Siber'den gelen kimlik kümesi yerelle
 karşılaştırılır ve eksik kayıtlar "Siber'de silinmiş" olarak işaretlenir. Kayıt yerelden
@@ -185,8 +192,8 @@ referanslarıyla çalıştığı için `tsc --noEmit` hiçbir dosyayı denetleme
 dotnet test
 ```
 
-147 test: `tests/OLS.Business.Tests` altında 37 birim testi (veritabanı gerekmez),
-`tests/OLS.API.IntegrationTests` altında 110 entegrasyon testi (Postgres gerekir).
+153 test: `tests/OLS.Business.Tests` altında 37 birim testi (veritabanı gerekmez),
+`tests/OLS.API.IntegrationTests` altında 116 entegrasyon testi (Postgres gerekir).
 
 Entegrasyon testleri her çalıştırmada rastgele adlı izole bir veritabanı (`ols_scoped_inttest_*`)
 oluşturup siler; geliştirme veritabanını etkilemez.
