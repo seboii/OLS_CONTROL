@@ -656,6 +656,11 @@ public partial class OlsDbContext : DbContext
                 .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_updated_at");
             entity.Property(e => e.SiberDeletedAt)
                 .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_deleted_at");
+            entity.Property(e => e.SiberDeletedBy)
+                .HasMaxLength(64).HasColumnName("siber_deleted_by");
+            entity.Property(e => e.SiberDeletedByUserId).HasColumnName("siber_deleted_by_user_id");
+            entity.Property(e => e.SiberDeletedOn)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_deleted_on");
 
             // SetNull: kullanıcı yerelden silinse bile kaydın kim tarafından
             // açıldığı bilgisi ham kodda duruyor.
@@ -668,6 +673,11 @@ public partial class OlsDbContext : DbContext
                 .HasForeignKey(d => d.SiberUpdatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("expeditions_siber_updated_by_user_id_foreign");
+
+            entity.HasOne(d => d.SiberDeletedByUser).WithMany()
+                .HasForeignKey(d => d.SiberDeletedByUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("expeditions_siber_deleted_by_user_id_foreign");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");
@@ -1491,6 +1501,11 @@ public partial class OlsDbContext : DbContext
                 .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_updated_at");
             entity.Property(e => e.SiberDeletedAt)
                 .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_deleted_at");
+            entity.Property(e => e.SiberDeletedBy)
+                .HasMaxLength(64).HasColumnName("siber_deleted_by");
+            entity.Property(e => e.SiberDeletedByUserId).HasColumnName("siber_deleted_by_user_id");
+            entity.Property(e => e.SiberDeletedOn)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_deleted_on");
 
             // SetNull: kullanıcı yerelden silinse bile kaydın kim tarafından
             // açıldığı bilgisi ham kodda duruyor.
@@ -1503,6 +1518,11 @@ public partial class OlsDbContext : DbContext
                 .HasForeignKey(d => d.SiberUpdatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("loads_siber_updated_by_user_id_foreign");
+
+            entity.HasOne(d => d.SiberDeletedByUser).WithMany()
+                .HasForeignKey(d => d.SiberDeletedByUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("loads_siber_deleted_by_user_id_foreign");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.AgentId).HasColumnName("agent_id");
@@ -1791,6 +1811,11 @@ public partial class OlsDbContext : DbContext
                 .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_updated_at");
             entity.Property(e => e.SiberDeletedAt)
                 .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_deleted_at");
+            entity.Property(e => e.SiberDeletedBy)
+                .HasMaxLength(64).HasColumnName("siber_deleted_by");
+            entity.Property(e => e.SiberDeletedByUserId).HasColumnName("siber_deleted_by_user_id");
+            entity.Property(e => e.SiberDeletedOn)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("siber_deleted_on");
 
             // SetNull: kullanıcı yerelden silinse bile kaydın kim tarafından
             // açıldığı bilgisi ham kodda duruyor.
@@ -1803,6 +1828,11 @@ public partial class OlsDbContext : DbContext
                 .HasForeignKey(d => d.SiberUpdatedByUserId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("load_transfers_siber_updated_by_user_id_foreign");
+
+            entity.HasOne(d => d.SiberDeletedByUser).WithMany()
+                .HasForeignKey(d => d.SiberDeletedByUserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("load_transfers_siber_deleted_by_user_id_foreign");
 
             entity.Property(e => e.Id).HasColumnName("id");
             entity.Property(e => e.SiberCompanyId).HasMaxLength(64).HasColumnName("siber_company_id");

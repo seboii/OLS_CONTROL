@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OLS.DataAccess.Context;
@@ -11,9 +12,11 @@ using OLS.DataAccess.Context;
 namespace OLS.DataAccess.Migrations
 {
     [DbContext(typeof(OlsDbContext))]
-    partial class OlsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260901082700_AddSiberDeleterNavigation")]
+    partial class AddSiberDeleterNavigation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2555,17 +2558,13 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnName("siber_deleted_at");
 
                     b.Property<string>("SiberDeletedBy")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_deleted_by");
+                        .HasColumnType("text");
 
                     b.Property<long?>("SiberDeletedByUserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("siber_deleted_by_user_id");
+                        .HasColumnType("bigint");
 
                     b.Property<DateTime?>("SiberDeletedOn")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("siber_deleted_on");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SiberId")
                         .HasMaxLength(191)
@@ -3183,17 +3182,13 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnName("siber_deleted_at");
 
                     b.Property<string>("SiberDeletedBy")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_deleted_by");
+                        .HasColumnType("text");
 
                     b.Property<long?>("SiberDeletedByUserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("siber_deleted_by_user_id");
+                        .HasColumnType("bigint");
 
                     b.Property<DateTime?>("SiberDeletedOn")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("siber_deleted_on");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SiberId")
                         .HasMaxLength(191)

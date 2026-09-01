@@ -124,9 +124,23 @@ public partial class Load
     /// </summary>
     public DateTime? SiberDeletedAt { get; set; }
 
+    /// <summary>Kaydı Siber'de SİLEN kullanıcının kodu (sbr_log'dan).</summary>
+    public string? SiberDeletedBy { get; set; }
+
+    public long? SiberDeletedByUserId { get; set; }
+
+    /// <summary>
+    /// Siber'deki GERÇEK silme anı. <see cref="SiberDeletedAt"/> ise bizim
+    /// fark ettiğimiz an — ikisi farklı şeydir ve karıştırılmamalı.
+    /// Silme günlüğü bulunamazsa null kalır.
+    /// </summary>
+    public DateTime? SiberDeletedOn { get; set; }
+
     public virtual User? SiberCreatedByUser { get; set; }
 
     public virtual User? SiberUpdatedByUser { get; set; }
+
+    public virtual User? SiberDeletedByUser { get; set; }
 
     public virtual ICollection<LoadContent> LoadContents { get; set; } = new List<LoadContent>();
 

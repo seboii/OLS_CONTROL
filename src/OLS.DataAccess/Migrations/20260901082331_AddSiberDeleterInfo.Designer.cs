@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using OLS.DataAccess.Context;
@@ -11,9 +12,11 @@ using OLS.DataAccess.Context;
 namespace OLS.DataAccess.Migrations
 {
     [DbContext(typeof(OlsDbContext))]
-    partial class OlsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260901082331_AddSiberDeleterInfo")]
+    partial class AddSiberDeleterInfo
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1121,8 +1124,6 @@ namespace OLS.DataAccess.Migrations
                         .HasName("expeditions_pkey");
 
                     b.HasIndex("SiberCreatedByUserId");
-
-                    b.HasIndex("SiberDeletedByUserId");
 
                     b.HasIndex("SiberUpdatedByUserId");
 
@@ -2555,17 +2556,13 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnName("siber_deleted_at");
 
                     b.Property<string>("SiberDeletedBy")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_deleted_by");
+                        .HasColumnType("text");
 
                     b.Property<long?>("SiberDeletedByUserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("siber_deleted_by_user_id");
+                        .HasColumnType("bigint");
 
                     b.Property<DateTime?>("SiberDeletedOn")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("siber_deleted_on");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SiberId")
                         .HasMaxLength(191)
@@ -2621,8 +2618,6 @@ namespace OLS.DataAccess.Migrations
                         .HasName("loads_pkey");
 
                     b.HasIndex("SiberCreatedByUserId");
-
-                    b.HasIndex("SiberDeletedByUserId");
 
                     b.HasIndex("SiberUpdatedByUserId");
 
@@ -3183,17 +3178,13 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnName("siber_deleted_at");
 
                     b.Property<string>("SiberDeletedBy")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)")
-                        .HasColumnName("siber_deleted_by");
+                        .HasColumnType("text");
 
                     b.Property<long?>("SiberDeletedByUserId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("siber_deleted_by_user_id");
+                        .HasColumnType("bigint");
 
                     b.Property<DateTime?>("SiberDeletedOn")
-                        .HasColumnType("timestamp(0) without time zone")
-                        .HasColumnName("siber_deleted_on");
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("SiberId")
                         .HasMaxLength(191)
@@ -3273,8 +3264,6 @@ namespace OLS.DataAccess.Migrations
                         .HasName("load_transfers_pkey");
 
                     b.HasIndex("SiberCreatedByUserId");
-
-                    b.HasIndex("SiberDeletedByUserId");
 
                     b.HasIndex("SiberUpdatedByUserId");
 
@@ -4743,12 +4732,6 @@ namespace OLS.DataAccess.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("expeditions_siber_created_by_user_id_foreign");
 
-                    b.HasOne("OLS.DataAccess.Entities.User", "SiberDeletedByUser")
-                        .WithMany()
-                        .HasForeignKey("SiberDeletedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("expeditions_siber_deleted_by_user_id_foreign");
-
                     b.HasOne("OLS.DataAccess.Entities.User", "SiberUpdatedByUser")
                         .WithMany()
                         .HasForeignKey("SiberUpdatedByUserId")
@@ -4756,8 +4739,6 @@ namespace OLS.DataAccess.Migrations
                         .HasConstraintName("expeditions_siber_updated_by_user_id_foreign");
 
                     b.Navigation("SiberCreatedByUser");
-
-                    b.Navigation("SiberDeletedByUser");
 
                     b.Navigation("SiberUpdatedByUser");
                 });
@@ -4936,12 +4917,6 @@ namespace OLS.DataAccess.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("loads_siber_created_by_user_id_foreign");
 
-                    b.HasOne("OLS.DataAccess.Entities.User", "SiberDeletedByUser")
-                        .WithMany()
-                        .HasForeignKey("SiberDeletedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("loads_siber_deleted_by_user_id_foreign");
-
                     b.HasOne("OLS.DataAccess.Entities.User", "SiberUpdatedByUser")
                         .WithMany()
                         .HasForeignKey("SiberUpdatedByUserId")
@@ -4949,8 +4924,6 @@ namespace OLS.DataAccess.Migrations
                         .HasConstraintName("loads_siber_updated_by_user_id_foreign");
 
                     b.Navigation("SiberCreatedByUser");
-
-                    b.Navigation("SiberDeletedByUser");
 
                     b.Navigation("SiberUpdatedByUser");
                 });
@@ -4999,12 +4972,6 @@ namespace OLS.DataAccess.Migrations
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("load_transfers_siber_created_by_user_id_foreign");
 
-                    b.HasOne("OLS.DataAccess.Entities.User", "SiberDeletedByUser")
-                        .WithMany()
-                        .HasForeignKey("SiberDeletedByUserId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("load_transfers_siber_deleted_by_user_id_foreign");
-
                     b.HasOne("OLS.DataAccess.Entities.User", "SiberUpdatedByUser")
                         .WithMany()
                         .HasForeignKey("SiberUpdatedByUserId")
@@ -5012,8 +4979,6 @@ namespace OLS.DataAccess.Migrations
                         .HasConstraintName("load_transfers_siber_updated_by_user_id_foreign");
 
                     b.Navigation("SiberCreatedByUser");
-
-                    b.Navigation("SiberDeletedByUser");
 
                     b.Navigation("SiberUpdatedByUser");
                 });
