@@ -80,6 +80,8 @@ public partial class OlsDbContext : DbContext
 
     public virtual DbSet<FinanceVoucherLine> FinanceVoucherLines { get; set; }
 
+    public virtual DbSet<SiberChangeLog> SiberChangeLogs { get; set; }
+
     public virtual DbSet<FinancialItem> FinancialItems { get; set; }
 
     public virtual DbSet<Instruction> Instructions { get; set; }
@@ -1198,6 +1200,40 @@ public partial class OlsDbContext : DbContext
                 .HasForeignKey(d => d.AccountId)
                 .OnDelete(DeleteBehavior.SetNull)
                 .HasConstraintName("finance_voucher_lines_account_id_foreign");
+        });
+
+        modelBuilder.Entity<SiberChangeLog>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("siber_change_logs_pkey");
+
+            entity.ToTable("siber_change_logs");
+
+            entity.HasIndex(e => e.SiberId, "siber_change_logs_siber_id_unique").IsUnique();
+            // Bir kaydın geçmişi bu indeksten okunuyor.
+            entity.HasIndex(e => new { e.TableName, e.RecordId, e.ChangedAt },
+                "siber_change_logs_record_index");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.ChangedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("changed_at");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.Fields).HasColumnName("fields");
+            entity.Property(e => e.Module).HasMaxLength(255).HasColumnName("module");
+            entity.Property(e => e.NewValues).HasColumnName("new_values");
+            entity.Property(e => e.OldValues).HasColumnName("old_values");
+            entity.Property(e => e.Operation).HasColumnName("operation");
+            entity.Property(e => e.RecordId).HasMaxLength(64).HasColumnName("record_id");
+            entity.Property(e => e.RecordLabel).HasMaxLength(510).HasColumnName("record_label");
+            entity.Property(e => e.SiberId).HasMaxLength(64).HasColumnName("siber_id");
+            entity.Property(e => e.TableName).HasMaxLength(128).HasColumnName("table_name");
+            entity.Property(e => e.UserCode).HasMaxLength(64).HasColumnName("user_code");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+
+            entity.HasOne(d => d.User).WithMany()
+                .HasForeignKey(d => d.UserId)
+                .OnDelete(DeleteBehavior.SetNull)
+                .HasConstraintName("siber_change_logs_user_id_foreign");
         });
 
         modelBuilder.Entity<FinancialItem>(entity =>
