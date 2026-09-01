@@ -11,6 +11,7 @@ import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer } from "@/components/ui/Overlay";
 import { Btn, FormField, TextInput, SelectInput, Tabs } from "@/components/ui/primitives";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
+import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 
 interface NamedRef {
   id: string;
@@ -138,7 +139,7 @@ function AccountCard({
 
 // olsold: AccountFormDrawer.vue TabList — "Genel Bilgiler"/"İletişim Bilgileri"/
 // "Görevli"/"Faturalar" (son ikisi bu güncellemede eklendi; önceden hiç yoktu).
-const TABS = ["Genel Bilgiler", "İletişim Bilgileri", "Görevli", "Faturalar"];
+const TABS = ["Genel Bilgiler", "İletişim Bilgileri", "Görevli", "Faturalar", "İşlem Geçmişi"];
 // olsold: pages/accounts/index.vue — üst seviye 6 sekme, aynı listeyi account_type_id
 // ile filtreliyor. ID'ler AccountTypeSeeder ile birebir (Müşteri=1 ... Acente=5).
 const TYPE_TABS: { label: string; typeId: number | null }[] = [
@@ -763,6 +764,13 @@ export function CustomersPage() {
                 )}
               </div>
             )}
+
+            {tab === "İşlem Geçmişi" && (
+
+              <RecordHistoryTab resource="account" recordId={editingId} />
+
+            )}
+
 
             {tab === "Faturalar" && (
               <div className="p-6">

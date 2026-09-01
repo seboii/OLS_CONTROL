@@ -11,12 +11,17 @@ import { Badge, Btn, FormField, SelectInput, TextInput, Tabs } from "@/component
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { FinancialItemPicker, type FinancialItemOption } from "@/components/shared/FinancialItemPicker";
 import { useToast } from "@/components/ui/Toast";
+import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 
 const PER_PAGE = 25;
 
 const TAB_BALANCES = "Cari Bakiyeler";
 const TAB_INVOICES = "Faturalar";
 const TAB_PAYMENTS = "Tahsilat & Ödeme";
+
+const INVOICE_TAB_DETAIL = "Fatura";
+const INVOICE_TAB_HISTORY = "İşlem Geçmişi";
+const INVOICE_TABS = [INVOICE_TAB_DETAIL, INVOICE_TAB_HISTORY];
 
 interface BalanceRow {
   id: number;
@@ -364,6 +369,7 @@ function InvoicesTab({ canCreate }: { canCreate: boolean }) {
   const [direction, setDirection] = useState("");
   const [onlyOverdue, setOnlyOverdue] = useState(false);
   const [detail, setDetail] = useState<InvoiceDetail | null>(null);
+  const [invoiceTab, setInvoiceTab] = useState(INVOICE_TAB_DETAIL);
   const [creating, setCreating] = useState(false);
   const debounced = useDebouncedValue(search, 350);
   const [reload, setReload] = useState(0);
@@ -467,7 +473,7 @@ function InvoicesTab({ canCreate }: { canCreate: boolean }) {
             onRowClick={(r) =>
               api
                 .get<DataMessage<InvoiceDetail>>(`/api/v1/finance/invoices/${r.id}`)
-                .then((res) => setDetail(res.data))
+                .then((res) => { setInvoiceTab(INVOICE_TAB_DETAIL); setDetail(res.data); })
             }
           />
           <Pagination page={page} total={total} perPage={PER_PAGE} onChange={setPage} />
@@ -481,7 +487,17 @@ function InvoicesTab({ canCreate }: { canCreate: boolean }) {
         subtitle={detail?.account_name ?? undefined}
         width="w-[720px]"
       >
-        {detail && <InvoiceBody invoice={detail} />}
+        <Tabs
+          tabs={INVOICE_TABS}
+          active={invoiceTab}
+          onChange={setInvoiceTab}
+          className="px-5"
+        />
+
+        {detail && invoiceTab === INVOICE_TAB_DETAIL && <InvoiceBody invoice={detail} />}
+        {detail && invoiceTab === INVOICE_TAB_HISTORY && (
+          <RecordHistoryTab resource="finance/invoices" recordId={detail.id} />
+        )}
       </Drawer>
 
       <InvoiceForm
