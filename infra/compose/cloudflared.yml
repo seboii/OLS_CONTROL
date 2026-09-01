@@ -1,0 +1,42 @@
+# Cloudflare Tunnel override'ı — uygulamayı İÇERİ HİÇ PORT AÇMADAN yayınlar.
+#
+# Kullanım:
+#   docker compose -f docker-compose.yml -f infra/compose/cloudflared.yml up -d
+#
+# NASIL ÇALIŞIR: cloudflared aynı Docker ağına katılır ve Cloudflare'e
+# DIŞARI DOĞRU bir bağlantı açar. Gelen trafik bu tünelden içeri iner ve
+# doğrudan `web` konteynerine gider. Yani sunucuda hiçbir gelen port
+# dinlenmez — güvenlik duvarında delik açmaya gerek yoktur.
+#
+#   internet ──▶ Cloudflare ──(giden tünel)──▶ cloudflared ──▶ web:80 ──▶ api:8080
+#
+# ÖNCE YAPILACAKLAR:
+#   1) Cloudflare Zero Trust panelinde bir tünel oluşturun ve token alın.
+#   2) .env dosyanıza ekleyin:
+#        CLOUDFLARE_TUNNEL_TOKEN=<token>
+#        PUBLIC_ORIGIN=https://ols.ornekalanadi.com
+#   3) Tünelin public hostname ayarında servis olarak `http://web:80` verin.
+#
+# PUBLIC_ORIGIN NEDEN GEREKLİ: arayüz ile API aynı köken üzerinden çalıştığı
+# için CORS normalde devreye girmez, ama API'nin izin listesinde gerçek alan
+# adının bulunması doğrudan istek atan araçlar için gerekiyor.
+#
+# TÜNELDEN SONRA PORTU KAPATMAK: bu dosya `web` servisinin yayınlanan
+# portunu kaldıramaz (Compose'da ports override ile silinemez). Portu tamamen
+# kapatmak için .env'e şunu yazın — böylece port yalnızca makinenin kendisine
+# bağlanır, dışarıdan erişilemez:
+#
+#   WEB_BIND_HOST=127.0.0.1
+#
+# cloudflared aynı Docker ağında olduğu için `web:80` adresine erişmeye devam
+# eder; yayınlanan port sadece yerel hata ayıklama içindir.
+
+services:
+  cloudflared:
+    image: 'cloudflare/cloudflared:latest'
+    container_name: ols-scoped-cloudflared
+    # Tünel giden bağlantı kurar; hiçbir port yayınlamaz.
+    command: 'tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}'
+    networks: [ols-scoped]
+    restart: unless-stopped
+    depends_on: [web]

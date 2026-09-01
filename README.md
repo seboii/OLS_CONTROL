@@ -32,15 +32,56 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-| Servis | Adres | Not |
-|---|---|---|
-| Arayüz | http://localhost:8105 | nginx + React üretim derlemesi |
-| API | http://localhost:8106 | `/health` ile canlılık kontrolü |
-| PostgreSQL | localhost:5443 | uygulama veritabanı |
-| MSSQL (yerel taklit) | localhost:1444 | `SIBER_CONNECTION_OVERRIDE` boşken kullanılır |
+Uygulama tek adresten açılır: **http://localhost:8105**
 
 API konteyneri ilk açılışta migrasyonları uygular ve temel verileri (yetki sayfaları, roller, durum
 kodları, tanım tabloları) yükler.
+
+### Ağ mimarisi
+
+Dışarıya **tek port** açılır. API, PostgreSQL ve MSSQL hiç port yayınlamaz; birbirlerine yalnızca
+Docker ağı üzerinden, servis adlarıyla erişirler.
+
+```
+tarayıcı ──▶ web (nginx, 8105) ──┬──▶ api:8080 ──┬──▶ postgres:5432
+                                 │               └──▶ siber-mock:1433
+                                 └── statik arayüz (aynı konteyner)
+```
+
+Bunun üç sonucu var: saldırı yüzeyi tek porta iner, tarayıcı her şeyi aynı kökende gördüğü için CORS
+devreye girmez, ve tünel tek bir upstream'e bağlanır.
+
+| Servis | Ana yığın | Geliştirme override'ı ile |
+|---|---|---|
+| web (nginx) | **8105** | 8105 |
+| api | — | 127.0.0.1:8106 |
+| postgres | — | 127.0.0.1:5443 |
+| siber-mock | — | 127.0.0.1:1444 |
+
+Dağıtım dosyalarının tamamı `infra/` altındadır; ayrıntı için [infra/README.md](infra/README.md).
+
+### Geliştirme
+
+Entegrasyon testleri `localhost:5443`'teki Postgres'e ihtiyaç duyar ve ana yığın o portu **açmaz**.
+Yerelde çalışırken override'ı ekleyin:
+
+```bash
+docker compose -f docker-compose.yml -f infra/compose/dev.yml up -d --build
+```
+
+Her komutta yazmamak için `.env` dosyanıza `COMPOSE_FILE=docker-compose.yml:infra/compose/dev.yml`
+satırını ekleyebilirsiniz; sonrasında düz `docker compose up -d` yeterli olur.
+
+### Cloudflare ile yayın
+
+```bash
+docker compose -f docker-compose.yml -f infra/compose/cloudflared.yml up -d --build
+```
+
+Tünel Cloudflare'e **dışarı doğru** bağlanır; sunucuda gelen port dinlenmez, güvenlik duvarında delik
+açmak gerekmez. Gerekli `.env` girdileri (`CLOUDFLARE_TUNNEL_TOKEN`, `PUBLIC_ORIGIN`) ve tünelden
+sonra 8105'i tamamen kapatma adımı için [infra/compose/cloudflared.yml](infra/compose/cloudflared.yml)
+başındaki açıklamaya bakın.
 
 ## Ağa açma
 
@@ -48,17 +89,16 @@ Uygulamayı telefondan veya ağdaki diğer bilgisayarlardan kullanmak için `.en
 adresini tanımlayın:
 
 ```
-LAN_ORIGIN=http://192.168.1.50:8105
-FRONTEND_BIND_HOST=0.0.0.0
-API_BIND_HOST=0.0.0.0
+PUBLIC_ORIGIN=http://192.168.1.50:8105
+WEB_BIND_HOST=0.0.0.0
 ```
 
-`LAN_ORIGIN` API'nin CORS izin listesine işlenir. Arayüz kendi API isteklerini nginx üzerinden aynı
-köken içinde (`/api` → API konteyneri) yönlendirdiği için istemcide ayrı bir adres tanımlamak gerekmez;
-tarayıcıdan yalnızca arayüz portu açılır.
+`PUBLIC_ORIGIN` API'nin CORS izin listesine işlenir. Arayüz kendi API isteklerini nginx üzerinden aynı
+köken içinde (`/api` → API konteyneri) yönlendirdiği için istemcide ayrı bir adres tanımlamak
+gerekmez; tarayıcıdan yalnızca 8105 açılır.
 
-Veritabanı portları bilinçli olarak `127.0.0.1`'e bağlıdır (`DB_BIND_HOST`, `SIBER_BIND_HOST`) —
-PostgreSQL ve MSSQL ağa açılmaz.
+Ana yığında veritabanları zaten hiç port yayınlamaz. Geliştirme override'ı açtığında da adresleri
+`127.0.0.1`'e bağlıdır (`DB_BIND_HOST`, `SIBER_BIND_HOST`).
 
 ## Siber entegrasyonu
 
@@ -176,7 +216,7 @@ sefer veya kullanıcı üzerinden filtrelenebilir.
 Yalnızca veritabanlarını Docker'da tutup arka ucu yerelde çalıştırmak için:
 
 ```bash
-docker compose up -d postgres siber-mock siber-init
+docker compose -f docker-compose.yml -f infra/compose/dev.yml up -d postgres siber-mock siber-init
 ```
 
 ```bash
@@ -220,11 +260,11 @@ oluşturup siler; geliştirme veritabanını etkilemez.
 
 | Değişken | Varsayılan | Açıklama |
 |---|---|---|
-| `FRONTEND_PORT` / `API_PORT` | 8105 / 8106 | Yayın portları |
-| `FORWARD_DB_PORT` / `FORWARD_SIBER_PORT` | 5443 / 1444 | Veritabanı portları |
-| `FRONTEND_BIND_HOST` / `API_BIND_HOST` | 0.0.0.0 | Ağa açılan servisler |
-| `DB_BIND_HOST` / `SIBER_BIND_HOST` | 127.0.0.1 | Veritabanları yalnızca yerel |
-| `LAN_ORIGIN` | boş | LAN erişimi için tam adres |
+| `WEB_PORT` | 8105 | Tek yayınlanan port |
+| `WEB_BIND_HOST` | 0.0.0.0 | Tünel kullanınca `127.0.0.1` yapın |
+| `PUBLIC_ORIGIN` | boş | Yayın adresi; CORS listesine girer |
+| `CLOUDFLARE_TUNNEL_TOKEN` | boş | Zero Trust panelinden alınır |
+| `FORWARD_DB_PORT` / `FORWARD_SIBER_PORT` / `API_PORT` | 5443 / 1444 / 8106 | Yalnızca dev override'ında |
 | `SIBER_CONNECTION_OVERRIDE` | boş | Doluysa canlı Siber'e bağlanır |
 | `SEED_DEFAULT_USER_PASSWORD` | `Admin123` | Yeni hesapların başlangıç parolası |
 | `SEED_RESET_ALL_PASSWORDS` | `false` | `true` ise tüm parolalar varsayılana çekilir |

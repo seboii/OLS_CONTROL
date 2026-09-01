@@ -1,0 +1,34 @@
+# Geliştirme override'ı — veritabanı ve API portlarını YEREL makineye açar.
+#
+# Kullanım:
+#   docker compose -f docker-compose.yml -f infra/compose/dev.yml up -d
+#
+# ya da .env dosyasına yazıp düz `docker compose up -d` kullanın:
+#   COMPOSE_FILE=docker-compose.yml:infra/compose/dev.yml
+#
+# NEDEN AYRI DOSYA: Compose'da `ports` listesi override ile KALDIRILAMAZ,
+# yalnızca eklenebilir. Bu yüzden güvenli olan (portsuz) hâl ana dosyada
+# durur; portlar burada eklenir. Ters kurgu, sunucuda yanlışlıkla açık port
+# bırakma riski taşırdı.
+#
+# Adresler bilerek 127.0.0.1'e bağlı: bu portlar geliştiricinin kendi
+# makinesi içindir, ağa açılmaları gerekmez.
+
+services:
+  postgres:
+    ports:
+      # Entegrasyon testleri (tests/OLS.API.IntegrationTests) bu portu
+      # kullanır — her turda izole bir ols_scoped_inttest_* veritabanı
+      # açıp siler. Bu satır olmadan `dotnet test` çalışmaz.
+      - '${DB_BIND_HOST:-127.0.0.1}:${FORWARD_DB_PORT:-5443}:5432'
+
+  siber-mock:
+    ports:
+      # Sahte Siber'e sqlcmd ile bakmak için.
+      - '${SIBER_BIND_HOST:-127.0.0.1}:${FORWARD_SIBER_PORT:-1444}:1433'
+
+  api:
+    ports:
+      # Doğrudan curl/Swagger denemesi için. Uygulama trafiği buradan
+      # GEÇMEZ; tarayıcı her zaman web (nginx) üzerinden gider.
+      - '${API_BIND_HOST:-127.0.0.1}:${API_PORT:-8106}:8080'

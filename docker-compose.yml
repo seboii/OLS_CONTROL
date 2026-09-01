@@ -1,26 +1,36 @@
-# OLS scoped stack: web -> API -> PostgreSQL / sahte Siber (MSSQL)
+# OLS — üretim/varsayılan yığın
 #
-# Yalnızca 8 modül (Müşteri, Teklif, Yük, Sefer, Fatura, Araç, Kullanıcılar,
-# Destek Talebi) için gerekli servisler. MongoDB (mesajlaşma) ve Socket.IO
-# kapsam dışı olduğu için bu yığında YOK.
+# AĞ MİMARİSİ: dışarıya AÇILAN TEK PORT web (nginx) servisidir. API,
+# PostgreSQL ve MSSQL hiç port yayınlamaz; birbirlerine yalnızca `ols-scoped`
+# Docker ağı üzerinden, servis adlarıyla (api, postgres, siber-mock) erişirler.
 #
-# Tamamı yerelde çalışır, CANLI hiçbir sisteme bağlanmaz:
-#   - Siber entegrasyonu "siber-mock" konteynerine gider (canlı sunucuya DEĞİL)
+#   tarayıcı ──▶ web (nginx, 8105) ──┬──▶ api:8080 ──┬──▶ postgres:5432
+#                                    │               └──▶ siber-mock:1433
+#                                    └── statik arayüz (aynı konteyner)
 #
-# Portlar, aynı makinede çalışabilecek olsnew (5433/8006/8005/1434) ve diğer
-# projelerle çakışmasın diye kaydırıldı (5443/8106/8105/1444).
+# Bunun sonucu:
+#   * saldırı yüzeyi tek porta iner,
+#   * tarayıcı her şeyi aynı köken üzerinden görür — CORS devreye girmez,
+#   * cloudflared tüneli tek upstream'e bağlanır ve bu port da kapatılabilir
+#     (bkz. infra/compose/cloudflared.yml).
+#
+# GELİŞTİRME: entegrasyon testleri localhost:5443'teki Postgres'e ihtiyaç
+# duyar ve bu dosya o portu AÇMAZ. Yerelde çalışırken dev override'ı ekleyin:
+#
+#   docker compose -f docker-compose.yml -f infra/compose/dev.yml up -d
+#
+# ya da .env dosyanıza şunu yazın (sonra düz `docker compose up -d` yeter):
+#
+#   COMPOSE_FILE=docker-compose.yml:infra/compose/dev.yml
+#
+# Dağıtım dosyalarının tamamı infra/ altındadır (bkz. infra/README.md).
 
 services:
   postgres:
     image: 'postgres:16-alpine'
     container_name: ols-scoped-postgres
-    ports:
-      # AĞA AÇMA NOTU: veritabanı portu bilerek YALNIZCA bu makineye bağlı
-      # (127.0.0.1). Telefon/diğer bilgisayarın Postgres'e doğrudan erişmesine
-      # gerek yok — uygulama trafiği frontend (8105) üzerinden geçiyor. Başka
-      # bir makineden pgAdmin ile bağlanmak isterseniz .env'e DB_BIND_HOST=0.0.0.0
-      # yazın (Public Wi-Fi'da ÖNERİLMEZ: parola varsayılan 'secret').
-      - '${DB_BIND_HOST:-127.0.0.1}:${FORWARD_DB_PORT:-5443}:5432'
+    # Port YAYINLANMAZ. Yalnızca ağ içinden erişilir.
+    expose: ['5432']
     environment:
       POSTGRES_DB: '${DB_DATABASE:-ols_scoped}'
       POSTGRES_USER: '${DB_USERNAME:-postgres}'
@@ -28,6 +38,7 @@ services:
     volumes:
       - 'ols-scoped-postgres:/var/lib/postgresql/data'
     networks: [ols-scoped]
+    restart: unless-stopped
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_DATABASE:-ols_scoped}']
       interval: 10s
@@ -39,18 +50,16 @@ services:
   siber-mock:
     image: 'mcr.microsoft.com/mssql/server:2022-latest'
     container_name: ols-scoped-siber-mock
-    ports:
-      # Aynı gerekçe (bkz. postgres): SA parolası .env'de duruyor, MSSQL'i
-      # ağa açmanın uygulama açısından hiçbir faydası yok.
-      - '${SIBER_BIND_HOST:-127.0.0.1}:${FORWARD_SIBER_PORT:-1444}:1433'
+    expose: ['1433']
     environment:
       ACCEPT_EULA: 'Y'
       MSSQL_SA_PASSWORD: '${SIBER_SA_PASSWORD:-Ols!Local2026}'
       MSSQL_PID: 'Developer'
     volumes:
       - 'ols-scoped-siber:/var/opt/mssql'
-      - './docker/siber-mock:/init:ro'
+      - './infra/docker/siber-mock:/init:ro'
     networks: [ols-scoped]
+    restart: unless-stopped
     healthcheck:
       test: ['CMD-SHELL', '/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" || exit 1']
       interval: 15s
@@ -82,8 +91,9 @@ services:
   #                                         üzerindeki GERÇEK sunucudan doğrulanan
   #                                         değerlerle değiştirir; bu yüzden EN SONDA
   #                                         çalışmalı (sample-data.sql'den SONRA)
+  #   7) finance-fix.sql                  — muhasebe/finans (sfy_*) şeması
   # einvoice-fix.sql/kzgelirgider-fix.sql bilinçli olarak ÇALIŞTIRILMIYOR — Uyumsoft
-  # e-fatura ve Reports/Hedef-ciro bu portun kapsamı dışında (bkz. TESLIM-RAPORU.md §1).
+  # e-fatura ve Reports/Hedef-ciro bu portun kapsamı dışında.
   siber-init:
     image: 'mcr.microsoft.com/mssql/server:2022-latest'
     container_name: ols-scoped-siber-init
@@ -91,7 +101,7 @@ services:
       siber-mock:
         condition: service_healthy
     volumes:
-      - './docker/siber-mock:/init:ro'
+      - './infra/docker/siber-mock:/init:ro'
     networks: [ols-scoped]
     entrypoint: >
       /bin/bash -c "set -e; for f in init.sql init-reference.sql sample-movements.sql
@@ -106,57 +116,54 @@ services:
   api:
     build:
       context: .
-      dockerfile: docker/api/Dockerfile
+      dockerfile: infra/docker/api/Dockerfile
     container_name: ols-scoped-api
-    ports:
-      # API'yi ağa açmak ŞART DEĞİL: frontend'in nginx'i /api/ isteklerini
-      # konteyner ağı üzerinden (http://api:8080) geçiriyor, yani telefon
-      # yalnızca 8105'e bağlanır. Bu port doğrudan Swagger/curl denemesi için
-      # duruyor; kapatmak isterseniz .env'e API_BIND_HOST=127.0.0.1 yazın.
-      - '${API_BIND_HOST:-0.0.0.0}:${API_PORT:-8106}:8080'
+    # Port YAYINLANMAZ: tüm istekler web (nginx) üzerinden geliyor.
+    # Doğrudan curl/Swagger denemesi için dev override'ı kullanın.
+    expose: ['8080']
     environment:
       ASPNETCORE_ENVIRONMENT: '${ASPNETCORE_ENVIRONMENT:-Development}'
       ConnectionStrings__Postgres: 'Host=postgres;Port=5432;Database=${DB_DATABASE:-ols_scoped};Username=${DB_USERNAME:-postgres};Password=${DB_PASSWORD:-secret}'
       # Varsayılan: sahte Siber'e bağlanır — canlı ERP'ye DEĞİL.
-      # Gerçek Siber'e geçmek için .env dosyanıza SIBER_CONNECTION_OVERRIDE
-      # ekleyin (bkz. .env.example) — bu tracked dosyaya DOKUNMAYA gerek yok.
+      # Gerçek Siber'e geçmek için .env dosyanıza SIBER_CONNECTION_OVERRIDE ekleyin.
       ConnectionStrings__Siber: '${SIBER_CONNECTION_OVERRIDE:-Server=siber-mock,1433;Database=Siber2022;User Id=sa;Password=${SIBER_SA_PASSWORD:-Ols!Local2026};TrustServerCertificate=True}'
-      # Siber__SyncIntervalMinutes: appsettings.json'daki varsayılan (15 dk) kullanılıyor.
       # Siber'den gelen kullanıcıların şifresi yoktur (bkz. IDefaultUserPassword).
       # Şifresi boş olan HERKESE bu şifre atanır; mevcut şifreler ezilmez.
       Seed__DefaultUserPassword: '${SEED_DEFAULT_USER_PASSWORD:-Admin123}'
       # TEK SEFERLİK bakım anahtarı: true iken MEVCUT şifreler dahil TÜM
-      # kullanıcılar yukarıdaki şifreye döndürülür. Her açılışta çalışır —
-      # kullandıktan sonra .env'de false yapın.
+      # kullanıcılar yukarıdaki şifreye döndürülür. Kullandıktan sonra false yapın.
       Seed__ResetAllPasswords: '${SEED_RESET_ALL_PASSWORDS:-false}'
-      # TEK SEFERLİK: true iken açılışta Siber departmanlarına göre rol uygulanır
-      # ve Siber'de engelli kullanıcılar pasife alınır. Kullandıktan sonra false.
+      # TEK SEFERLİK: true iken açılışta Siber departmanlarına göre rol uygulanır.
       Seed__ApplyRolesFromSiber: '${SEED_APPLY_ROLES:-false}'
       Jwt__Key: '${JWT_KEY:-yerel-test-anahtari-en-az-32-bayt-olmali-0000}'
       Jwt__Issuer: '${JWT_ISSUER:-ols-api}'
       Jwt__Audience: '${JWT_AUDIENCE:-ols-app}'
-      Cors__AllowedOrigins__0: 'http://localhost:${FRONTEND_PORT:-8105}'
-      # Ağdan girişte tarayıcının origin'i http://<LAN-IP>:8105 olur. Uygulama
-      # aynı origin üzerinden (nginx proxy) çalıştığı için CORS devreye girmez,
-      # ama API'ye 8106'dan doğrudan istek atan bir sayfa/araç olursa diye
-      # LAN adresi de listeye alınabiliyor (.env: LAN_ORIGIN).
-      Cors__AllowedOrigins__1: '${LAN_ORIGIN:-http://localhost:${FRONTEND_PORT:-8105}}'
+      # Arayüz ve API aynı köken (nginx) üzerinden çalıştığı için CORS normalde
+      # devreye girmez. Bu girdiler yalnızca API'ye doğrudan istek atan bir
+      # araç/sayfa olduğunda anlamlı — ör. dev override'la açılan 8106.
+      Cors__AllowedOrigins__0: 'http://localhost:${WEB_PORT:-8105}'
+      Cors__AllowedOrigins__1: '${PUBLIC_ORIGIN:-http://localhost:${WEB_PORT:-8105}}'
     volumes:
       - './storage/app/public:/app/storage/app/public'
     networks: [ols-scoped]
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
 
-  frontend:
+  # TEK GİRİŞ NOKTASI: statik arayüzü servis eder, /api ve /storage'ı
+  # ağ içinden API'ye geçirir (bkz. infra/docker/web/nginx.conf).
+  web:
     build:
       context: .
-      dockerfile: docker/frontend/Dockerfile
-    container_name: ols-scoped-frontend
+      dockerfile: infra/docker/web/Dockerfile
+    container_name: ols-scoped-web
     ports:
-      # Kullanıcıların (telefon/diğer bilgisayar) girdiği TEK port bu.
-      - '${FRONTEND_BIND_HOST:-0.0.0.0}:${FRONTEND_PORT:-8105}:80'
+      # Yığındaki TEK yayınlanan port. Cloudflared kullanıldığında bu satır
+      # da kaldırılabilir (bkz. infra/compose/cloudflared.yml).
+      - '${WEB_BIND_HOST:-0.0.0.0}:${WEB_PORT:-8105}:80'
     networks: [ols-scoped]
+    restart: unless-stopped
     depends_on: [api]
 
 networks:
