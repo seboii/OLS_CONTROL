@@ -79,6 +79,23 @@ veya teklife Siber üzerinden eklenmiş evraklar uygulamada listelenir ve indiri
 yüklenen dosyalar da aynı arşive gönderilir. Klasör düzeyi kodu kayıt türüne göre belirlenir (yük iş
 türüne göre `0401`–`0404`, sefer `0405`, teklif `04113`).
 
+**Kim açtı, kim dokundu.** Siber teklif, yük ve sefer kayıtlarında kullanıcı izini tutuyor;
+uygulama bunu her kaydın detayında gösterir. "Kaydı açan" üç modülde de eksiksiz doludur;
+"son işlem yapan" teklifte %81, yükte %85, seferde %30 oranında dolu olduğu için o satır
+veri yoksa hiç gösterilmez. Kullanıcı Siber'de kodla tutulduğundan (91 koddan 88'i yerel
+bir kullanıcıya karşılık geliyor), eşleşme yoksa kodun kendisi gösterilir.
+
+**Program dışı silmeler.** Doğrudan Siber ekranından silinen bir kayıt, uygulamada canlı
+görünmeye devam ediyordu. Artık her tam senkronda Siber'den gelen kimlik kümesi yerelle
+karşılaştırılır ve eksik kayıtlar "Siber'de silinmiş" olarak işaretlenir. Kayıt yerelden
+SİLİNMEZ — bağlı finans kayıtları, evrak arşivi ve denetim izi korunur, kayıt Siber'de
+yeniden görünürse işaret kalkar. Listeler bu kayıtları varsayılan olarak gizler
+(`include_deleted=true` ile görünür).
+
+Silme kontrolünün bir güvenlik eşiği vardır: Siber'den gelen kayıt sayısı yereldekinin
+yarısından azsa hiçbir kayıt işaretlenmez. Bu olmadan yarım dönen tek bir çekim tüm tabloyu
+silinmiş sayardı.
+
 **Kimlik eşleşmesi.** Siber `uniqueidentifier` değerlerini büyük harfle döndürür, .NET küçük harfle
 üretir. PostgreSQL karşılaştırması harfe duyarlı olduğu için Siber tarafındaki kimlikler sorgularda
 küçük harfe indirgenir.
@@ -168,8 +185,8 @@ referanslarıyla çalıştığı için `tsc --noEmit` hiçbir dosyayı denetleme
 dotnet test
 ```
 
-135 test: `tests/OLS.Business.Tests` altında 29 birim testi (veritabanı gerekmez),
-`tests/OLS.API.IntegrationTests` altında 106 entegrasyon testi (Postgres gerekir).
+147 test: `tests/OLS.Business.Tests` altında 37 birim testi (veritabanı gerekmez),
+`tests/OLS.API.IntegrationTests` altında 110 entegrasyon testi (Postgres gerekir).
 
 Entegrasyon testleri her çalıştırmada rastgele adlı izole bir veritabanı (`ols_scoped_inttest_*`)
 oluşturup siler; geliştirme veritabanını etkilemez.
