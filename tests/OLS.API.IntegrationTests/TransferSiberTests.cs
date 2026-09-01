@@ -408,6 +408,13 @@ internal sealed class FakeSiberLoadRepository : ISiberLoadRepository
         IReadOnlyCollection<string> kalemIds, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<string>>([]);
 
+    // Sahte Siber'de her referans "var" sayılır; bu testlerin konusu tanım
+    // doğrulaması değil.
+    public Task<IReadOnlyList<string>> FindMissingReferenceIdsAsync(
+        SiberReferenceTable table, IReadOnlyCollection<string> ids,
+        CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<string>>([]);
+
     public FakeSiberLoadRepository(bool isConfigured) => IsConfigured = isConfigured;
 
     public bool IsConfigured { get; }

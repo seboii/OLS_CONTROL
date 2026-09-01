@@ -355,10 +355,10 @@ public static class DbSeeder
         // Gerçek `skn_sabittanim` (grupkod=ISTURU) ile düzeltildi.
         await SeedIfEmptyAsync(db.WorkTypes, ct, () =>
         [
-            new WorkType { Name = "İhracat", Code = "0", GroupCode = "ISTURU", AdditionalCode = "EX", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new WorkType { Name = "İthalat", Code = "1", GroupCode = "ISTURU", AdditionalCode = "IM", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new WorkType { Name = "Transit", Code = "2", GroupCode = "ISTURU", AdditionalCode = "TR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new WorkType { Name = "Yurtiçi", Code = "3", GroupCode = "ISTURU", AdditionalCode = "YI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new WorkType { Name = "İhracat", Code = "0", GroupCode = "ISTURU", AdditionalCode = "EX", SiberId = "1704A279-D076-4C38-B448-D8047FB6193D", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new WorkType { Name = "İthalat", Code = "1", GroupCode = "ISTURU", AdditionalCode = "IM", SiberId = "EA147918-3714-4DEF-A379-A44DF2233F7E", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new WorkType { Name = "Transit", Code = "2", GroupCode = "ISTURU", AdditionalCode = "TR", SiberId = "0A99104E-1523-44B4-A986-C8529DDEDA21", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new WorkType { Name = "Yurtiçi", Code = "3", GroupCode = "ISTURU", AdditionalCode = "YI", SiberId = "577D934A-BB8F-48DA-9322-1633CC1F5241", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         // Yerel 3 genel isim ("Operasyon"/"Satış"/"Muhasebe") gerçek sunucudaki 7
@@ -376,25 +376,33 @@ public static class DbSeeder
             new Department { Name = "Yönetim", SiberId = "DB3B6E91-B9D4-430B-BE96-AD5030EBC967", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
-        // DÜRÜST NOT: gerçek `sbr_odemesekli` 12 ayrıntılı ödeme şekli içeriyor (Mal
-        // Mukabili/Akreditif/Vesaik Mükabili vb.) — bizim basit "Peşin/Vadeli" ikilisi
-        // bunlarla 1:1 eşleşmiyor. Yalnızca "Peşin" tam eşleşme (kod+GUID, Teklif'in
-        // kendi PEŞİN varsayılanıyla da birebir aynı); "Vadeli" için TEK bir doğru
-        // karşılık yok (VADELİ AKREDİTİF mi, MAL MUKABİLİ mi — iş kararı gerektirir),
-        // bu yüzden kodsuz bırakıldı.
+        // Gerçek `sbr_odemesekli` 12 ayrıntılı ödeme şekli içeriyor (Mal Mukabili /
+        // Akreditif / Vesaik Mukabili vb.) ve tamamı senkronla geliyor. Burada
+        // yalnızca GUID'i doğrulanmış "Peşin" tohumlanır — Teklif formunun kendi
+        // PEŞİN varsayılanıyla da birebir aynı.
+        //
+        // Eskiden bir de kodsuz/GUID'siz "Vadeli" tohumlanıyordu; hangi Siber
+        // karşılığına denk geldiği bir iş kararıydı ve hiç verilmemişti. Sonuç:
+        // Siber'de OLMAYAN bir seçenek listede duruyordu. Kaldırıldı.
         await SeedIfEmptyAsync(db.PaymentTypes, ct, () =>
         [
             new PaymentType { Name = "Peşin", Code = "2", SiberId = "97081C47-4F6A-4F37-9557-BC1CAC802106", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new PaymentType { Name = "Vadeli", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
-        // Gerçek skn_sabittanim(YUKLEMETIP): Grupaj(0)/Komple(1)/Co-Load(2). "Parsiyel"
-        // isim olarak farklı ama kargo terminolojisinde Grupaj'ın (LTL/konsolide yük)
-        // birebir karşılığı — isim korundu, kod gerçeğe göre düzeltildi.
+        // Gerçek skn_sabittanim(YUKLEMETIP) TAM OLARAK üç satır: GRUPAJ(0) /
+        // KOMPLE(1) / CO-LOAD(2). Üçü de GUID'iyle birlikte tohumlanır.
+        //
+        // Eskiden GRUPAJ yerine "Parsiyel" tohumlanıyordu. İkisi terim olarak aynı
+        // şey (LTL / konsolide kısmi yük) ama Siber'in kullandığı ad GRUPAJ ve
+        // "Parsiyel" satırının GUID'i yoktu. Daha kötüsü: senkron eşlemesi KODA
+        // göre sözlük kuruyor (ByCode) ve iki satır da kod "0" taşıyordu — yani
+        // Siber'in GRUPAJ yükleri yerelde bu iki satırdan hangisine düşeceği
+        // sıraya bağlıydı. Yinelenen satır kaldırıldı.
         await SeedIfEmptyAsync(db.LoadingTypes, ct, () =>
         [
-            new LoadingType { Name = "Parsiyel", Code = "0", GroupCode = "YUKLEMETIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new LoadingType { Name = "Komple", Code = "1", GroupCode = "YUKLEMETIP", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadingType { Name = "Grupaj", Code = "0", GroupCode = "YUKLEMETIP", SiberId = "6F8B8B0E-357E-446B-99AC-E365E70AABED", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadingType { Name = "Komple", Code = "1", GroupCode = "YUKLEMETIP", SiberId = "DDA7585E-B003-4594-A261-131C046F6031", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadingType { Name = "Co-Load", Code = "2", GroupCode = "YUKLEMETIP", SiberId = "3456324E-2FDF-4D50-AB3A-29A6F218DFA7", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         // olsold/Siber tarafında bu 4 "tanım" tablosu için hiç Seeder yoktu (yalnızca
@@ -414,18 +422,18 @@ public static class DbSeeder
 
         await SeedIfEmptyAsync(db.RomorkTypes, ct, () =>
         [
-            new RomorkType { Name = "Frigo", Code = "0", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Jumbo", Code = "1", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Romork [Kamyon]", Code = "2", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Optima", Code = "3", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Tanker", Code = "4", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Tekstil Dorse", Code = "5", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Oto Taşıyıcı", Code = "6", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Silobas", Code = "7", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Low Bed", Code = "8", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Mega Maksima", Code = "9", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Maksima", Code = "10", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new RomorkType { Name = "Mega", Code = "11", GroupCode = "ROMORKCINS", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Frigo", Code = "0", GroupCode = "ROMORKCINS", SiberId = "25135BDD-8249-4FD1-896B-94142A428D18", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Jumbo", Code = "1", GroupCode = "ROMORKCINS", SiberId = "68ABE69A-41D5-4935-99D5-F07B981B0382", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Romork [Kamyon]", Code = "2", GroupCode = "ROMORKCINS", SiberId = "952CC66F-34D1-4B76-85ED-E3E275113978", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Optima", Code = "3", GroupCode = "ROMORKCINS", SiberId = "FFE0E488-8E94-4BD9-A3CA-A37C67A12715", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Tanker", Code = "4", GroupCode = "ROMORKCINS", SiberId = "9B59AFD9-5BC6-4DAD-BFE3-DCE0E178DDC9", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Tekstil Dorse", Code = "5", GroupCode = "ROMORKCINS", SiberId = "58ECFED9-14CA-4688-A54A-FEF5FCB45BB6", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Oto Taşıyıcı", Code = "6", GroupCode = "ROMORKCINS", SiberId = "DC0D13BC-847F-425E-88B9-AFBC5A971495", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Silobas", Code = "7", GroupCode = "ROMORKCINS", SiberId = "45739811-8473-4F51-9834-0D55FFE14036", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Low Bed", Code = "8", GroupCode = "ROMORKCINS", SiberId = "B2DEF3C4-CBCD-421C-B080-D1749F59614F", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Mega Maksima", Code = "9", GroupCode = "ROMORKCINS", SiberId = "6D07D705-5A7C-4DD2-8D6E-B5848A7D86D9", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Maksima", Code = "10", GroupCode = "ROMORKCINS", SiberId = "6F394089-9FE1-11D7-BFF7-0000B4BEFACA", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new RomorkType { Name = "Mega", Code = "11", GroupCode = "ROMORKCINS", SiberId = "8F942D33-41E4-4A4A-8C29-CE6F225CE308", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         // additional_code = Siber skn_sabittanim(ARACSAHIP).ekkod: ExpeditionWriteService.CreateAsync
@@ -469,14 +477,20 @@ public static class DbSeeder
         // Aynı şekilde boştu — SiberLoadRepository.InsertYukAsync'in gönderdiği
         // "YukTurKod" doğrudan skn_yuk.yukturkod (tinyint) sütununa gidiyor; bu alanın
         // gerçek karşılığı skn_sabittanim(grupkod=YUKTUR) — isim eşleşmesi çok net
-        // (yük TÜRÜ kodu ↔ YUKTUR). Karayolu dışı taşımalar nadiren kullanıldığından
-        // yalnızca 3 temel mod eklendi; çok modlu (HAVA>DENİZ vb.) kombinasyonlar
-        // olsold'un kapsamında yok.
+        // (yük TÜRÜ kodu ↔ YUKTUR). Eskiden yalnızca 3 temel mod tohumlanıyordu;
+        // gerçek listede 9 satır var (çok modlu HAVA > DENİZ vb. kombinasyonlar
+        // dâhil) ve tamamı GUID'iyle eklendi.
         await SeedIfEmptyAsync(db.LoadTransferTypes, ct, () =>
         [
-            new LoadTransferType { Name = "Kara", Code = "1", GroupCode = "YUKTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new LoadTransferType { Name = "Hava", Code = "2", GroupCode = "YUKTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new LoadTransferType { Name = "Deniz", Code = "3", GroupCode = "YUKTUR", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Kara", Code = "1", GroupCode = "YUKTUR", SiberId = "3F0D3C58-B2EE-4E02-A5C0-0A6C90CA07B4", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Hava", Code = "2", GroupCode = "YUKTUR", SiberId = "7324C4B9-C193-487F-9AEC-25737BC60E78", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Deniz", Code = "3", GroupCode = "YUKTUR", SiberId = "5CABCEA6-699D-447E-A587-69B911FD99DA", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Hava > Deniz", Code = "4", GroupCode = "YUKTUR", SiberId = "1DAA0F11-BFCE-4085-80A5-882B5DBFCBC6", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Hava > Kara", Code = "5", GroupCode = "YUKTUR", SiberId = "B91789FE-05F8-42E7-9753-1BC3108D268A", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Kara > Deniz", Code = "6", GroupCode = "YUKTUR", SiberId = "F0290594-DC9F-4B4B-8442-C85D7EADE135", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Kara > Hava", Code = "7", GroupCode = "YUKTUR", SiberId = "D674A09B-4157-4E13-8617-3A457B83EF7C", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Deniz > Hava", Code = "8", GroupCode = "YUKTUR", SiberId = "C60FECD5-C11A-4F7B-BD12-BE97A9E9344E", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new LoadTransferType { Name = "Deniz > Kara", Code = "9", GroupCode = "YUKTUR", SiberId = "193E81CD-254E-4144-9AFE-9C1FFA8A5748", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         // DÜRÜST NOT: bu tabloda hiç seeder yoktu (yalnızca elle eklenmiş test kaydı
@@ -500,10 +514,10 @@ public static class DbSeeder
         // "Talimat" alanının geliş şekli.
         await SeedIfEmptyAsync(db.Instructions, ct, () =>
         [
-            new Instruction { Name = "Telefon", Code = "0", GroupCode = "TALIMATGELISSEKLI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new Instruction { Name = "E-Mail", Code = "1", GroupCode = "TALIMATGELISSEKLI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new Instruction { Name = "Faks", Code = "2", GroupCode = "TALIMATGELISSEKLI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-            new Instruction { Name = "Pazarlama", Code = "3", GroupCode = "TALIMATGELISSEKLI", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Instruction { Name = "Telefon", Code = "0", GroupCode = "TALIMATGELISSEKLI", SiberId = "CE31EDA5-E59A-4D93-9EA5-615460F7EF5B", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Instruction { Name = "E-Mail", Code = "1", GroupCode = "TALIMATGELISSEKLI", SiberId = "122BD16C-8633-4B73-BA0C-943567475255", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Instruction { Name = "Faks", Code = "2", GroupCode = "TALIMATGELISSEKLI", SiberId = "5BD163B1-79A4-47D3-9C0A-6143AC4629E9", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
+            new Instruction { Name = "Pazarlama", Code = "3", GroupCode = "TALIMATGELISSEKLI", SiberId = "F4A8AFB5-272D-466F-9D2D-892599E0FF45", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
         ]);
 
         // Aynı şekilde boştu. Siber'in skn_sabittanim (grupkod=REZERVASYONTASIMASEKLI) —

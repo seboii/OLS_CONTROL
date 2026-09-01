@@ -178,6 +178,25 @@ public sealed class DirectLoadService : IDirectLoadService
         var loadTransferType = await _db.LoadTransferTypes.AsNoTracking()
             .FirstOrDefaultAsync(t => t.Id == model.LoadTransferTypeId, cancellationToken);
 
+        // SEÇİLEN TANIMLAR SİBER'E YAZILMADAN ÖNCE DOĞRULANIR.
+        //
+        // Açılır listeler yerel tablolardan besleniyor ama kayıt Siber'e gidiyor.
+        // Karşılığı olmayan bir seçenek INSERT'i düşürüyor ve kullanıcı ekranda
+        // yalnızca "beklenmeyen bir hata oluştu" görüyordu.
+        var lookupFailure = await ValidateSiberLookupsAsync(
+            [
+                ("Departman", SiberReferenceTable.Departman, department.SiberId),
+                ("Ödeme tipi", SiberReferenceTable.OdemeSekli, paymentType?.SiberId),
+                ("İş türü", SiberReferenceTable.SabitTanim, workType.SiberId),
+                ("Yükleme tipi", SiberReferenceTable.SabitTanim, loadingType.SiberId),
+                ("Yük türü", SiberReferenceTable.SabitTanim, loadTransferType?.SiberId),
+                ("Talimat geliş şekli", SiberReferenceTable.SabitTanim, instruction?.SiberId),
+                ("Römork cinsi", SiberReferenceTable.SabitTanim, romorkType?.SiberId),
+            ],
+            cancellationToken);
+        if (lookupFailure is not null)
+            return lookupFailure;
+
         var userSiberCode = await _db.Users.AsNoTracking()
             .Where(u => u.Id == currentUserId).Select(u => u.SiberCode)
             .FirstOrDefaultAsync(cancellationToken);
@@ -357,6 +376,58 @@ public sealed class DirectLoadService : IDirectLoadService
     /// oluşturmamışsa kalem yerelde açılır ve bir sonraki güncellemede Siber'e
     /// gider (bkz. LoadTransferUpdateService).
     /// </summary>
+
+    /// <summary>
+    /// Seçilen tanımların (departman, ödeme tipi, iş türü, yükleme tipi, yük
+    /// türü, talimat geliş şekli, römork cinsi) Siber'de gerçekten var olduğunu
+    /// doğrular. Sorun varsa Siber'e HİÇBİR ŞEY yazılmadan hata döner.
+    ///
+    /// İki ayrı kusuru birden yakalar:
+    ///   * satırın <c>SiberId</c>'si hiç yok ya da GUID bile değil (taklit
+    ///     Siber'den kalan "ref-yuklemetip-0" gibi),
+    ///   * GUID var ama Siber'de o kayıt yok/silinmiş.
+    ///
+    /// Boş bırakılan (null) seçimler doğrulanmaz — zorunluluk kontrolü ayrı.
+    /// </summary>
+    private async Task<LoadTransferWriteResult?> ValidateSiberLookupsAsync(
+        IReadOnlyList<(string Label, SiberReferenceTable Table, string? SiberId)> selections,
+        CancellationToken cancellationToken)
+    {
+        // Seçilmemiş alanlar bu kontrolün konusu değil.
+        var chosen = selections.Where(x => x.SiberId is not null).ToList();
+
+        var withoutId = selections
+            .Where(x => x.SiberId is not null && string.IsNullOrWhiteSpace(x.SiberId))
+            .Select(x => x.Label)
+            .ToList();
+
+        var problems = new List<string>(withoutId.Select(l => $"{l} (Siber karşılığı tanımlı değil)"));
+
+        // Tablo başına tek sorgu.
+        foreach (var group in chosen
+            .Where(x => !string.IsNullOrWhiteSpace(x.SiberId))
+            .GroupBy(x => x.Table))
+        {
+            var missing = await _siber.FindMissingReferenceIdsAsync(
+                group.Key,
+                group.Select(x => x.SiberId!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                cancellationToken);
+
+            if (missing.Count == 0)
+                continue;
+
+            problems.AddRange(group
+                .Where(x => missing.Contains(x.SiberId!, StringComparer.OrdinalIgnoreCase))
+                .Select(x => $"{x.Label} (Siber'de bulunamadı)"));
+        }
+
+        if (problems.Count == 0)
+            return null;
+
+        return LoadTransferWriteResult.Fail(
+            $"Şu seçimlerin Siber'de karşılığı yok: {string.Join(", ", problems.Distinct())}. " +
+            "Listeyi yenileyip Siber'de tanımlı bir seçenek seçin.");
+    }
 
     /// <summary>
     /// Seçilen mali kalemlerin Siber'de gerçekten var olduğunu doğrular.
