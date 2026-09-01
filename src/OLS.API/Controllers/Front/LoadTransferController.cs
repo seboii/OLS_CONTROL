@@ -66,13 +66,15 @@ public sealed class LoadTransferController : ApiControllerBase
         [FromQuery] decimal? weight = null,
         /// <summary>Siber'den silinmiş kayıtları da listeler.</summary>
         [FromQuery(Name = "include_deleted")] bool includeDeleted = false,
+        /// <summary>Yalnizca Siber'den silinmis kayitlari listeler.</summary>
+        [FromQuery(Name = "only_deleted")] bool onlyDeleted = false,
         CancellationToken cancellationToken = default)
     {
         var result = await _transfers.ListAsync(
             new LoadTransferListQuery(
                 search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath,
                 customerId, senderId, receiverId, assignedUserId, statusId, caseTypeId, financialItem, weight,
-                includeDeleted),
+                includeDeleted, onlyDeleted),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");
@@ -324,12 +326,14 @@ public sealed class ExpeditionController : ApiControllerBase
         [FromQuery(Name = "department_id")] int? departmentId = null,
         /// <summary>Siber'den silinmiş kayıtları da listeler.</summary>
         [FromQuery(Name = "include_deleted")] bool includeDeleted = false,
+        /// <summary>Yalnizca Siber'den silinmis kayitlari listeler.</summary>
+        [FromQuery(Name = "only_deleted")] bool onlyDeleted = false,
         CancellationToken cancellationToken = default)
     {
         var result = await _expeditions.ListAsync(
             new ExpeditionListQuery(
                 search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath,
-                expeditionTypeId, statusId, departmentId, includeDeleted),
+                expeditionTypeId, statusId, departmentId, includeDeleted, onlyDeleted),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");

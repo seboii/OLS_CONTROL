@@ -28,8 +28,19 @@ public sealed class SiberAuditDto
 
     [JsonPropertyName("updated_at")] public DateTime? UpdatedAt { get; init; }
 
-    /// <summary>Kaydın Siber'de bulunamadığının fark edildiği an; null ise kayıt duruyor.</summary>
+    /// <summary>Kaydın Siber'de bulunamadığının FARK EDİLDİĞİ an; null ise kayıt duruyor.</summary>
     [JsonPropertyName("deleted_at")] public DateTime? DeletedAt { get; init; }
+
+    /// <summary>Kaydı silen kullanıcının Siber kodu (silme günlüğünden).</summary>
+    [JsonPropertyName("deleted_by_code")] public string? DeletedByCode { get; init; }
+
+    [JsonPropertyName("deleted_by_name")] public string? DeletedByName { get; init; }
+
+    /// <summary>
+    /// Siber'deki GERÇEK silme anı. <see cref="DeletedAt"/> bizim fark ettiğimiz
+    /// andır; silme günlüğü yoksa bu alan boş kalır.
+    /// </summary>
+    [JsonPropertyName("deleted_on")] public DateTime? DeletedOn { get; init; }
 
     /// <summary>
     /// Gösterilecek hiçbir iz yoksa NULL döner. Boş bir nesne döndürmek,
@@ -38,13 +49,15 @@ public sealed class SiberAuditDto
     public static SiberAuditDto? From(
         string? createdByCode, string? createdByName, DateTime? createdAt,
         string? updatedByCode, string? updatedByName, DateTime? updatedAt,
-        DateTime? deletedAt)
+        DateTime? deletedAt,
+        string? deletedByCode = null, string? deletedByName = null, DateTime? deletedOn = null)
     {
         var empty =
             string.IsNullOrWhiteSpace(createdByCode) &&
             string.IsNullOrWhiteSpace(createdByName) &&
             string.IsNullOrWhiteSpace(updatedByCode) &&
             string.IsNullOrWhiteSpace(updatedByName) &&
+            string.IsNullOrWhiteSpace(deletedByCode) &&
             createdAt is null && updatedAt is null && deletedAt is null;
 
         return empty ? null : new SiberAuditDto
@@ -56,6 +69,9 @@ public sealed class SiberAuditDto
             UpdatedByName = updatedByName,
             UpdatedAt = updatedAt,
             DeletedAt = deletedAt,
+            DeletedByCode = deletedByCode,
+            DeletedByName = deletedByName,
+            DeletedOn = deletedOn,
         };
     }
 }

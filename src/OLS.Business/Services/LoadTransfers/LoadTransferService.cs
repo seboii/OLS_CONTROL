@@ -35,7 +35,13 @@ public sealed record LoadTransferListQuery(
     /// silinen kayıt yerelde duruyor (geçmiş ve bağlı kayıtlar için) ama günlük
     /// listede görünmemeli.
     /// </summary>
-    bool IncludeDeleted = false);
+    bool IncludeDeleted = false,
+    /// <summary>
+    /// true ise YALNIZCA Siber'den silinmiş kayıtlar listelenir. Operatörün
+    /// "ne silinmiş?" sorusuna tek tıkla cevap verir; include_deleted ise
+    /// silinenleri normal listeye katar.
+    /// </summary>
+    bool OnlyDeleted = false);
 
 /// <summary>
 /// Liste yanıtı. olsold yalnızca beş sütun seçip üç ilişkiyi yüklüyordu;
@@ -43,6 +49,9 @@ public sealed record LoadTransferListQuery(
 /// </summary>
 public sealed class LoadTransferListItemDto
 {
+    /// <summary>Dolu ise kayıt Siber'de bulunamıyor (bkz. SiberAuditDto).</summary>
+    [JsonPropertyName("siber_deleted_at")] public DateTime? SiberDeletedAt { get; init; }
+
     [JsonPropertyName("id")] public long Id { get; init; }
 
     [JsonPropertyName("load_number_work_type")]
@@ -275,7 +284,9 @@ public sealed class LoadTransferService : ILoadTransferService
     {
         var transfers = _db.LoadTransfers.AsNoTracking();
 
-        if (!query.IncludeDeleted)
+        if (query.OnlyDeleted)
+            transfers = transfers.Where(t => t.SiberDeletedAt != null);
+        else if (!query.IncludeDeleted)
             transfers = transfers.Where(t => t.SiberDeletedAt == null);
 
         // ŞİRKET GÖRÜNÜRLÜĞÜ (AVRORA / OLS). Filtre listede uygulanır ki Avrora
@@ -430,6 +441,7 @@ public sealed class LoadTransferService : ILoadTransferService
             .ThenByDescending(t => t.Id)
             .Select(t => new LoadTransferListItemDto
             {
+                SiberDeletedAt = t.SiberDeletedAt,
                 Id = t.Id,
                 LoadNumberWorkType = t.LoadNumberWorkType,
                 CreatedAt = t.CreatedAt,
@@ -468,6 +480,7 @@ public sealed class LoadTransferService : ILoadTransferService
         var t = await _db.LoadTransfers.AsNoTracking()
             .Include(x => x.SiberCreatedByUser)
             .Include(x => x.SiberUpdatedByUser)
+            .Include(x => x.SiberDeletedByUser)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (t is null)
@@ -493,7 +506,7 @@ public sealed class LoadTransferService : ILoadTransferService
             SiberAudit = SiberAuditDto.From(
                 t.SiberCreatedBy, t.SiberCreatedByUser?.Name, t.SiberCreatedAt,
                 t.SiberUpdatedBy, t.SiberUpdatedByUser?.Name, t.SiberUpdatedAt,
-                t.SiberDeletedAt),
+                t.SiberDeletedAt, t.SiberDeletedBy, t.SiberDeletedByUser?.Name, t.SiberDeletedOn),
             Id = t.Id,
             LoadTransferId = t.LoadTransferId,
             LoadNumber = t.LoadNumber,

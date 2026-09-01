@@ -14,6 +14,9 @@ namespace OLS.Business.Services.Loads;
 /// </summary>
 public sealed class LoadListItemDto
 {
+    /// <summary>Dolu ise kayıt Siber'de bulunamıyor (bkz. SiberAuditDto).</summary>
+    [JsonPropertyName("siber_deleted_at")] public DateTime? SiberDeletedAt { get; init; }
+
     [JsonPropertyName("id")] public long Id { get; init; }
     [JsonPropertyName("reservation_number")] public string? ReservationNumber { get; init; }
     [JsonPropertyName("load_number")] public string? LoadNumber { get; init; }

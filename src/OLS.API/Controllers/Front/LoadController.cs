@@ -83,6 +83,8 @@ public sealed class LoadController : ApiControllerBase
         [FromQuery(Name = "is_draft")] int? isDraft = null,
         /// <summary>Siber'den silinmiş kayıtları da listeler.</summary>
         [FromQuery(Name = "include_deleted")] bool includeDeleted = false,
+        /// <summary>Yalnizca Siber'den silinmis kayitlari listeler.</summary>
+        [FromQuery(Name = "only_deleted")] bool onlyDeleted = false,
         CancellationToken cancellationToken = default)
     {
         if (_currentUser.Id is not { } userId)
@@ -92,7 +94,7 @@ public sealed class LoadController : ApiControllerBase
             new LoadListQuery(
                 userId, search, statusTypeId, timeout is 1, dateFrom, dateTo, perPage, page, CurrentPath,
                 customerId, senderId, receiverId, agentId, assignedUserId, workTypeId, isDraft is 1,
-                includeDeleted),
+                includeDeleted, onlyDeleted),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");

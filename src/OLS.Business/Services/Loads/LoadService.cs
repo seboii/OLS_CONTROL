@@ -61,7 +61,13 @@ public sealed record LoadListQuery(
     /// silinen kayıt yerelde duruyor (geçmiş ve bağlı kayıtlar için) ama günlük
     /// listede görünmemeli.
     /// </summary>
-    bool IncludeDeleted = false);
+    bool IncludeDeleted = false,
+    /// <summary>
+    /// true ise YALNIZCA Siber'den silinmiş kayıtlar listelenir. Operatörün
+    /// "ne silinmiş?" sorusuna tek tıkla cevap verir; include_deleted ise
+    /// silinenleri normal listeye katar.
+    /// </summary>
+    bool OnlyDeleted = false);
 
 public sealed record LoadDeleteResult(bool Success, string? BlockedByLoadNumber);
 
@@ -105,7 +111,9 @@ public sealed class LoadService : ILoadService
 
         // Siber'den silinen kayıtlar varsayılan olarak gizlenir; kayıt yerelde
         // duruyor (bkz. Load.SiberDeletedAt) ama günlük listede yer almamalı.
-        if (!query.IncludeDeleted)
+        if (query.OnlyDeleted)
+            loads = loads.Where(l => l.SiberDeletedAt != null);
+        else if (!query.IncludeDeleted)
             loads = loads.Where(l => l.SiberDeletedAt == null);
 
         // ŞİRKET GÖRÜNÜRLÜĞÜ (AVRORA / OLS) — yük ve seferdeki ile aynı kural.
@@ -235,6 +243,7 @@ public sealed class LoadService : ILoadService
             .ThenByDescending(l => l.Id)
             .Select(l => new LoadListItemDto
             {
+                SiberDeletedAt = l.SiberDeletedAt,
                 Id = l.Id,
                 ReservationNumber = l.ReservationNumber,
                 LoadNumber = l.LoadNumber,
@@ -308,6 +317,7 @@ public sealed class LoadService : ILoadService
         var l = await _db.Loads.AsNoTracking()
             .Include(x => x.SiberCreatedByUser)
             .Include(x => x.SiberUpdatedByUser)
+            .Include(x => x.SiberDeletedByUser)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (l is null)
@@ -323,7 +333,7 @@ public sealed class LoadService : ILoadService
             SiberAudit = SiberAuditDto.From(
                 l.SiberCreatedBy, l.SiberCreatedByUser?.Name, l.SiberCreatedAt,
                 l.SiberUpdatedBy, l.SiberUpdatedByUser?.Name, l.SiberUpdatedAt,
-                l.SiberDeletedAt),
+                l.SiberDeletedAt, l.SiberDeletedBy, l.SiberDeletedByUser?.Name, l.SiberDeletedOn),
             Id = l.Id,
             ReservationNumber = l.ReservationNumber,
             LoadNumber = l.LoadNumber,

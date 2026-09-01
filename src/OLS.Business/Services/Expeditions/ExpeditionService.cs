@@ -29,10 +29,19 @@ public sealed record ExpeditionListQuery(
     /// silinen kayıt yerelde duruyor (geçmiş ve bağlı kayıtlar için) ama günlük
     /// listede görünmemeli.
     /// </summary>
-    bool IncludeDeleted = false);
+    bool IncludeDeleted = false,
+    /// <summary>
+    /// true ise YALNIZCA Siber'den silinmiş kayıtlar listelenir. Operatörün
+    /// "ne silinmiş?" sorusuna tek tıkla cevap verir; include_deleted ise
+    /// silinenleri normal listeye katar.
+    /// </summary>
+    bool OnlyDeleted = false);
 
 public sealed class ExpeditionListItemDto
 {
+    /// <summary>Dolu ise kayıt Siber'de bulunamıyor (bkz. SiberAuditDto).</summary>
+    [JsonPropertyName("siber_deleted_at")] public DateTime? SiberDeletedAt { get; init; }
+
     [JsonPropertyName("id")] public long Id { get; init; }
     [JsonPropertyName("expedition_number")] public string? ExpeditionNumber { get; init; }
     [JsonPropertyName("created_at")] public DateTime? CreatedAt { get; init; }
@@ -125,7 +134,9 @@ public sealed class ExpeditionService : IExpeditionService
     {
         var expeditions = _db.Expeditions.AsNoTracking();
 
-        if (!query.IncludeDeleted)
+        if (query.OnlyDeleted)
+            expeditions = expeditions.Where(e => e.SiberDeletedAt != null);
+        else if (!query.IncludeDeleted)
             expeditions = expeditions.Where(e => e.SiberDeletedAt == null);
 
         // ŞİRKET GÖRÜNÜRLÜĞÜ — yüklerdeki ile aynı kural (bkz. CompanyScope).
@@ -183,6 +194,7 @@ public sealed class ExpeditionService : IExpeditionService
             .ThenByDescending(e => e.Id)
             .Select(e => new ExpeditionListItemDto
             {
+                SiberDeletedAt = e.SiberDeletedAt,
                 Id = e.Id,
                 ExpeditionNumber = e.ExpeditionNumber,
                 CreatedAt = e.CreatedAt,
@@ -219,6 +231,7 @@ public sealed class ExpeditionService : IExpeditionService
         var e = await _db.Expeditions.AsNoTracking()
             .Include(x => x.SiberCreatedByUser)
             .Include(x => x.SiberUpdatedByUser)
+            .Include(x => x.SiberDeletedByUser)
             .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
         if (e is null)
@@ -234,7 +247,7 @@ public sealed class ExpeditionService : IExpeditionService
             SiberAudit = SiberAuditDto.From(
                 e.SiberCreatedBy, e.SiberCreatedByUser?.Name, e.SiberCreatedAt,
                 e.SiberUpdatedBy, e.SiberUpdatedByUser?.Name, e.SiberUpdatedAt,
-                e.SiberDeletedAt),
+                e.SiberDeletedAt, e.SiberDeletedBy, e.SiberDeletedByUser?.Name, e.SiberDeletedOn),
             Id = e.Id,
             ExpeditionId = e.ExpeditionId,
             ExpeditionNumber = e.ExpeditionNumber,
