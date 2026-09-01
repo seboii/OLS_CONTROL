@@ -470,9 +470,13 @@ public sealed class SiberSyncService : ISiberSyncService
     /// geçmişi: kim, ne zaman, hangi alanı, hangi değerden hangi değere.
     ///
     /// <c>insuser</c>/<c>upduser</c> yalnızca açan ve son dokunanı verir;
-    /// aradaki her işlem burada. Kapsam üç operasyon tablosuyla sınırlı
-    /// (yük 36.941, teklif 31.331, sefer 18.000 satır) — sbr_log'un tamamı
-    /// 797.855 satır ve büyük kısmı bu uygulamanın göstermediği modüllere ait.
+    /// aradaki her işlem burada. Kapsam uygulamanın GÖSTERDİĞİ kayıtlarla
+    /// sınırlı: yük 36.941, teklif 31.331, sefer 18.000, fatura 116.312,
+    /// tahsilat/ödeme 39.254, cari 11.260 satır. sbr_log'un tamamı 797.855
+    /// satır ve büyük kısmı bu uygulamada karşılığı olmayan modüllere ait.
+    ///
+    /// <c>sfy_efatura</c> (8.300 satır) BİLİNÇLİ OLARAK dışarıda: yerel
+    /// invoices tablosu boş, e-fatura modülü kullanılmıyor.
     ///
     /// Günlük satırları DEĞİŞMEZ: bir kez yazıldıktan sonra Siber tarafından
     /// güncellenmiyor. Bu yüzden yalnızca YENİ satırlar çekilir — yerelde en
@@ -512,7 +516,8 @@ public sealed class SiberSyncService : ISiberSyncService
                        findfieldvalue                             AS RecordLabel,
                        LTRIM(RTRIM(islemmodul))                   AS Module
                 FROM sbr_log
-                WHERE tablename IN ('skn_yuk', 'skn_rezervasyon', 'skn_pozisyon')
+                WHERE tablename IN ('skn_yuk', 'skn_rezervasyon', 'skn_pozisyon',
+                                    'sfy_gelirgider', 'sfy_tahsilatodeme', 'sbr_firma')
                   AND (@Since IS NULL OR tarih >= @Since)
                 """,
                 new { Since = since },
