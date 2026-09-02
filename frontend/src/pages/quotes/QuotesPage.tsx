@@ -16,7 +16,7 @@ import { AccountPicker, type AccountOption } from "@/components/shared/AccountPi
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 import { FinancialItemPicker, type FinancialItemOption } from "@/components/shared/FinancialItemPicker";
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
-import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
+import { listDrafts, saveDraft, removeDraft, newDraftId, formatDraftTime, type Draft } from "@/lib/autodraft";
 import { BusyLabel, FullScreenBusy } from "@/components/ui/Busy";
 import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
@@ -166,7 +166,7 @@ const EMPTY_FINANCIAL_ROW: FinancialItemRow = {
  * çıkar. Sunucuya yazılmaz: yarım form zaten doğrulamadan geçmez ve her yarım
  * denemede Siber'e/veritabanına çöp kayıt açmak istemiyoruz.
  */
-const LOCAL_DRAFT_KEY = "ols.quote.autodraft.v1";
+const LOCAL_DRAFT_KEY = "ols.quote.drafts.v2";
 
 type LocalDraft = {
   savedAt: string;
@@ -185,9 +185,7 @@ type LocalDraft = {
   emailCc: string[];
 };
 
-const readLocalDraft = () => readDraft<LocalDraft>(LOCAL_DRAFT_KEY);
-const writeLocalDraft = (draft: LocalDraft) => writeDraft(LOCAL_DRAFT_KEY, draft);
-const clearLocalDraft = () => clearDraft(LOCAL_DRAFT_KEY);
+const readLocalDrafts = () => listDrafts<LocalDraft>(LOCAL_DRAFT_KEY);
 
 /** Kullanıcı gerçekten bir şey doldurdu mu — boş formu taslak diye kaydetmeyelim. */
 function draftHasContent(d: Omit<LocalDraft, "savedAt">): boolean {
@@ -672,7 +670,10 @@ export function QuotesPage() {
   const draftsRef = useRef<HTMLDivElement>(null);
   const DRAFTS_PAGE_SIZE = 10;
   // Kaydedilmemiş "Yeni Teklif" otomatik taslağı — bkz. LOCAL_DRAFT_KEY açıklaması.
-  const [localDraft, setLocalDraft] = useState<LocalDraft | null>(() => readLocalDraft());
+  const [localDrafts, setLocalDrafts] = useState<Draft<LocalDraft>[]>(() => readLocalDrafts());
+
+  // Açık düzenleme oturumunun taslak kimliği — bkz. lib/autodraft.ts.
+  const activeDraftId = useRef<string>(newDraftId());
   // Taslak geri yüklenirken otomatik kaydediciyi susturur (aksi hâlde geri yükleme
   // sırasındaki ara state'ler taslağın üstüne yazardı).
   const restoringDraftRef = useRef(false);
@@ -1007,6 +1008,8 @@ export function QuotesPage() {
   }
 
   function openNew() {
+    // Yeni bir düzenleme oturumu: önceki taslak yerinde kalır.
+    activeDraftId.current = newDraftId();
     resetForm();
     setEditingId(null);
     setDrawerOpen(true);
@@ -1028,9 +1031,9 @@ export function QuotesPage() {
     if (!draftHasContent(snapshot)) return;
 
     const timer = setTimeout(() => {
-      const draft: LocalDraft = { ...snapshot, savedAt: new Date().toISOString() };
-      writeLocalDraft(draft);
-      setLocalDraft(draft);
+      saveDraft<LocalDraft>(LOCAL_DRAFT_KEY, activeDraftId.current,
+        { ...snapshot, savedAt: new Date().toISOString() });
+      setLocalDrafts(readLocalDrafts());
     }, 600);
     return () => clearTimeout(timer);
   }, [
@@ -1039,11 +1042,12 @@ export function QuotesPage() {
   ]);
 
   /** Otomatik taslağı forma geri yükler ve çekmeceyi açar. */
-  function resumeLocalDraft() {
-    const d = readLocalDraft();
-    if (!d) return;
+  /** Taslaktan devam: o taslağın kimliğini benimseyip formu doldurur. */
+  function resumeLocalDraft(draft: Draft<LocalDraft>) {
+    const d = draft.payload;
 
     restoringDraftRef.current = true;
+    activeDraftId.current = draft.id;
     setEditingId(null);
     setErrors({});
     setDetailMeta({ siberId: null, reservationNumber: null, loadNumber: null, approvalDate: null, siberAudit: null });
@@ -1069,9 +1073,9 @@ export function QuotesPage() {
     setTimeout(() => { restoringDraftRef.current = false; }, 0);
   }
 
-  function discardLocalDraft() {
-    clearLocalDraft();
-    setLocalDraft(null);
+  function discardLocalDraft(id: string) {
+    removeDraft(LOCAL_DRAFT_KEY, id);
+    setLocalDrafts(readLocalDrafts());
   }
 
   async function openEdit(id: number) {
@@ -1284,7 +1288,10 @@ export function QuotesPage() {
         await api.postForm("/api/v1/load", fd);
         addToast("Teklif oluşturuldu");
         // Teklif artık sunucuda: kaydedilmemiş otomatik taslak gereksiz.
-        discardLocalDraft();
+        // Yalnızca bu taslak gereksiz; diğerleri durur.
+        removeDraft(LOCAL_DRAFT_KEY, activeDraftId.current);
+        setLocalDrafts(readLocalDrafts());
+        activeDraftId.current = newDraftId();
       }
       setDrawerOpen(false);
       load();
@@ -1394,9 +1401,9 @@ export function QuotesPage() {
               <Btn variant="secondary" onClick={() => setDraftsOpen((o) => !o)}>
                 <FileText size={14} />
                 Taslaklar
-                {(draftsTotal ?? 0) + (localDraft ? 1 : 0) > 0 && (
+                {(draftsTotal ?? 0) + localDrafts.length > 0 && (
                   <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold">
-                    {(draftsTotal ?? 0) + (localDraft ? 1 : 0)}
+                    {(draftsTotal ?? 0) + localDrafts.length}
                   </span>
                 )}
               </Btn>
@@ -1405,45 +1412,45 @@ export function QuotesPage() {
                   <div className="px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
                     <p className="text-xs font-semibold text-gray-700">Taslaklar</p>
                     <p className="text-[11px] text-gray-400">
-                      {draftsTotal !== null ? `${draftsTotal + (localDraft ? 1 : 0)} kayıt` : ""}
+                      {draftsTotal !== null ? `${draftsTotal + localDrafts.length} kayıt` : ""}
                     </p>
                   </div>
                   <div onScroll={handleDraftsScroll} className="max-h-96 overflow-y-auto">
                     {/* Kaydedilmemiş otomatik taslak — sunucudakilerin üstünde,
                         ayırt edilsin diye amber vurgulu. */}
-                    {localDraft && (
-                      <div className="flex items-stretch border-b border-gray-100 bg-amber-50/50">
+                    {localDrafts.map((d) => (
+                      <div key={d.id} className="flex items-stretch border-b border-gray-100 bg-amber-50/50">
                         <button
                           type="button"
-                          onClick={resumeLocalDraft}
+                          onClick={() => resumeLocalDraft(d)}
                           className="flex-1 text-left px-4 py-2.5 hover:bg-amber-50 transition-colors"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-sm font-medium text-gray-800 truncate">
-                              {localDraft.customer?.name ?? "Müşteri seçilmedi"}
+                              {d.payload.customer?.name ?? "Müşteri seçilmedi"}
                             </p>
                             <span className="shrink-0 text-[10px] font-semibold text-amber-700">
                               Kaydedilmedi
                             </span>
                           </div>
                           <p className="text-[11px] text-gray-500 mt-0.5">
-                            Kaldığı yerden devam et · {formatDraftTime(localDraft.savedAt)}
+                            Kaldığı yerden devam et · {formatDraftTime(d.savedAt)}
                           </p>
                         </button>
                         <button
                           type="button"
-                          onClick={discardLocalDraft}
+                          onClick={() => discardLocalDraft(d.id)}
                           title="Taslağı sil"
                           className="px-3 text-gray-300 hover:text-red-500 transition-colors"
                         >
                           <Trash2 size={13} />
                         </button>
                       </div>
-                    )}
+                    ))}
                     {draftsLoading ? (
                       <p className="text-xs text-gray-400 text-center py-6">Yükleniyor...</p>
                     ) : draftItems.length === 0 ? (
-                      !localDraft && <p className="text-xs text-gray-400 text-center py-6">Taslak bulunamadı.</p>
+                      localDrafts.length === 0 && <p className="text-xs text-gray-400 text-center py-6">Taslak bulunamadı.</p>
                     ) : (
                       <>
                         {draftItems.map((d) => (

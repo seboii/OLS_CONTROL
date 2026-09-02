@@ -13,7 +13,7 @@ import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SearchInput, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerModal";
 import { CarPicker } from "@/components/shared/CarPicker";
-import { clearDraft, formatDraftTime, readDraft, writeDraft } from "@/lib/autodraft";
+import { listDrafts, saveDraft, removeDraft, newDraftId, formatDraftTime, type Draft } from "@/lib/autodraft";
 import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
@@ -25,7 +25,7 @@ import { RecordHistoryTab } from "@/components/shared/RecordHistory";
  * kavramı yok (Teklif'teki is_draft gibi), bu yüzden menüde yalnızca bu
  * kaydedilmemiş taslak listelenir.
  */
-const TRIP_DRAFT_KEY = "ols.trip.autodraft.v1";
+const TRIP_DRAFT_KEY = "ols.trip.drafts.v2";
 
 type TripForm = {
   // romork_id kaydedilen DEĞER (araç kimliği), romork_plate ise SEÇİCİDE ve
@@ -319,7 +319,10 @@ export function TripsPage() {
   const [form, setForm] = useState<TripForm>({ ...EMPTY_TRIP_FORM });
 
   // Kaydedilmemiş "Yeni Sefer" taslağı — bkz. TRIP_DRAFT_KEY açıklaması.
-  const [tripDraft, setTripDraft] = useState<TripDraft | null>(() => readDraft<TripDraft>(TRIP_DRAFT_KEY));
+  const [tripDrafts, setTripDrafts] = useState<Draft<TripDraft>[]>(() => listDrafts<TripDraft>(TRIP_DRAFT_KEY));
+
+  // Açık düzenleme oturumunun taslak kimliği — bkz. lib/autodraft.ts.
+  const activeDraftId = useRef<string>(newDraftId());
   const [draftsOpen, setDraftsOpen] = useState(false);
   const draftsRef = useRef<HTMLDivElement>(null);
   // Geri yükleme sırasındaki ara state'ler taslağın üstüne yazmasın diye.
@@ -372,6 +375,8 @@ export function TripsPage() {
   }, [debouncedSearch, workTypeTab, workTypes.length, dateFrom, dateTo, page, fExpeditionType, fStatus, fDepartment, onlyDeleted]);
 
   function openNew() {
+    // Yeni bir düzenleme oturumu: önceki taslak yerinde kalır.
+    activeDraftId.current = newDraftId();
     setForm({ ...EMPTY_TRIP_FORM });
     setErrors({});
     setDrawerOpen(true);
@@ -386,9 +391,8 @@ export function TripsPage() {
     if (!tripFormHasContent(form)) return;
 
     const timer = setTimeout(() => {
-      const draft: TripDraft = { savedAt: new Date().toISOString(), form };
-      writeDraft(TRIP_DRAFT_KEY, draft);
-      setTripDraft(draft);
+      saveDraft<TripDraft>(TRIP_DRAFT_KEY, activeDraftId.current, { savedAt: new Date().toISOString(), form });
+      setTripDrafts(listDrafts<TripDraft>(TRIP_DRAFT_KEY));
     }, 600);
     return () => clearTimeout(timer);
   }, [drawerOpen, form]);
@@ -401,21 +405,20 @@ export function TripsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  function resumeTripDraft() {
-    const d = readDraft<TripDraft>(TRIP_DRAFT_KEY);
-    if (!d) return;
-
+  /** Taslaktan devam: o taslağın kimliğini benimseyip formu doldurur. */
+  function resumeTripDraft(draft: Draft<TripDraft>) {
     restoringDraftRef.current = true;
+    activeDraftId.current = draft.id;
     setErrors({});
-    setForm({ ...EMPTY_TRIP_FORM, ...d.form });
+    setForm({ ...EMPTY_TRIP_FORM, ...draft.payload.form });
     setDrawerOpen(true);
     setDraftsOpen(false);
     setTimeout(() => { restoringDraftRef.current = false; }, 0);
   }
 
-  function discardTripDraft() {
-    clearDraft(TRIP_DRAFT_KEY);
-    setTripDraft(null);
+  function discardTripDraft(id: string) {
+    removeDraft(TRIP_DRAFT_KEY, id);
+    setTripDrafts(listDrafts<TripDraft>(TRIP_DRAFT_KEY));
   }
 
   async function handleSubmit() {
@@ -457,7 +460,10 @@ export function TripsPage() {
       const created = await api.post<DataMessage<ExpeditionDetail>>("/api/v1/expedition", body);
       addToast("Sefer oluşturuldu");
       // Sefer artık sunucuda: kaydedilmemiş otomatik taslak gereksiz.
-      discardTripDraft();
+      // Yalnızca bu taslak gereksiz; diğerleri durur.
+      removeDraft(TRIP_DRAFT_KEY, activeDraftId.current);
+      setTripDrafts(listDrafts<TripDraft>(TRIP_DRAFT_KEY));
+      activeDraftId.current = newDraftId();
       setDrawerOpen(false);
       load();
 
@@ -837,12 +843,12 @@ export function TripsPage() {
                 aynı desen (bkz. QuotesPage.tsx). Sefer'de sunucu taraflı taslak
                 kavramı olmadığı için menü yalnızca bu girdiyi listeler. */}
             <div className="relative" ref={draftsRef}>
-              <Btn variant="secondary" onClick={() => setDraftsOpen((o) => !o)}>
+              <Btn variant="secondary" onClick={() => { setTripDrafts(listDrafts<TripDraft>(TRIP_DRAFT_KEY)); setDraftsOpen((o) => !o); }}>
                 <FileText size={14} />
                 Taslaklar
-                {tripDraft && (
+                {tripDrafts.length > 0 && (
                   <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold">
-                    1
+                    {tripDrafts.length}
                   </span>
                 )}
               </Btn>
@@ -851,37 +857,42 @@ export function TripsPage() {
                   <div className="px-4 py-2.5 border-b border-gray-100">
                     <p className="text-xs font-semibold text-gray-700">Taslaklar</p>
                   </div>
-                  {tripDraft ? (
-                    <div className="flex items-stretch bg-amber-50/50">
-                      <button
-                        type="button"
-                        onClick={resumeTripDraft}
-                        className="flex-1 text-left px-4 py-2.5 hover:bg-amber-50 transition-colors"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium text-gray-800 truncate">
-                            {workTypes.find((w) => String(w.id) === tripDraft.form.work_type)?.name
-                              ?? (tripDraft.form.romork_plate || (tripDraft.form.romork_id ? `Araç #${tripDraft.form.romork_id}` : "Yeni sefer"))}
-                          </p>
-                          <span className="shrink-0 text-[10px] font-semibold text-amber-700">
-                            Kaydedilmedi
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-gray-500 mt-0.5">
-                          Kaldığı yerden devam et · {formatDraftTime(tripDraft.savedAt)}
-                        </p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={discardTripDraft}
-                        title="Taslağı sil"
-                        className="px-3 text-gray-300 hover:text-red-500 transition-colors"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ) : (
+                  {tripDrafts.length === 0 ? (
                     <p className="text-xs text-gray-400 text-center py-6">Taslak bulunamadı.</p>
+                  ) : (
+                    <div className="max-h-80 overflow-y-auto">
+                      {tripDrafts.map((d) => (
+                        <div key={d.id} className="flex items-stretch border-b border-gray-100 last:border-b-0 bg-amber-50/50">
+                          <button
+                            type="button"
+                            onClick={() => resumeTripDraft(d)}
+                            className="flex-1 text-left px-4 py-2.5 hover:bg-amber-50 transition-colors"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-sm font-medium text-gray-800 truncate">
+                                {d.payload.form.romork_plate
+                                  || workTypes.find((w) => String(w.id) === d.payload.form.work_type)?.name
+                                  || "Yeni sefer"}
+                              </p>
+                              <span className="shrink-0 text-[10px] font-semibold text-amber-700">
+                                Kaydedilmedi
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                              Kaldığı yerden devam et · {formatDraftTime(d.savedAt)}
+                            </p>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => discardTripDraft(d.id)}
+                            title="Taslağı sil"
+                            className="px-3 text-gray-300 hover:text-red-500 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}

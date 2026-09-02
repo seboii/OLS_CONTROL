@@ -20,8 +20,11 @@ import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 import {
-  writeAutosave, readAutosave, clearAutosave, isPayloadEmpty,
-} from "@/lib/directLoadDrafts";
+  listDrafts, saveDraft, removeDraft, newDraftId, formatDraftTime, type Draft,
+} from "@/lib/autodraft";
+
+/** Teklifsiz yük taslakları — bkz. lib/autodraft.ts (çoklu). */
+const DIRECT_DRAFT_KEY = "ols.directLoad.drafts.v2";
 
 interface NamedRef {
   id: number;
@@ -547,10 +550,13 @@ export function LoadsPage() {
   // Taslak LİSTE ekranından da görünür — teklif ve seferdeki "Taslaklar"
   // menüsünün aynısı. Kullanıcı çekmeceyi açmadan taslağı olduğunu görsün,
   // oradan devam etsin ya da silsin.
-  const [directDraft, setDirectDraft] =
-    useState<{ savedAt: string; payload: unknown } | null>(() => readAutosave());
+  const [drafts, setDrafts] = useState<Draft<unknown>[]>(() => listDrafts(DIRECT_DRAFT_KEY));
   const [draftsOpen, setDraftsOpen] = useState(false);
   const draftsRef = useRef<HTMLDivElement>(null);
+
+  // Açık düzenleme oturumunun taslak kimliği. "Yeni" YENİ kimlik açar (önceki
+  // taslak durur), taslaktan devam edilince O kimlik benimsenir (çoğalmaz).
+  const activeDraftId = useRef<string>(newDraftId());
 
   /** Formun tüm durumu tek nesnede — taslak da kurtarma da bunu saklar. */
   const directSnapshot = useCallback(() => ({
@@ -585,11 +591,12 @@ export function LoadsPage() {
   useEffect(() => {
     if (!directOpen) return;
     const snap = directSnapshot();
-    if (isPayloadEmpty(snap as unknown as Record<string, unknown>)) return;
+    // Boş formu taslak yapma: hiç dolu alan yoksa yazma.
+    if (!JSON.stringify(snap).match(/:"[^"]+"/)) return;
 
     const timer = setTimeout(() => {
-      writeAutosave(snap);
-      setDirectDraft(readAutosave());
+      saveDraft(DIRECT_DRAFT_KEY, activeDraftId.current, snap);
+      setDrafts(listDrafts(DIRECT_DRAFT_KEY));
     }, 600);
     return () => clearTimeout(timer);
   }, [directOpen, directSnapshot]);
@@ -612,19 +619,17 @@ export function LoadsPage() {
     return snap?.customer?.name?.trim() || "Teklifsiz yük";
   }
 
-  /** Taslaktan devam: formu doldurup çekmeceyi açar. */
-  function resumeDirectDraft() {
-    const draft = readAutosave();
-    if (!draft) return;
-
+  /** Taslaktan devam: o taslağın kimliğini benimseyip formu doldurur. */
+  function resumeDirectDraft(draft: Draft<unknown>) {
+    activeDraftId.current = draft.id;
     applySnapshot(draft.payload);
     setDirectOpen(true);
     setDraftsOpen(false);
   }
 
-  function discardDirectDraft() {
-    clearAutosave();
-    setDirectDraft(null);
+  function discardDirectDraft(id: string) {
+    removeDraft(DIRECT_DRAFT_KEY, id);
+    setDrafts(listDrafts(DIRECT_DRAFT_KEY));
   }
 
   /**
@@ -731,9 +736,10 @@ export function LoadsPage() {
         }
       }
 
-      // Kayıt Siber'e gittiğine göre taslak gereksiz.
-      clearAutosave();
-      setDirectDraft(null);
+      // Kayıt Siber'e gittiğine göre YALNIZCA bu taslak gereksiz; diğerleri durur.
+      removeDraft(DIRECT_DRAFT_KEY, activeDraftId.current);
+      setDrafts(listDrafts(DIRECT_DRAFT_KEY));
+      activeDraftId.current = newDraftId();
 
       setDirectOpen(false);
       resetDirectForm();
@@ -1294,12 +1300,12 @@ export function LoadsPage() {
                 listeler. */}
             {canDirect && canCreate && (
               <div className="relative shrink-0" ref={draftsRef}>
-                <Btn variant="secondary" onClick={() => setDraftsOpen((o) => !o)}>
+                <Btn variant="secondary" onClick={() => { setDrafts(listDrafts(DIRECT_DRAFT_KEY)); setDraftsOpen((o) => !o); }}>
                   <FileText size={14} />
                   Taslaklar
-                  {directDraft && (
+                  {drafts.length > 0 && (
                     <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold">
-                      1
+                      {drafts.length}
                     </span>
                   )}
                 </Btn>
@@ -1308,38 +1314,40 @@ export function LoadsPage() {
                     <div className="px-4 py-2.5 border-b border-gray-100">
                       <p className="text-xs font-semibold text-gray-700">Taslaklar</p>
                     </div>
-                    {directDraft ? (
-                      <div className="flex items-stretch bg-amber-50/50">
-                        <button
-                          type="button"
-                          onClick={resumeDirectDraft}
-                          className="flex-1 text-left px-4 py-2.5 hover:bg-amber-50 transition-colors"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <p className="text-sm font-medium text-gray-800 truncate">
-                              {draftLabel(directDraft.payload)}
-                            </p>
-                            <span className="shrink-0 text-[10px] font-semibold text-amber-700">
-                              Kaydedilmedi
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-gray-500 mt-0.5">
-                            Kaldığı yerden devam et · {new Date(directDraft.savedAt).toLocaleString("tr-TR", {
-                              day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit",
-                            })}
-                          </p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={discardDirectDraft}
-                          title="Taslağı sil"
-                          className="px-3 text-gray-300 hover:text-red-500 transition-colors"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ) : (
+                    {drafts.length === 0 ? (
                       <p className="text-xs text-gray-400 text-center py-6">Taslak bulunamadı.</p>
+                    ) : (
+                      <div className="max-h-80 overflow-y-auto">
+                        {drafts.map((d) => (
+                          <div key={d.id} className="flex items-stretch border-b border-gray-100 last:border-b-0 bg-amber-50/50">
+                            <button
+                              type="button"
+                              onClick={() => resumeDirectDraft(d)}
+                              className="flex-1 text-left px-4 py-2.5 hover:bg-amber-50 transition-colors"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-sm font-medium text-gray-800 truncate">
+                                  {draftLabel(d.payload)}
+                                </p>
+                                <span className="shrink-0 text-[10px] font-semibold text-amber-700">
+                                  Kaydedilmedi
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-gray-500 mt-0.5">
+                                Kaldığı yerden devam et · {formatDraftTime(d.savedAt)}
+                              </p>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => discardDirectDraft(d.id)}
+                              title="Taslağı sil"
+                              className="px-3 text-gray-300 hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}
@@ -1347,7 +1355,7 @@ export function LoadsPage() {
             )}
             {/* Teklifsiz yük açma — teklif kullanmayan şirket (Avrora) ve yöneticiler. */}
             {canDirect && canCreate && (
-              <Btn onClick={() => { resetDirectForm(); setDirectOpen(true); }}>
+              <Btn onClick={() => { activeDraftId.current = newDraftId(); resetDirectForm(); setDirectOpen(true); }}>
                 <Plus size={14} />Teklifsiz Yük Aç
               </Btn>
             )}
