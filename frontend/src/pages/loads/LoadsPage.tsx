@@ -709,7 +709,7 @@ export function LoadsPage() {
    */
   function SectionTitle({ children }: { children: React.ReactNode }) {
     return (
-      <h3 className="mb-4 border-b border-gray-200 pb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+      <h3 className="mb-5 border-b border-gray-200 pb-2.5 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
         {children}
       </h3>
     );
@@ -1372,7 +1372,7 @@ export function LoadsPage() {
         onClose={() => setDirectOpen(false)}
         title="Teklifsiz Yük Aç"
         subtitle="Teklif aşaması olmadan doğrudan yük oluşturur"
-        width="w-[1080px]"
+        width="w-[min(1180px,95vw)]"
         footer={
           <div className="flex gap-2">
             <Btn onClick={submitDirectLoad} disabled={directSaving}>
@@ -1425,7 +1425,7 @@ export function LoadsPage() {
           </div>
         )}
 
-        <div className="p-6 space-y-8">
+        <div className="p-8 space-y-10">
           {/* ---------------------------------------------------------------
               1) GENEL BİLGİLER — tanımlar + taraflar tek blokta.
 
@@ -1442,7 +1442,7 @@ export function LoadsPage() {
               --------------------------------------------------------------- */}
           <section>
             <SectionTitle>Genel Bilgiler</SectionTitle>
-            <div className="grid grid-cols-3 gap-x-6 gap-y-5">
+            <div className="grid grid-cols-3 gap-x-6 gap-y-6">
               <FormField label="İş Türü" required>
                 <SelectInput value={directForm.work_type_id} onChange={(v) => setDirectForm((f) => ({ ...f, work_type_id: v }))} options={opts(workTypes)} />
               </FormField>
@@ -1481,8 +1481,8 @@ export function LoadsPage() {
               </FormField>
             </div>
 
-            <div className="mt-6 space-y-5">
-            <div className="space-y-5">
+            {/* Cari seçiciler iki sütun — teklif ekranıyla aynı ölçü. */}
+            <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-6">
               <AccountPicker label="Müşteri" value={directCustomer} onChange={setDirectCustomer} required />
               <AccountPicker label="Gönderici" value={directSender} onChange={setDirectSender} required />
               <AccountPicker label="Alıcı" value={directReceiver} onChange={setDirectReceiver} required />
@@ -1492,13 +1492,12 @@ export function LoadsPage() {
                 <TextInput value={directForm.payer_company} onChange={(v) => setDirectForm((f) => ({ ...f, payer_company: v }))} />
               </FormField>
             </div>
-            </div>
           </section>
 
           {/* 2) GÜZERGAH — taraflardan hemen sonra: önce kimden kime, sonra nereden nereye. */}
           <section>
             <SectionTitle>Güzergah</SectionTitle>
-          <div className="grid grid-cols-3 gap-x-6 gap-y-5">
+          <div className="grid grid-cols-3 gap-x-6 gap-y-6">
             <FormField label="Yükleme Ülkesi" required>
               <SelectInput value={directForm.departure_country_id} onChange={(v) => setDirectForm((f) => ({ ...f, departure_country_id: v }))} options={opts(countries)} />
             </FormField>
@@ -1778,7 +1777,7 @@ export function LoadsPage() {
                   <AccountPicker label="Müşteri" value={customer} onChange={setCustomer} />
                   <AccountPicker label="Gönderici" value={sender} onChange={setSender} />
                   <AccountPicker label="Alıcı" value={receiver} onChange={setReceiver} />
-                  <div className="grid grid-cols-3 gap-x-6 gap-y-5">
+                  <div className="grid grid-cols-3 gap-x-6 gap-y-6">
                     <FormField label="Durum">
                       <SelectInput value={form.load_status_id} onChange={(v) => setForm((f) => ({ ...f, load_status_id: v }))} options={opts(loadStatusTypes)} />
                     </FormField>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type UIEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { useNavigate } from "react-router-dom";
-import { FileText, Package, Plus, Trash2, Truck, Upload, Download, File as FileIcon, X, Filter, ChevronDown, CalendarDays, Globe, CreditCard, Building2, User, MoreVertical, Copy } from "lucide-react";
+import { FileText, Package, Plus, Trash2, Truck, Upload, Download, File as FileIcon, X, Filter, ChevronDown, CalendarDays, User, MoreVertical, Copy } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -327,14 +327,21 @@ function ChargePersonsCell({ people }: { people: LoadChargePersonDetail[] }) {
   );
 }
 
-/** olsnew: OfferFormDrawer.vue'daki ikon + başlık deseni (Tarih/Konum/Ödeme/Şirketler/...). */
+/**
+ * İkon + başlık deseni.
+ *
+ * Eskiden Genel Bilgiler'i alt bloklara ayırıyordu (Tarih/Konum/Ödeme/
+ * Şirketler/Taşıma Ayarları). O başlıklar kaldırıldı: alanlar tek sürekli
+ * yapıda akıyor, sitedeki diğer formlarla aynı. Geriye tek gerçek kullanımı
+ * kaldı — Finans'ta ALIŞ ve SATIŞ hareketlerini ayırmak, ki bu bir görsel
+ * gruplama değil, iki farklı kayıt türü.
+ */
 /**
  * Tek sayfalık formda ANA bölüm başlığı.
  *
- * SectionHeader'dan farkı: o, Genel Bilgiler içindeki ALT blokları
- * (Tarih/Konum/Ödeme…) ikonla ayırıyor; bu ise sayfanın ana bölümlerini
- * (Yük İçeriği, Finans, Dosya Arşivi…) ayırıyor. Form 7 sekmeden tek sayfaya
- * indiği için bu ikinci seviye gerekti.
+ * Form 7 sekmeden tek sayfaya indiği için gerekti: Yük İçeriği, Finans,
+ * Dosya Arşivi gibi ANA bölümleri ayırır. Alan alt-başlığı DEĞİLDİR —
+ * alanlar tek sürekli yapıda akar.
  */
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
@@ -1655,15 +1662,17 @@ export function QuotesPage() {
         {detailLoading ? (
           <p className="text-sm text-gray-400 text-center py-10">Yükleniyor...</p>
         ) : (
-          <div className="p-8">
+          <div className="p-8 space-y-10">
             {/* ---------------------------------------------------------------
                 TEK SAYFA: form eskiden 7 sekmeliydi ve kullanıcı hangi sekmede
                 ne kaldığını takip etmek zorundaydı. Sıra artık işin sırası:
                 tanımlar ve taraflar -> güzergah -> içerik -> finans -> görevliler
                 -> e-posta -> açıklama -> dosya arşivi.
                 --------------------------------------------------------------- */}
-            <div className="space-y-8">
-              <div className="grid grid-cols-3 gap-x-6 gap-y-5">
+            <section>
+              <SectionTitle>Genel Bilgiler</SectionTitle>
+              <div className="space-y-6">
+              <div className="grid grid-cols-3 gap-x-6 gap-y-6">
                 <FormField label="İş Tipi" required error={errors.work_type_id?.[0]}>
                   <SelectInput
                     value={form.work_type_id}
@@ -1743,96 +1752,82 @@ export function QuotesPage() {
                 </div>
               )}
 
-              <div>
-                <SectionHeader icon={Building2} title="Şirketler" />
-                <div className="grid grid-cols-2 gap-4">
-                  <AccountPicker label="Müşteri" value={customer} onChange={(v) => { setCustomer(v); applyCustomerRepresentatives(v); }} required error={errors.customer_id?.[0]} />
-                  <AccountPicker label="Gönderici" value={sender} onChange={setSender} required={isPositiveStatus} error={errors.sender_id?.[0]} />
-                  <AccountPicker label="Alıcı" value={receiver} onChange={setReceiver} required={isPositiveStatus} error={errors.receiver_id?.[0]} />
-                  <AccountPicker label="Acente" value={agent} onChange={setAgent} error={errors.agent_id?.[0]} accountType={5} />
+              <div className="grid grid-cols-2 gap-x-6 gap-y-6">
+                <AccountPicker label="Müşteri" value={customer} onChange={(v) => { setCustomer(v); applyCustomerRepresentatives(v); }} required error={errors.customer_id?.[0]} />
+                <AccountPicker label="Gönderici" value={sender} onChange={setSender} required={isPositiveStatus} error={errors.sender_id?.[0]} />
+                <AccountPicker label="Alıcı" value={receiver} onChange={setReceiver} required={isPositiveStatus} error={errors.receiver_id?.[0]} />
+                <AccountPicker label="Acente" value={agent} onChange={setAgent} error={errors.agent_id?.[0]} accountType={5} />
+              </div>
+
+              <div className="grid grid-cols-3 gap-x-6 gap-y-6">
+                <FormField label="Kalkış Ülkesi" required={isPositiveStatus} error={errors.departure_country_id?.[0]}>
+                  <SelectInput value={route.departure_country_id} onChange={(v) => setRoute((r) => ({ ...r, departure_country_id: v }))} options={opts(countries)} />
+                </FormField>
+                <FormField label="Varış Ülkesi" required={isPositiveStatus} error={errors.target_country_id?.[0]}>
+                  <SelectInput value={route.target_country_id} onChange={(v) => setRoute((r) => ({ ...r, target_country_id: v }))} options={opts(countries)} />
+                </FormField>
+                <FormField label="Transfer Ülkesi">
+                  <SelectInput value={route.transit_country_id} onChange={(v) => setRoute((r) => ({ ...r, transit_country_id: v }))} options={opts(countries)} />
+                </FormField>
+              </div>
+
+              <div className="grid grid-cols-3 gap-x-6 gap-y-6">
+                <FormField label="Teklif Tarihi" required error={errors.offer_date?.[0]}>
+                  <TextInput value={form.offer_date} onChange={(v) => setForm((f) => ({ ...f, offer_date: v }))} type="date" error={!!errors.offer_date} />
+                </FormField>
+                <FormField label="Pazarlama Bildirim Tarihi" required error={errors.marketing_notification_date?.[0]}>
+                  <TextInput value={form.marketing_notification_date} onChange={(v) => setForm((f) => ({ ...f, marketing_notification_date: v }))} type="date" error={!!errors.marketing_notification_date} />
+                </FormField>
+                <FormField label="Geçerlilik Tarihi" required error={errors.offer_validity_date?.[0]}>
+                  <TextInput value={form.offer_validity_date} onChange={(v) => setForm((f) => ({ ...f, offer_validity_date: v }))} type="date" error={!!errors.offer_validity_date} />
+                </FormField>
+              </div>
+
+              {/*
+                Olumlu Tarihi ELLE GİRİLMEZ: durum Olumlu'ya çekildiğinde sunucu
+                o günün tarihini damgalar (LoadWriteService.ResolveApprovalDate) ve
+                Siber'de skn_rezervasyon.onaytarih sütununa yazar. Teklif Tarihi'ne
+                dokunulmaz — ikisinin farkı "teklif kaç günde onaylandı" bilgisidir.
+              */}
+              {isPositiveStatus && (
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/70 px-3 py-2">
+                  <CalendarDays size={14} className="text-emerald-600 shrink-0" />
+                  <span className="text-xs text-emerald-900">
+                    <b>Olumlu Tarihi:</b>{" "}
+                    {detailMeta.approvalDate
+                      ? new Date(detailMeta.approvalDate).toLocaleDateString("tr-TR")
+                      : new Date().toLocaleDateString("tr-TR")}
+                  </span>
+                  <span className="ml-auto text-[11px] text-emerald-700/70">
+                    {detailMeta.approvalDate ? "kayıtlı" : "kaydedince damgalanacak"}
+                  </span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-x-6 gap-y-6">
+                <FormField label="Ödeme Şekli" required error={errors.payment_type_id?.[0]}>
+                  <SelectInput value={form.payment_type_id} onChange={(v) => setForm((f) => ({ ...f, payment_type_id: v }))} options={opts(paymentTypes)} />
+                </FormField>
+                <div className="col-span-2">
+                  <AccountPicker label="Navlun Ödeyecek Firma" value={companyPayFreight} onChange={setCompanyPayFreight} error={errors.company_pay_freight_id?.[0]} accountType={1} />
+                </div>
+                <div className="col-span-3">
+                  <FormField label="Navlun Ödeyen Firma (serbest metin)">
+                    <TextInput value={form.payer_company} onChange={(v) => setForm((f) => ({ ...f, payer_company: v }))} />
+                  </FormField>
                 </div>
               </div>
 
-              <div>
-                <SectionHeader icon={Globe} title="Konum" />
-                <div className="grid grid-cols-3 gap-4">
-                  <FormField label="Kalkış Ülkesi" required={isPositiveStatus} error={errors.departure_country_id?.[0]}>
-                    <SelectInput value={route.departure_country_id} onChange={(v) => setRoute((r) => ({ ...r, departure_country_id: v }))} options={opts(countries)} />
-                  </FormField>
-                  <FormField label="Varış Ülkesi" required={isPositiveStatus} error={errors.target_country_id?.[0]}>
-                    <SelectInput value={route.target_country_id} onChange={(v) => setRoute((r) => ({ ...r, target_country_id: v }))} options={opts(countries)} />
-                  </FormField>
-                  <FormField label="Transfer Ülkesi">
-                    <SelectInput value={route.transit_country_id} onChange={(v) => setRoute((r) => ({ ...r, transit_country_id: v }))} options={opts(countries)} />
-                  </FormField>
-                </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-6">
+                <FormField label="Ön Taşıma Tarafımızdan Yapılır">
+                  <SelectInput value={form.front_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, front_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
+                </FormField>
+                <FormField label="Son Taşıma Tarafımızdan Yapılır">
+                  <SelectInput value={form.final_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, final_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
+                </FormField>
               </div>
-
-              <div>
-                <SectionHeader icon={CalendarDays} title="Tarih" />
-                <div className="grid grid-cols-3 gap-4">
-                  <FormField label="Teklif Tarihi" required error={errors.offer_date?.[0]}>
-                    <TextInput value={form.offer_date} onChange={(v) => setForm((f) => ({ ...f, offer_date: v }))} type="date" error={!!errors.offer_date} />
-                  </FormField>
-                  <FormField label="Pazarlama Bildirim Tarihi" required error={errors.marketing_notification_date?.[0]}>
-                    <TextInput value={form.marketing_notification_date} onChange={(v) => setForm((f) => ({ ...f, marketing_notification_date: v }))} type="date" error={!!errors.marketing_notification_date} />
-                  </FormField>
-                  <FormField label="Geçerlilik Tarihi" required error={errors.offer_validity_date?.[0]}>
-                    <TextInput value={form.offer_validity_date} onChange={(v) => setForm((f) => ({ ...f, offer_validity_date: v }))} type="date" error={!!errors.offer_validity_date} />
-                  </FormField>
-                </div>
-
-                {/*
-                  Olumlu Tarihi ELLE GİRİLMEZ: durum Olumlu'ya çekildiğinde sunucu
-                  o günün tarihini damgalar (LoadWriteService.ResolveApprovalDate) ve
-                  Siber'de skn_rezervasyon.onaytarih sütununa yazar. Teklif Tarihi'ne
-                  dokunulmaz — ikisinin farkı "teklif kaç günde onaylandı" bilgisidir.
-                */}
-                {isPositiveStatus && (
-                  <div className="mt-3 flex items-center gap-2 rounded-lg border border-emerald-100 bg-emerald-50/70 px-3 py-2">
-                    <CalendarDays size={14} className="text-emerald-600 shrink-0" />
-                    <span className="text-xs text-emerald-900">
-                      <b>Olumlu Tarihi:</b>{" "}
-                      {detailMeta.approvalDate
-                        ? new Date(detailMeta.approvalDate).toLocaleDateString("tr-TR")
-                        : new Date().toLocaleDateString("tr-TR")}
-                    </span>
-                    <span className="ml-auto text-[11px] text-emerald-700/70">
-                      {detailMeta.approvalDate ? "kayıtlı" : "kaydedince damgalanacak"}
-                    </span>
-                  </div>
-                )}
               </div>
-
-              <div>
-                <SectionHeader icon={CreditCard} title="Ödeme" />
-                <div className="grid grid-cols-3 gap-4">
-                  <FormField label="Ödeme Şekli" required error={errors.payment_type_id?.[0]}>
-                    <SelectInput value={form.payment_type_id} onChange={(v) => setForm((f) => ({ ...f, payment_type_id: v }))} options={opts(paymentTypes)} />
-                  </FormField>
-                  <div className="col-span-2">
-                    <AccountPicker label="Navlun Ödeyecek Firma" value={companyPayFreight} onChange={setCompanyPayFreight} error={errors.company_pay_freight_id?.[0]} accountType={1} />
-                  </div>
-                  <div className="col-span-3">
-                    <FormField label="Navlun Ödeyen Firma (serbest metin)">
-                      <TextInput value={form.payer_company} onChange={(v) => setForm((f) => ({ ...f, payer_company: v }))} />
-                    </FormField>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <SectionHeader icon={Truck} title="Taşıma Ayarları" />
-                <div className="grid grid-cols-2 gap-4">
-                  <FormField label="Ön Taşıma Tarafımızdan Yapılır">
-                    <SelectInput value={form.front_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, front_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
-                  </FormField>
-                  <FormField label="Son Taşıma Tarafımızdan Yapılır">
-                    <SelectInput value={form.final_transportation_by_us} onChange={(v) => setForm((f) => ({ ...f, final_transportation_by_us: v }))} options={YES_NO_OPTIONS} />
-                  </FormField>
-                </div>
-              </div>
-            </div>
+            </section>
 
             <section>
               <SectionTitle>Yük İçeriği</SectionTitle>

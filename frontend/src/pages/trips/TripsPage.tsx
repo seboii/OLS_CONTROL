@@ -1016,7 +1016,7 @@ export function TripsPage() {
           )
         }
       >
-        <div className="p-8 grid grid-cols-2 gap-x-6 gap-y-5">
+        <div className="p-8 grid grid-cols-2 gap-x-6 gap-y-6">
           <CarPicker
             label="Araç (Plaka)"
             required
@@ -1080,7 +1080,7 @@ export function TripsPage() {
           <div className="p-10 text-center text-sm text-gray-400">Yükleniyor...</div>
         ) : (
           detail && (
-            <div className="p-8">
+            <div className="p-8 space-y-10">
               {/* ---------------------------------------------------------------
                   TEK SAYFA: detay eskiden 4 sekmeliydi. Sıra işin sırası:
                   seferin kendi bilgileri -> bağlı yükler -> hareketler ->
@@ -1104,7 +1104,7 @@ export function TripsPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-x-6 gap-y-5">
+                  <div className="grid grid-cols-3 gap-x-6 gap-y-6">
                   <CarPicker
                     label="Araç (Plaka)"
                     required
