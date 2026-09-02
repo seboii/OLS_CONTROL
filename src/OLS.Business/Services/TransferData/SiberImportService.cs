@@ -299,15 +299,15 @@ public sealed class SiberImportService : ISiberImportService
         await RunAsync("FinancialItem", () => ImportFinancialItemsAsync(connection, cancellationToken));
         await RunAsync("FinancialItemDefaultAccount", () => ImportFinancialItemDefaultAccountsAsync(connection, cancellationToken));
         await RunAsync("Country", () => ImportCountriesAsync(connection, cancellationToken));
-        // City (sbr_sehir) BİLİNÇLİ OLARAK includeCities=false'ta ATLANIR: canlıda
-        // doğrulandı, bu tablo "şehir" değil — 116 ülkeye yayılmış 118.392 satırlık
-        // dünya çapında bir posta-kodu/mikro-yerleşim veritabanı (bazı ülkelerde
-        // 40.000+ satır). Sürekli senkronun her turunda bunu yeniden taraması hem
-        // aşırı pahalı hem anlamsız (İl/Şehir seçicimiz 104 kayıtlık küratörlü bir
-        // listedir, Siber'in ham coğrafya tablosu değil). Yalnızca elle tetiklenen
-        // TEK SEFERLİK kurulumda (bu metodun varsayılan çağrısı) hâlâ çalışır.
+        // City (sbr_sehir) 118.393 satırlık ham coğrafya tablosu; tamamı ALINMAZ.
+        // Sorgu "gerçekten kullanılan"la sınırlı (Türkiye + pozisyonlarda geçen
+        // her şehir, bugün 351 satır) — bkz. ImportCitiesAsync. includeCities
+        // bayrağı, sürekli senkronun bu turu atlayabilmesi için duruyor.
         if (includeCities)
             await RunAsync("City", () => ImportCitiesAsync(connection, cancellationToken));
+
+        if (_cityWarnings is { } cityNote)
+            errors.Add($"City not: {cityNote}");
         await RunAsync("District", () => ImportDistrictsAsync(connection, cancellationToken));
         await RunAsync("Currency", () => ImportCurrenciesAsync(connection, cancellationToken));
         await RunAsync("User", () => ImportUsersAsync(connection, cancellationToken));
@@ -867,8 +867,31 @@ public sealed class SiberImportService : ISiberImportService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // YERELDE OLUP SİBER'DE OLMAYAN ŞEHİRLER GÖRÜNÜR OLSUN. Böyle bir satır
+        // açılır listede seçilebiliyor ama kayıt anında "Siber'de bulunamadı"
+        // hatasına dönüşüyor; canlıda taklit Siber'den sızmış İstanbul/İzmir
+        // satırları tam olarak buydu. Sessizce silmiyoruz (2.910 sefer ve 1.573
+        // cari böyle satırlara işaret ediyordu) — sayıyı özete koyuyoruz.
+        var localIds = await _db.Cities.AsNoTracking()
+            .Where(c => c.SiberId != null && c.SiberId != "")
+            .Select(c => c.SiberId!)
+            .ToListAsync(cancellationToken);
+
+        var known = (await connection.QueryAsync<string>(new CommandDefinition(
+                "SELECT LOWER(CAST(sehirid AS VARCHAR(64))) FROM sbr_sehir",
+                cancellationToken: cancellationToken)))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var strays = localIds.Count(id => !known.Contains(id));
+        if (strays > 0)
+            _cityWarnings = $"{strays} yerel şehrin Siber'de karşılığı yok — seçilirse kayıt reddedilir.";
+
         return (created, updated);
     }
+
+    /// <summary>Son şehir içe aktarımında bulunan öksüz satır uyarısı.</summary>
+    private string? _cityWarnings;
 
     private async Task<(int, int)> ImportDistrictsAsync(IDbConnection connection, CancellationToken cancellationToken)
     {

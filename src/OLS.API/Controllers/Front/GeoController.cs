@@ -59,7 +59,12 @@ public sealed class GeoController : ApiControllerBase
         [FromQuery] int page = 1,
         CancellationToken cancellationToken = default)
     {
-        var query = _db.Cities.AsNoTracking().AsQueryable();
+        // SİBER KARŞILIĞI OLMAYAN ŞEHİR LİSTELENMEZ. Seçilebilen ama Siber'de
+        // olmayan bir şehir, kaydetme anında "Siber'de bulunamadı" hatasına
+        // dönüşüyordu — taklit Siber'den sızmış İstanbul/İzmir satırları tam
+        // olarak bunu yapıyordu (bkz. MergeDuplicateCities migrasyonu).
+        var query = _db.Cities.AsNoTracking()
+            .Where(c => c.SiberId != null && c.SiberId != "");
 
         // BULUNAN GERÇEK BUG: burada değer BÜYÜK harfe çevrilip karşılaştırılıyordu
         // (olsold'un strtoupper'ı taşınmış), ama yereldeki cities.country_id
