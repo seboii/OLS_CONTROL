@@ -157,7 +157,10 @@ const invoiceMoney = (value: number | null) =>
 export function CustomersPage() {
   const { can } = useAuth();
   const { addToast } = useToast();
-  const canCreate = can("account_management", "create");
+  // OLUŞTURMA HERKESE AÇIK: müşteri / araç / teklif / yük / sefer kaydı
+  // AÇMAK yetkiye bağlı değil. Okuma, güncelleme ve silme yetkileri
+  // olduğu gibi duruyor; uç tarafında da create izni aranmıyor.
+  const canCreate = true;
   const canUpdate = can("account_management", "update");
   const canDelete = can("account_management", "delete");
 

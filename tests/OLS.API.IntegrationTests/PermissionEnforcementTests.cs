@@ -18,8 +18,14 @@ public sealed class PermissionEnforcementTests
 
     public PermissionEnforcementTests(OlsApiFactory factory) => _factory = factory;
 
+    /// <summary>
+    /// KAYIT AÇMAK YETKİYE BAĞLI DEĞİL — bilinçli kural. Müşteri / araç /
+    /// teklif / yük / sefer oluşturma uçlarında <c>create</c> izni aranmıyor;
+    /// yetki sistemi bu sayfalarda okuma, güncelleme ve silme için duruyor.
+    /// Eskiden bu test aynı isteğin 403 döndüğünü kilitliyordu.
+    /// </summary>
     [Fact]
-    public async Task CreateCar_AsFreshUserWithoutCarManagementPermission_Returns403()
+    public async Task CreateCar_AsFreshUserWithoutCarManagementPermission_IsAllowed()
     {
         using var admin = await _factory.CreateAdminClientAsync();
         var email = $"car-noperm-{Guid.NewGuid():N}@example.test";
@@ -27,7 +33,35 @@ public sealed class PermissionEnforcementTests
         var token = await _factory.LoginAsync(email, "Test!2026Pw");
         using var client = _factory.CreateAuthorizedClient(token);
 
-        var response = await client.PostAsJsonAsync("/api/v1/car", new { plate_number = "34 XX 0001" });
+        var carPayload = await TestCarHelper.RequiredCarFieldsAsync(admin);
+        carPayload["plate_number"] = $"34 AC {Random.Shared.Next(1000, 9999)}";
+
+        var response = await client.PostAsJsonAsync("/api/v1/car", carPayload);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// Oluşturma açıldı diye yetki kontrolü BÜTÜNÜYLE kalkmadı: aynı sayfada
+    /// silme hâlâ yetki istiyor. Mekanizmanın çalışmaya devam ettiğini kilitler.
+    /// </summary>
+    [Fact]
+    public async Task DeleteCar_AsFreshUserWithoutCarManagementPermission_Returns403()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+        var email = $"car-nodelete-{Guid.NewGuid():N}@example.test";
+        await admin.CreateUserAsync(email);
+        var token = await _factory.LoginAsync(email, "Test!2026Pw");
+        using var client = _factory.CreateAuthorizedClient(token);
+
+        // Silme ucu gövde bekliyor (DELETE /api/v1/car + deletion_id), ama yetki
+        // süzgeci model bağlamadan ÖNCE çalıştığı için içerik önemsiz.
+        using var request = new HttpRequestMessage(HttpMethod.Delete, "/api/v1/car")
+        {
+            Content = JsonContent.Create(new { deletion_id = new[] { 1 } }),
+        };
+
+        var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }

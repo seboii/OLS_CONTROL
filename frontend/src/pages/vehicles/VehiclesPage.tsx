@@ -95,7 +95,10 @@ function CarCard({
 export function VehiclesPage() {
   const { can } = useAuth();
   const { addToast } = useToast();
-  const canCreate = can("car_management", "create");
+  // OLUŞTURMA HERKESE AÇIK: müşteri / araç / teklif / yük / sefer kaydı
+  // AÇMAK yetkiye bağlı değil. Okuma, güncelleme ve silme yetkileri
+  // olduğu gibi duruyor; uç tarafında da create izni aranmıyor.
+  const canCreate = true;
   const canUpdate = can("car_management", "update");
   const canDelete = can("car_management", "delete");
 

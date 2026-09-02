@@ -126,7 +126,9 @@ public sealed class LoadController : ApiControllerBase
     /// geçiyordu, kullanıcı hangi alanın boş kaldığını göremiyordu.
     /// </summary>
     [HttpPost("saveAi")]
-    [RequiresPermission(PermissionAction.Create, "load_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     public async Task<IActionResult> SaveAi(
         [FromBody] LoadAiRequest request,
         [FromServices] ILoadAiImportService ai,
@@ -144,7 +146,9 @@ public sealed class LoadController : ApiControllerBase
     /// durum ve onay bilgisi devredilmez (bkz. LoadService.DuplicateAsync).
     /// </summary>
     [HttpPost("{id:long}/duplicate")]
-    [RequiresPermission(PermissionAction.Create, "load_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     public async Task<IActionResult> Duplicate(long id, CancellationToken cancellationToken)
     {
         var copyId = await _loads.DuplicateAsync(id, cancellationToken);
@@ -200,7 +204,9 @@ public sealed class LoadController : ApiControllerBase
     }
 
     [HttpPost]
-    [RequiresPermission(PermissionAction.Create, "load_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     public async Task<IActionResult> Save(
         [FromForm] LoadFormRequest form, CancellationToken cancellationToken)
     {

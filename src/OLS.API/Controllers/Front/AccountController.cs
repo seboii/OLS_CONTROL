@@ -96,7 +96,9 @@ public sealed class AccountController : ApiControllerBase
     }
 
     [HttpPost]
-    [RequiresPermission(PermissionAction.Create, "account_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     public async Task<IActionResult> Save(
         [FromForm] AccountFormRequest form, CancellationToken cancellationToken)
     {

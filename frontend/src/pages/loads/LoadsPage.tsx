@@ -391,7 +391,10 @@ export function LoadsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const canCreate = can("load_management", "create");
+  // OLUŞTURMA HERKESE AÇIK: müşteri / araç / teklif / yük / sefer kaydı
+  // AÇMAK yetkiye bağlı değil. Okuma, güncelleme ve silme yetkileri
+  // olduğu gibi duruyor; uç tarafında da create izni aranmıyor.
+  const canCreate = true;
   const canUpdate = can("load_management", "update");
   const canDelete = can("load_management", "delete");
 

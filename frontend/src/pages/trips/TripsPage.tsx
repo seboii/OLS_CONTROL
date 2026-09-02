@@ -279,7 +279,10 @@ export function TripsPage() {
   // düşmek kullanıcıyı boşuna dolaştırırdı.
   const canOpenLoad = can("load_management", "read");
 
-  const canCreate = can("expedition_management", "create");
+  // OLUŞTURMA HERKESE AÇIK: müşteri / araç / teklif / yük / sefer kaydı
+  // AÇMAK yetkiye bağlı değil. Okuma, güncelleme ve silme yetkileri
+  // olduğu gibi duruyor; uç tarafında da create izni aranmıyor.
+  const canCreate = true;
   const canUpdate = can("expedition_management", "update");
   const canDelete = can("expedition_management", "delete");
 

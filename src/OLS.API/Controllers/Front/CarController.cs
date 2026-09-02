@@ -89,7 +89,9 @@ public sealed class CarController : ApiControllerBase
     }
 
     [HttpPost]
-    [RequiresPermission(PermissionAction.Create, "car_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     public async Task<IActionResult> Save(
         [FromBody] CarRequest request, CancellationToken cancellationToken)
     {

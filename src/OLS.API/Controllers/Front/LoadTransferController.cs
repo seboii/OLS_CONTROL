@@ -66,7 +66,9 @@ public sealed class LoadTransferController : ApiControllerBase
     /// arşive ulaştığı yanıtta dönüyor ve eksik varsa loglanıyor.
     /// </summary>
     [HttpPost("{id:long}/archive")]
-    [RequiresPermission(PermissionAction.Create, "load_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     [RequestSizeLimit(64 * 1024 * 1024)]
     public async Task<IActionResult> UploadArchive(
         long id, [FromForm] IFormFileCollection files, CancellationToken cancellationToken)
@@ -161,7 +163,9 @@ public sealed class LoadTransferController : ApiControllerBase
     /// duruyordu ama davranışı "kayıt oluştur" değil "teklifi yüke çevir"dir.
     /// </summary>
     [HttpPost]
-    [RequiresPermission(PermissionAction.Create, "load_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     // Teklifi yüke çevirmek teklif modülünün işi; Avrora bu yolu kullanmıyor.
     [RequiresOfferModule]
     public async Task<IActionResult> ConvertOffer(
@@ -237,7 +241,9 @@ public sealed class LoadTransferController : ApiControllerBase
     /// yetki kontrolü serviste de tekrarlanır (bkz. DirectLoadService).
     /// </summary>
     [HttpPost("direct")]
-    [RequiresPermission(PermissionAction.Create, "load_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     public async Task<IActionResult> CreateDirect(
         [FromBody] DirectLoadRequest request, CancellationToken cancellationToken)
     {
@@ -623,7 +629,9 @@ public sealed class ExpeditionController : ApiControllerBase
     }
 
     [HttpPost]
-    [RequiresPermission(PermissionAction.Create, "expedition_management")]
+    // OLUŞTURMA YETKİYE BAĞLI DEĞİL. Müşteri / araç / teklif / yük / sefer
+    // kaydı açmak herkese açık; okuma, güncelleme ve silme yetkileri
+    // olduğu gibi duruyor (arayüzde de aynı, bkz. canCreate).
     public async Task<IActionResult> Save(
         [FromBody] ExpeditionRequest request, CancellationToken cancellationToken)
     {
