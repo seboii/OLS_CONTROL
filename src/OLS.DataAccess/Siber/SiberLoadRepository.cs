@@ -2,24 +2,6 @@
 
 namespace OLS.DataAccess.Siber;
 
-/// <summary>
-/// Yazımdan önce doğrulanabilen Siber referans tabloları. Tablo/kolon adları
-/// SQL'e dizge olarak girdiği için serbest metin DEĞİL, kapalı bir liste.
-/// </summary>
-public enum SiberReferenceTable
-{
-    /// <summary>
-    /// <c>skn_sabittanim</c> — iş türü, yükleme tipi, yük türü, talimat geliş
-    /// şekli ve römork cinsi hepsi bu tek tabloda <c>grupkod</c> ile ayrılıyor.
-    /// </summary>
-    SabitTanim,
-
-    /// <summary><c>sbr_departman</c> — tek FK'li referans, bu yüzden en kritiği.</summary>
-    Departman,
-
-    /// <summary><c>sbr_odemesekli</c>.</summary>
-    OdemeSekli,
-}
 
 /// <summary>
 /// Siber tarafındaki yük tabloları: <c>skn_yuk</c>, <c>skn_yukkoli</c>,
@@ -47,17 +29,6 @@ public interface ISiberLoadRepository
     Task<IReadOnlyList<string>> FindMissingKalemIdsAsync(
         IReadOnlyCollection<string> kalemIds, CancellationToken cancellationToken = default);
 
-    /// <summary>
-    /// Verilen referans kimliklerinden Siber'de BULUNMAYANLARI döner.
-    ///
-    /// Açılır listeler yerel tablolardan besleniyor ama kayıt Siber'e yazılıyor;
-    /// karşılığı olmayan bir seçenek INSERT'i düşürüyor. En sert olanı departman:
-    /// <c>skn_yuk.departmanid</c> FK'li (FK_skn_yuk_sbr_departman_departmanid).
-    /// Yük yazıldıktan sonra geri alınamadığı için kontrol YAZIMDAN ÖNCE yapılır.
-    /// </summary>
-    Task<IReadOnlyList<string>> FindMissingReferenceIdsAsync(
-        SiberReferenceTable table, IReadOnlyCollection<string> ids,
-        CancellationToken cancellationToken = default);
 
     Task<Guid> GenerateYukIdAsync(CancellationToken cancellationToken = default);
     Task<Guid> GenerateYukKoliIdAsync(CancellationToken cancellationToken = default);
@@ -347,52 +318,6 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             SELECT LOWER(CAST(kalemid AS VARCHAR(64)))
             FROM skn_kalem
             WHERE kalemid IN @Ids
-            """,
-            new { Ids = parsable.Select(Guid.Parse).ToArray() },
-            cancellationToken: cancellationToken))).ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        missing.AddRange(parsable.Where(id => !found.Contains(id)));
-        return missing;
-    }
-
-    public async Task<IReadOnlyList<string>> FindMissingReferenceIdsAsync(
-        SiberReferenceTable table, IReadOnlyCollection<string> ids,
-        CancellationToken cancellationToken = default)
-    {
-        var (tableName, keyColumn) = table switch
-        {
-            SiberReferenceTable.SabitTanim => ("skn_sabittanim", "sabittanimid"),
-            SiberReferenceTable.Departman => ("sbr_departman", "departmanid"),
-            SiberReferenceTable.OdemeSekli => ("sbr_odemesekli", "odemesekliid"),
-            _ => throw new ArgumentOutOfRangeException(nameof(table)),
-        };
-
-        var candidates = ids
-            .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Select(id => id.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        if (candidates.Count == 0)
-            return [];
-
-        // Biçimi GUID olmayan kimlik Siber'de olamaz; sorguya sokulmadan eksik
-        // sayılır (uniqueidentifier dönüşümü aksi hâlde hata verirdi). Taklit
-        // Siber'den kalan "ref-yuklemetip-0" gibi değerler tam olarak buraya düşer.
-        var parsable = candidates.Where(id => Guid.TryParse(id, out _)).ToList();
-        var missing = candidates.Except(parsable, StringComparer.OrdinalIgnoreCase).ToList();
-
-        if (parsable.Count == 0)
-            return missing;
-
-        using var connection = await _factory.CreateOpenAsync(cancellationToken);
-
-        // tableName/keyColumn yukarıdaki kapalı listeden geliyor, kullanıcı girdisi değil.
-        var found = (await connection.QueryAsync<string>(new CommandDefinition(
-            $"""
-            SELECT LOWER(CAST({keyColumn} AS VARCHAR(64)))
-            FROM {tableName}
-            WHERE {keyColumn} IN @Ids
             """,
             new { Ids = parsable.Select(Guid.Parse).ToArray() },
             cancellationToken: cancellationToken))).ToHashSet(StringComparer.OrdinalIgnoreCase);

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.DataAccess.Context;
+using OLS.Business.Services.Siber;
 using OLS.DataAccess.Siber;
 
 namespace OLS.Business.Services.TransferSiber;
@@ -45,13 +46,16 @@ public sealed class TransferSiberService : ITransferSiberService
     private readonly OlsDbContext _db;
     private readonly ISiberReservationRepository _siber;
     private readonly IClock _clock;
+    private readonly ISiberReferenceValidator _references;
 
     public TransferSiberService(
-        OlsDbContext db, ISiberReservationRepository siber, IClock clock)
+        OlsDbContext db, ISiberReservationRepository siber, IClock clock,
+        ISiberReferenceValidator references)
     {
         _db = db;
         _siber = siber;
         _clock = clock;
+        _references = references;
     }
 
     public async Task<TransferSiberResult> TransferOfferAsync(
@@ -382,30 +386,22 @@ public sealed class TransferSiberService : ITransferSiberService
     /// bağlı değil, ama yük aşamasında bağlı olduğu için onlar da kontrol edilir —
     /// hatayı bir adım önce ve anlaşılır biçimde yakalamak için.
     /// </summary>
+    /// <summary>
+    /// Teklifin Siber referanslarını yazımdan önce doğrular. Kontrolün kendisi
+    /// ortak serviste (bkz. <see cref="ISiberReferenceValidator"/>) — yük ve
+    /// sefer akışları da aynı yerden geçiyor.
+    /// </summary>
     private async Task<string?> ValidateSiberReferencesAsync(
-        DataAccess.Entities.Load load, OfferRefs refs, CancellationToken cancellationToken)
-    {
-        (string Label, string? Value, string Table, string Column)[] checks =
-        [
-            ("Departman", refs.DepartmentSiberId, "sbr_departman", "departmanid"),
-            ("Müşteri", refs.CustomerSiberId, "sbr_firma", "firmaid"),
-            ("Gönderici", refs.SenderSiberId, "sbr_firma", "firmaid"),
-            ("Alıcı", refs.ReceiverSiberId, "sbr_firma", "firmaid"),
-            ("Navlun Ödeyecek Firma", refs.CompanyPayFreightSiberId, "sbr_firma", "firmaid"),
-        ];
-
-        foreach (var (label, value, table, column) in checks)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-                continue;
-
-            if (!await _siber.ReferenceExistsAsync(table, column, value, cancellationToken))
-                return $"\"{label}\" alanındaki kayıt Siber'de bulunamadı — " +
-                       "lütfen bu alanı Siber'de tanımlı bir değerle yeniden seçin.";
-        }
-
-        return null;
-    }
+        DataAccess.Entities.Load load, OfferRefs refs, CancellationToken cancellationToken) =>
+        await _references.ValidateAsync(
+            [
+                new("Departman", SiberReferenceTable.Departman, refs.DepartmentSiberId),
+                new("Müşteri", SiberReferenceTable.Firma, refs.CustomerSiberId),
+                new("Gönderici", SiberReferenceTable.Firma, refs.SenderSiberId),
+                new("Alıcı", SiberReferenceTable.Firma, refs.ReceiverSiberId),
+                new("Navlun Ödeyecek Firma", SiberReferenceTable.Firma, refs.CompanyPayFreightSiberId),
+            ],
+            cancellationToken);
 
     /// <summary>
     /// Teklifin mali kalemlerinin Siber'de GERÇEKTEN var olduğunu doğrular.

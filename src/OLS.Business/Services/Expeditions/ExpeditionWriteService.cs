@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
+using OLS.Business.Services.Siber;
 using OLS.DataAccess.Siber;
 
 namespace OLS.Business.Services.Expeditions;
@@ -70,13 +71,16 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
     private readonly OlsDbContext _db;
     private readonly ISiberExpeditionRepository _siber;
     private readonly IClock _clock;
+    private readonly ISiberReferenceValidator _references;
 
     public ExpeditionWriteService(
-        OlsDbContext db, ISiberExpeditionRepository siber, IClock clock)
+        OlsDbContext db, ISiberExpeditionRepository siber, IClock clock,
+        ISiberReferenceValidator references)
     {
         _db = db;
         _siber = siber;
         _clock = clock;
+        _references = references;
     }
 
     public async Task<ExpeditionWriteResult> CreateAsync(
@@ -107,6 +111,22 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
 
         if (await _siber.IsCarOnActiveTripAsync(car.SiberId, cancellationToken))
             return ExpeditionWriteResult.Fail("Bu araç zaten seferde");
+
+        // SİBER REFERANSLARI YAZIMDAN ÖNCE DOĞRULANIR.
+        //
+        // skn_pozisyon.romorkid hem FK'li HEM NOT NULL: karşılığı olmayan bir
+        // araç INSERT'i kesin düşürür. departmanid de FK'li ve SiberId'si boş
+        // olsa sessizce NULL yazılır — sefer Siber'de departmansız açılırdı.
+        // Bu akış eskiden yalnızca YEREL kaydın varlığına bakıyordu.
+        var referenceFailure = await _references.ValidateAsync(
+            [
+                new("Araç", SiberReferenceTable.Arac, car.SiberId),
+                new("Departman", SiberReferenceTable.Departman, department.SiberId),
+            ],
+            cancellationToken);
+
+        if (referenceFailure is not null)
+            return ExpeditionWriteResult.Fail(referenceFailure);
 
         var owner = await _db.CarOwners.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == car.VehicleOwner, cancellationToken);

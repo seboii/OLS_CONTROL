@@ -47,6 +47,7 @@ public static class DependencyInjection
         services.AddScoped<ISiberFinanceRepository, SiberFinanceRepository>();
         services.AddScoped<ISiberInvoiceWriter, SiberInvoiceWriter>();
         services.AddScoped<ISiberLoadRepository, SiberLoadRepository>();
+        services.AddScoped<ISiberReferenceRepository, SiberReferenceRepository>();
         services.AddScoped<ISiberLoadMappingRepository, SiberLoadMappingRepository>();
         services.AddScoped<ISiberLoadReleaseRepository, SiberLoadReleaseRepository>();
         services.AddScoped<ISiberReservationRepository, SiberReservationRepository>();

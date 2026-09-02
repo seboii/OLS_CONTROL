@@ -1,4 +1,5 @@
 using System.Net;
+using OLS.Business.Services.Siber;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -89,7 +90,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock);
+        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator());
 
         var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
 
@@ -136,7 +137,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock);
+        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator());
 
         var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
 
@@ -187,7 +188,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock);
+        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator());
 
         var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
 
@@ -408,13 +409,6 @@ internal sealed class FakeSiberLoadRepository : ISiberLoadRepository
         IReadOnlyCollection<string> kalemIds, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<string>>([]);
 
-    // Sahte Siber'de her referans "var" sayılır; bu testlerin konusu tanım
-    // doğrulaması değil.
-    public Task<IReadOnlyList<string>> FindMissingReferenceIdsAsync(
-        SiberReferenceTable table, IReadOnlyCollection<string> ids,
-        CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<string>>([]);
-
     public FakeSiberLoadRepository(bool isConfigured) => IsConfigured = isConfigured;
 
     public bool IsConfigured { get; }
@@ -501,4 +495,15 @@ internal sealed class FakeSiberReservationRepository : ISiberReservationReposito
         throw new NotSupportedException();
     public Task UpdateRezervasyonTarifeAsync(SiberRezervasyonTarife tarife, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+}
+
+/// <summary>
+/// Bu testlerin konusu Siber referanslarının varlığı DEĞİL, aktarım akışı.
+/// Gerçek doğrulama canlı Siber'e sorduğu için burada geçirgen bırakılıyor.
+/// </summary>
+internal sealed class PassThroughReferenceValidator : ISiberReferenceValidator
+{
+    public Task<string?> ValidateAsync(
+        IReadOnlyList<SiberReferenceCheck> checks, CancellationToken cancellationToken = default) =>
+        Task.FromResult<string?>(null);
 }

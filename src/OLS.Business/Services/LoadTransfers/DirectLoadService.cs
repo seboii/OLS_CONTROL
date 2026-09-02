@@ -3,6 +3,7 @@ using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
+using OLS.Business.Services.Siber;
 using OLS.DataAccess.Siber;
 
 namespace OLS.Business.Services.LoadTransfers;
@@ -89,16 +90,19 @@ public sealed class DirectLoadService : IDirectLoadService
 {
     private readonly OlsDbContext _db;
     private readonly ISiberLoadRepository _siber;
+    private readonly ISiberReferenceValidator _references;
     private readonly ICompanyScope _companyScope;
     private readonly IPermissionService _permissions;
     private readonly IClock _clock;
 
     public DirectLoadService(
         OlsDbContext db, ISiberLoadRepository siber, ICompanyScope companyScope,
-        IPermissionService permissions, IClock clock)
+        IPermissionService permissions, IClock clock,
+        ISiberReferenceValidator references)
     {
         _db = db;
         _siber = siber;
+        _references = references;
         _companyScope = companyScope;
         _permissions = permissions;
         _clock = clock;
@@ -181,19 +185,32 @@ public sealed class DirectLoadService : IDirectLoadService
         // Açılır listeler yerel tablolardan besleniyor ama kayıt Siber'e gidiyor.
         // Karşılığı olmayan bir seçenek INSERT'i düşürüyor ve kullanıcı ekranda
         // yalnızca "beklenmeyen bir hata oluştu" görüyordu.
-        var lookupFailure = await ValidateSiberLookupsAsync(
-            [
-                ("Departman", SiberReferenceTable.Departman, department.SiberId),
-                ("Ödeme tipi", SiberReferenceTable.OdemeSekli, paymentType?.SiberId),
-                ("İş türü", SiberReferenceTable.SabitTanim, workType.SiberId),
-                ("Yükleme tipi", SiberReferenceTable.SabitTanim, loadingType.SiberId),
-                ("Yük türü", SiberReferenceTable.SabitTanim, loadTransferType?.SiberId),
-                ("Talimat geliş şekli", SiberReferenceTable.SabitTanim, instruction?.SiberId),
-                ("Römork cinsi", SiberReferenceTable.SabitTanim, romorkType?.SiberId),
-            ],
-            cancellationToken);
+        var checks = new List<SiberReferenceCheck>
+        {
+            new("Departman", SiberReferenceTable.Departman, department.SiberId),
+            new("Ödeme tipi", SiberReferenceTable.OdemeSekli, paymentType?.SiberId),
+            new("İş türü", SiberReferenceTable.SabitTanim, workType.SiberId),
+            new("Yükleme tipi", SiberReferenceTable.SabitTanim, loadingType.SiberId),
+            new("Yük türü", SiberReferenceTable.SabitTanim, loadTransferType?.SiberId),
+            new("Talimat geliş şekli", SiberReferenceTable.SabitTanim, instruction?.SiberId),
+            new("Römork cinsi", SiberReferenceTable.SabitTanim, romorkType?.SiberId),
+
+            // CARİLER: skn_yuk'ta üçü de FK'li (firmaid / gondericiid / aliciid).
+            // Eskiden yalnızca yerel tablodan okunuyordu; Siber ekranından silinmiş
+            // bir cari seçilince INSERT FK hatasıyla düşüyor ve kullanıcı "beklenmeyen
+            // hata" görüyordu. Canlıda üç cari tam olarak bu durumdaydı.
+            new("Müşteri", SiberReferenceTable.Firma, customer),
+            new("Gönderici", SiberReferenceTable.Firma, sender),
+            new("Alıcı", SiberReferenceTable.Firma, receiver),
+        };
+
+        // KAP TİPİ: skn_yukkoli.kapid FK'li. Liste Siber'den senkronlanıyor,
+        // yani oradan bir satır silinirse aynı sessiz FK hatasına dönüşür.
+        checks.AddRange(await CaseTypeChecksAsync(model, cancellationToken));
+
+        var lookupFailure = await _references.ValidateAsync(checks, cancellationToken);
         if (lookupFailure is not null)
-            return lookupFailure;
+            return LoadTransferWriteResult.Fail(lookupFailure);
 
         var userSiberCode = await _db.Users.AsNoTracking()
             .Where(u => u.Id == currentUserId).Select(u => u.SiberCode)
@@ -379,55 +396,29 @@ public sealed class DirectLoadService : IDirectLoadService
     /// </summary>
 
     /// <summary>
-    /// Seçilen tanımların (departman, ödeme tipi, iş türü, yükleme tipi, yük
-    /// türü, talimat geliş şekli, römork cinsi) Siber'de gerçekten var olduğunu
-    /// doğrular. Sorun varsa Siber'e HİÇBİR ŞEY yazılmadan hata döner.
-    ///
-    /// İki ayrı kusuru birden yakalar:
-    ///   * satırın <c>SiberId</c>'si hiç yok ya da GUID bile değil (taklit
-    ///     Siber'den kalan "ref-yuklemetip-0" gibi),
-    ///   * GUID var ama Siber'de o kayıt yok/silinmiş.
-    ///
-    /// Boş bırakılan (null) seçimler doğrulanmaz — zorunluluk kontrolü ayrı.
+    /// Paketlerde seçilen kap tiplerinin Siber kimliklerini toplar.
     /// </summary>
-    private async Task<LoadTransferWriteResult?> ValidateSiberLookupsAsync(
-        IReadOnlyList<(string Label, SiberReferenceTable Table, string? SiberId)> selections,
-        CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<SiberReferenceCheck>> CaseTypeChecksAsync(
+        DirectLoadModel model, CancellationToken cancellationToken)
     {
-        // Seçilmemiş alanlar bu kontrolün konusu değil.
-        var chosen = selections.Where(x => x.SiberId is not null).ToList();
-
-        var withoutId = selections
-            .Where(x => x.SiberId is not null && string.IsNullOrWhiteSpace(x.SiberId))
-            .Select(x => x.Label)
+        var ids = model.Packages
+            .Where(p => p.CaseTypeId is not null)
+            .Select(p => p.CaseTypeId!.Value)
+            .Distinct()
             .ToList();
 
-        var problems = new List<string>(withoutId.Select(l => $"{l} (Siber karşılığı tanımlı değil)"));
+        if (ids.Count == 0)
+            return [];
 
-        // Tablo başına tek sorgu.
-        foreach (var group in chosen
-            .Where(x => !string.IsNullOrWhiteSpace(x.SiberId))
-            .GroupBy(x => x.Table))
-        {
-            var missing = await _siber.FindMissingReferenceIdsAsync(
-                group.Key,
-                group.Select(x => x.SiberId!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
-                cancellationToken);
+        var rows = await _db.CaseTypes.AsNoTracking()
+            .Where(c => ids.Contains(c.Id))
+            .Select(c => new { c.Name, c.SiberId })
+            .ToListAsync(cancellationToken);
 
-            if (missing.Count == 0)
-                continue;
-
-            problems.AddRange(group
-                .Where(x => missing.Contains(x.SiberId!, StringComparer.OrdinalIgnoreCase))
-                .Select(x => $"{x.Label} (Siber'de bulunamadı)"));
-        }
-
-        if (problems.Count == 0)
-            return null;
-
-        return LoadTransferWriteResult.Fail(
-            $"Şu seçimlerin Siber'de karşılığı yok: {string.Join(", ", problems.Distinct())}. " +
-            "Listeyi yenileyip Siber'de tanımlı bir seçenek seçin.");
+        return rows
+            .Select(c => new SiberReferenceCheck(
+                $"Kap tipi \"{c.Name}\"", SiberReferenceTable.KapCins, c.SiberId))
+            .ToList();
     }
 
     /// <summary>

@@ -2124,15 +2124,35 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // CARİLERDE DE SİLME TESPİTİ. Yük/teklif/seferde vardı, caride yoktu:
+        // Siber ekranından silinen firma yerelde canlı görünmeye devam ediyor ve
+        // teklifsiz yük açarken FK hatası veriyordu (canlıda üç firma).
+        var deletionNote = await MarkMissingAsDeletedAsync(
+            "Cari",
+            "sbr_firma",
+            _db.Accounts.Where(a => a.SiberId != null),
+            a => a.SiberId,
+            a => a.Name,
+            (a, at) => a.SiberDeletedAt = at,
+            a => a.SiberDeletedAt,
+            (a, code, id, at) => { a.SiberDeletedBy = code; a.SiberDeletedByUserId = id; a.SiberDeletedOn = at; },
+            rows.Select(r => r.Firmaid!).Where(id => id is not null).ToList(),
+            cancellationToken);
+
         return new SiberImportSummary(created, updated, errors) with
         {
             Errors = errors,
             // Artık "atlandı" DEĞİL ve hata da değil: firmanın alanları güncellendi,
             // yalnızca muhasebe kodundan cari tipi çıkarılamadı (kod 120/320 değil).
             // Bilgi amaçlı not — bkz. SiberImportSummary.Notes.
-            Notes = unclassified > 0
-                ? [$"{unclassified} satırın muhasebe kodundan cari tipi çıkarılamadı (alanlar güncellendi, tip eşlemesine dokunulmadı)."]
-                : [],
+            Notes = (List<string>)
+            [
+                .. unclassified > 0
+                    ? new[] { $"{unclassified} satırın muhasebe kodundan cari tipi çıkarılamadı (alanlar güncellendi, tip eşlemesine dokunulmadı)." }
+                    : [],
+                .. deletionNote is null ? Array.Empty<string>() : [deletionNote],
+            ],
         };
     }
 

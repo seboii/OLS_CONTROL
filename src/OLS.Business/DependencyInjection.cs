@@ -118,6 +118,9 @@ public static class DependencyInjection
         services.AddScoped<Services.Authorization.ICompanyScope, Services.Authorization.CompanyScope>();
         services.AddScoped<Services.LoadTransfers.IDirectLoadService, Services.LoadTransfers.DirectLoadService>();
         services.AddScoped<Services.Loads.ILoadArchivePublisher, Services.Loads.LoadArchivePublisher>();
+
+        // Siber referans doğrulaması — teklif, yük ve sefer akışlarının ortak kapısı.
+        services.AddScoped<Services.Siber.ISiberReferenceValidator, Services.Siber.SiberReferenceValidator>();
         services.AddScoped<ITokenService, JwtTokenService>();
 
         return services;
