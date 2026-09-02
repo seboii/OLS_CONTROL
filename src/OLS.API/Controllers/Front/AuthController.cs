@@ -28,6 +28,11 @@ public sealed class AuthController : ApiControllerBase
 
     public sealed class LoginRequest
     {
+        /// <summary>
+        /// E-posta ya da Siber kullanıcı kodu. Alan adı <c>email</c> olarak
+        /// KALIYOR: arayüz ve kaynak sözleşme bu adı kullanıyor, değiştirmek
+        /// giriş isteğini kıracaktı.
+        /// </summary>
         [JsonPropertyName("email")]
         public string? Email { get; set; }
 
@@ -44,9 +49,13 @@ public sealed class AuthController : ApiControllerBase
         // olsold'daki Validator kuralları ve Türkçe mesajları birebir korunuyor.
         var errors = new Dictionary<string, string[]>();
 
+        // BİÇİM KONTROLÜ YALNIZCA E-POSTAYA. Kullanıcılar Siber hesabıyla da
+        // girebiliyor ve Siber kullanıcı kodu "FATIHT" gibi, e-posta değil —
+        // katı e-posta doğrulaması bu girişleri daha sunucuya varmadan reddederdi.
+        // "@" içeren değer e-posta sayılır ve eskisi gibi doğrulanır.
         if (string.IsNullOrWhiteSpace(request.Email))
             errors["email"] = [Translator.Get("E-mail Alanı boş olamaz")];
-        else if (!new EmailAddressAttribute().IsValid(request.Email))
+        else if (request.Email.Contains('@') && !new EmailAddressAttribute().IsValid(request.Email))
             errors["email"] = [Translator.Get("E-mail Alanı boş olamaz")];
 
         if (string.IsNullOrWhiteSpace(request.Password))

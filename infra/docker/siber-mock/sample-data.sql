@@ -79,9 +79,16 @@ INSERT INTO sbr_dovizkur (tarih, dovizkod, dovizalis, dovizsatis, efektifalis, e
   ('2026-08-01', 'EUR', 47.10, 47.35, 47.05, 47.45),
   ('2026-08-01', 'USD', 40.20, 40.40, 40.15, 40.50);
 
-INSERT INTO sky_kullanici (kullaniciid, ad, kod, email, engelle) VALUES
-  ('dddd0000-0000-0000-0000-000000000001', N'Ahmet Yılmaz', 'AY', 'ahmet@siber.test', 0),
-  ('dddd0000-0000-0000-0000-000000000002', N'Pasif Kullanıcı', 'PK', NULL, 1);
+-- pass, gercek Siber'deki gibi PWDENCRYPT ozetiyle dolduruluyor. Siber'in
+-- kendi dogrulayicisi sifreyi BUYUK HARFE cevirip karsilastirdigi icin
+-- (PWDCOMPARE(UPPER(@sifre), pass)) ozet de buyuk harfli metinden uretilir --
+-- yani Siber sifreleri buyuk/kucuk harf duyarsizdir.
+--   AY -> 'Ols!Local2026' | PK (engelli) -> 'Ols!Local2026'
+--   SIFRESIZ -> pass NULL (bos sifreyle giris DENENMEMELI, bkz. SiberUserRepository)
+INSERT INTO sky_kullanici (kullaniciid, ad, kod, email, engelle, pass) VALUES
+  ('dddd0000-0000-0000-0000-000000000001', N'Ahmet Yılmaz', 'AY', 'ahmet@siber.test', 0, PWDENCRYPT(UPPER('Ols!Local2026'))),
+  ('dddd0000-0000-0000-0000-000000000002', N'Pasif Kullanıcı', 'PK', NULL, 1, PWDENCRYPT(UPPER('Ols!Local2026'))),
+  ('dddd0000-0000-0000-0000-000000000003', N'Şifresiz Kullanıcı', 'SIFRESIZ', NULL, 0, NULL);
 
 INSERT INTO skn_yukdurum (yukdurumid, ad, sirano) VALUES
   (1, N'Hazırlanıyor', 1), (2, N'Yolda', 2), (3, N'Teslim Edildi', 3);

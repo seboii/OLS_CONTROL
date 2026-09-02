@@ -160,17 +160,24 @@ export function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">
-                E-Posta
+                E-Posta veya Siber Kullanıcı Kodu
               </label>
               <div className={clsx(
                 "relative border rounded-xl bg-white transition-all duration-150 overflow-hidden",
                 focused === "email" ? "border-blue-500 ring-2 ring-blue-500/20" : "border-gray-200",
               )}>
                 <Mail size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                {/* type="text": Siber kullanıcı kodu ("FATIHT") e-posta biçiminde
+                    değil; type="email" bu girişleri tarayıcıda daha gönderilmeden
+                    reddediyordu. autoCapitalize kapalı — kod büyük harfli ama
+                    doğrulama zaten harfe duyarsız, mobilde otomatik büyütme
+                    e-posta yazan kullanıcıyı yanıltırdı. */}
+                <input type="text" inputMode="email" autoCapitalize="none" autoCorrect="off"
+                  autoComplete="username" spellCheck={false}
+                  value={email} onChange={(e) => setEmail(e.target.value)}
                   onFocus={() => setFocused("email")} onBlur={() => setFocused(null)}
                   className="w-full pl-9 pr-4 py-3 text-sm bg-transparent focus:outline-none text-gray-800"
-                  placeholder="ad@olslojistik.com"
+                  placeholder="ad@olslojistik.com veya SIBER KODU"
                 />
               </div>
             </div>

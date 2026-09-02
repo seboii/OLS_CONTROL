@@ -893,9 +893,11 @@ public sealed class SiberImportService : ISiberImportService
     /// E-posta ile eşleşir; mevcut yerel kullanıcıların ŞİFRESİNE ASLA dokunmaz.
     ///
     /// Siber tarafına YALNIZCA okuma yapılır (tek bir SELECT) — bu uygulama
-    /// <c>sky_kullanici</c>'ye hiçbir koşulda yazmaz. Şifreler tamamen yereldir
-    /// (PostgreSQL <c>users.password</c>), Siber'deki kullanıcı şifreleriyle
-    /// hiçbir ilişkisi yoktur.
+    /// <c>sky_kullanici</c>'ye hiçbir koşulda yazmaz; <c>pass</c> sütunu ne
+    /// okunur ne kopyalanır. Yerel şifre (<c>users.password</c>, bcrypt) Siber
+    /// şifresinden AYRI kalır; kullanıcı isterse Siber şifresiyle de girebilir
+    /// ama o doğrulama Siber sunucusunda yapılır ve şifre yerele hiç yazılmaz
+    /// (bkz. <see cref="OLS.DataAccess.Siber.ISiberUserRepository"/>).
     ///
     /// Kaynakta yeni gelen kullanıcı şifresiz açılıyordu ve bu yüzden hiç giriş
     /// yapamıyordu; artık ortak başlangıç şifresi atanıyor (bkz.

@@ -127,6 +127,11 @@ services:
       # Varsayılan: sahte Siber'e bağlanır — canlı ERP'ye DEĞİL.
       # Gerçek Siber'e geçmek için .env dosyanıza SIBER_CONNECTION_OVERRIDE ekleyin.
       ConnectionStrings__Siber: '${SIBER_CONNECTION_OVERRIDE:-Server=siber-mock,1433;Database=Siber2022;User Id=sa;Password=${SIBER_SA_PASSWORD:-Ols!Local2026};TrustServerCertificate=True}'
+      # Siber hesabıyla giriş: kullanıcı e-postası + yerel şifresi YA DA Siber
+      # kullanıcı kodu + Siber şifresiyle girebilir. Şifre uygulamaya hiç gelmez,
+      # doğrulama Siber sunucusunda PWDCOMPARE ile yapılır (bkz.
+      # ISiberUserRepository). false yapılırsa yalnızca yerel şifreler kalır.
+      Siber__LoginEnabled: '${SIBER_LOGIN_ENABLED:-true}'
       # Siber'den gelen kullanıcıların şifresi yoktur (bkz. IDefaultUserPassword).
       # Şifresi boş olan HERKESE bu şifre atanır; mevcut şifreler ezilmez.
       Seed__DefaultUserPassword: '${SEED_DEFAULT_USER_PASSWORD:-Admin123}'

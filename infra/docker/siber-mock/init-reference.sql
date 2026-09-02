@@ -58,9 +58,12 @@ CREATE TABLE sbr_dovizkur (
     dovizalis DECIMAL(18,6), dovizsatis DECIMAL(18,6),
     efektifalis DECIMAL(18,6), efektifsatis DECIMAL(18,6));
 
+-- pass: gercek Siber'de varbinary(255) ve SQL Server'in kendi sifre ozeti
+-- (PWDENCRYPT). Dogrulama PWDCOMPARE(UPPER(@sifre), pass) ile sunucuda yapilir
+-- (bkz. ISiberUserRepository) -- ozet geri cevrilemez, uygulama sifreyi gormez.
 CREATE TABLE sky_kullanici (
     kullaniciid NVARCHAR(64) NOT NULL, ad NVARCHAR(255), kod NVARCHAR(64),
-    email NVARCHAR(255), engelle INT);
+    email NVARCHAR(255), engelle INT, pass VARBINARY(255) NULL);
 
 CREATE TABLE skn_yukdurum (
     yukdurumid INT, ad NVARCHAR(255), sirano INT);
