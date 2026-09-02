@@ -16,8 +16,12 @@ DROP TABLE IF EXISTS sbr_ulke, sbr_sehir, sbr_ilce, sbr_vergidaire,
     skn_yukdurum, sbr_teslimsekli, skn_pozisyondurum, sfy_muhasebeentegrekodu;
 GO
 
+-- kita: gercek Siber'de tinyint ve skn_sabittanim'in KITA grubuna karsilik
+-- gelir (0 AFRIKA, 1 ASYA, 2 AVRUPA, 3 AMERIKA, 4 AVUSTURALYA). Yuk kaydinda
+-- _yuklemekita/_bosaltmakita bu tablodan turer.
 CREATE TABLE sbr_ulke (
-    ulkeid NVARCHAR(64) NOT NULL, ad NVARCHAR(255), telefonkod NVARCHAR(16), kisaad NVARCHAR(16));
+    ulkeid NVARCHAR(64) NOT NULL, ad NVARCHAR(255), telefonkod NVARCHAR(16),
+    kisaad NVARCHAR(16), kita TINYINT NULL);
 
 CREATE TABLE sbr_sehir (
     sehirid NVARCHAR(64) NOT NULL, ad NVARCHAR(255), ulkeid NVARCHAR(64));

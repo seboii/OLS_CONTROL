@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Siber;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Siber;
 
@@ -45,13 +46,16 @@ public sealed class LoadReleaseService : ILoadReleaseService
 
     private readonly OlsDbContext _db;
     private readonly ISiberLoadReleaseRepository _siber;
+    private readonly ISiberCountryResolver _countries;
     private readonly IClock _clock;
 
     public LoadReleaseService(
-        OlsDbContext db, ISiberLoadReleaseRepository siber, IClock clock)
+        OlsDbContext db, ISiberLoadReleaseRepository siber,
+        ISiberCountryResolver countries, IClock clock)
     {
         _db = db;
         _siber = siber;
+        _countries = countries;
         _clock = clock;
     }
 
@@ -141,6 +145,18 @@ public sealed class LoadReleaseService : ILoadReleaseService
         var sender = await AccountSiberIdAsync(load.SenderId, cancellationToken);
         var receiver = await AccountSiberIdAsync(load.ReceiverId, cancellationToken);
 
+        // Siber'deki yuklemeulkeid sbr_ulke'nin kendi kimliği; yereldeki
+        // countries.id 26 ülkede ondan farklı (bkz. ISiberCountryResolver).
+        // Ham karşılaştırma o ülkelerde sahte bir "uyuşmuyor" üretiyordu.
+        var countries = await _countries.ResolveAsync(
+            [load.DepartureCountryId?.ToString(), load.TargetCountryId?.ToString()],
+            cancellationToken);
+
+        string? CountrySiberId(Guid? id) =>
+            id is { } value && countries.TryGetValue(value.ToString(), out var country)
+                ? country.SiberId
+                : null;
+
         var checks = new (string Field, string? Local, string? Remote)[]
         {
             ("romork tipi", romorkType, siber.IstenenRomorkCins),
@@ -157,8 +173,8 @@ public sealed class LoadReleaseService : ILoadReleaseService
             ("alıcı", receiver, siber.AliciId),
             ("durum", statusType, siber.DurumId),
             ("departman", department, siber.DepartmanId),
-            ("yükleme ülkesi", load.DepartureCountryId?.ToString(), siber.YuklemeUlkeId),
-            ("boşaltma ülkesi", load.TargetCountryId?.ToString(), siber.BosaltmaUlkeId),
+            ("yükleme ülkesi", CountrySiberId(load.DepartureCountryId), siber.YuklemeUlkeId),
+            ("boşaltma ülkesi", CountrySiberId(load.TargetCountryId), siber.BosaltmaUlkeId),
             ("çalışma şekli", load.WayOfWorking.ToString(), siber.CalismaSekli),
         };
 

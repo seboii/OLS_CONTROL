@@ -185,6 +185,16 @@ public sealed class SiberYuk
     public string? YukTurKod { get; init; }
     public string? YuklemeUlke { get; init; }
     public string? BosaltmaUlke { get; init; }
+
+    /// <summary>
+    /// <c>_yuklemekita</c>/<c>_bosaltmakita</c> — ülkenin kıtası, ADIYLA.
+    /// Eskiden INSERT'te sabit "ASYA" yazılıyordu ve UPDATE'te hiç
+    /// yazılmıyordu; canlıda dolu 7.486 yükün 5.793'ü AVRUPA, yani sabit değer
+    /// satırların çoğunda yanlıştı. Kıta ülkeden türer (bkz.
+    /// <see cref="ISiberCountryRepository"/>).
+    /// </summary>
+    public string? YuklemeKita { get; init; }
+    public string? BosaltmaKita { get; init; }
     public int? CalismaSekli { get; init; }
     public DateTime KayitGirisTarih { get; init; }
 
@@ -442,7 +452,7 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                  @MusteriTemsilcisiAd, @DepartmanId, @DepartmanId, @loadNumberWorkType,
                  @KayitGirisTarih, @loadNumberWorkType, @ToplamKap, @KayitGiren, @Yil,
                  @TalimatGelisTarihi, @LademeterMultiplier, @VolumeMultiplier, @CarHeight,
-                 @YukTurKod, @YuklemeUlke, @BosaltmaUlke, 'ASYA', 'ASYA',
+                 @YukTurKod, @YuklemeUlke, @BosaltmaUlke, @YuklemeKita, @BosaltmaKita,
                  @KayitGiren, @KayitGiren, @CalismaSekli,
                  @RezervasyonId);
 
@@ -463,7 +473,8 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             yuk.KayitGirisTarih, yuk.ToplamKap, yuk.KayitGiren,
             yuk.TalimatGelisTarihi, LademeterMultiplier, VolumeMultiplier,
             CarHeight = DefaultCarHeight, yuk.YukTurKod, yuk.YuklemeUlke,
-            yuk.BosaltmaUlke, yuk.CalismaSekli, yuk.RezervasyonId,
+            yuk.BosaltmaUlke, yuk.YuklemeKita, yuk.BosaltmaKita,
+            yuk.CalismaSekli, yuk.RezervasyonId,
         });
     }
 
@@ -559,8 +570,17 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                 departmanid        = @DepartmanId,
                 operasyondepartmanid = @DepartmanId,
                 talimatgelistarihi = @TalimatGelisTarihi,
-                _yuklemeulke       = @YuklemeUlke,
-                _bosaltmaulke      = @BosaltmaUlke,
+                -- Dört ülke/kıta sütununda ISNULL BİLİNÇLİ: yerel ayna bu
+                -- alanları Siber'den ÇÖZÜLMÜŞ AD olarak taşıyor ve çözüm
+                -- başarısız olduğunda parametre null geliyordu. Düz atama, o
+                -- durumda Siber'deki doğru değeri SİLİYORDU — yani uygulamadan
+                -- yapılan her kayıt, senkronla gelmiş bir yükün ülkesini
+                -- boşaltıyordu. Alan gerçekten temizlenmek istendiğinde bu
+                -- yükün ekranında ülke seçimi zaten zorunlu.
+                _yuklemeulke       = ISNULL(@YuklemeUlke, _yuklemeulke),
+                _bosaltmaulke      = ISNULL(@BosaltmaUlke, _bosaltmaulke),
+                _yuklemekita       = ISNULL(@YuklemeKita, _yuklemekita),
+                _bosaltmakita      = ISNULL(@BosaltmaKita, _bosaltmakita),
                 calismasekli       = @CalismaSekli,
                 aracyuksekligi     = @CarHeight,
                 teslimsekil                  = @TeslimSekil,
@@ -578,7 +598,8 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             yuk.AliciId, yuk.OdemeSekliId, yuk.TalimatGelisSekli, yuk.IstenenRomorkCins,
             yuk.ToplamAgirlik, yuk.ToplamHacim, yuk.ToplamLademetre, yuk.UcretAgirlik,
             yuk.ToplamKap, yuk.MusteriTemsilcisiAd, yuk.DepartmanId,
-            yuk.TalimatGelisTarihi, yuk.YuklemeUlke, yuk.BosaltmaUlke, yuk.CalismaSekli,
+            yuk.TalimatGelisTarihi, yuk.YuklemeUlke, yuk.BosaltmaUlke,
+            yuk.YuklemeKita, yuk.BosaltmaKita, yuk.CalismaSekli,
             CarHeight = DefaultCarHeight,
             yuk.TeslimSekil, yuk.OnTasimaTarafimizdanYapilir, yuk.SonTasimaTarafimizdanYapilir,
             yuk.IstenenVarisTarihi, yuk.HazirOlmaTarih, yuk.MusteridenAlinisTarih,

@@ -1908,6 +1908,9 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.TargetCountryId)
                 .HasMaxLength(191)
                 .HasColumnName("target_country_id");
+            entity.Property(e => e.TransitCountryId)
+                .HasMaxLength(191)
+                .HasColumnName("transit_country_id");
             entity.Property(e => e.TotalCap)
                 .HasPrecision(10, 2)
                 .HasColumnName("total_cap");

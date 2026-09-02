@@ -47,15 +47,17 @@ public sealed class TransferSiberService : ITransferSiberService
     private readonly ISiberReservationRepository _siber;
     private readonly IClock _clock;
     private readonly ISiberReferenceValidator _references;
+    private readonly ISiberCountryResolver _countries;
 
     public TransferSiberService(
         OlsDbContext db, ISiberReservationRepository siber, IClock clock,
-        ISiberReferenceValidator references)
+        ISiberReferenceValidator references, ISiberCountryResolver countries)
     {
         _db = db;
         _siber = siber;
         _clock = clock;
         _references = references;
+        _countries = countries;
     }
 
     public async Task<TransferSiberResult> TransferOfferAsync(
@@ -128,8 +130,13 @@ public sealed class TransferSiberService : ITransferSiberService
             DepartmanId = refs.DepartmentSiberId,
             Aciklama = load.Description,
             Yil = now.Year,
-            YuklemeUlkeId = load.DepartureCountryId?.ToString(),
-            BosaltmaUlkeId = load.TargetCountryId?.ToString(),
+            // skn_rezervasyon.yuklemeulkeid sbr_ulke'nin KENDİ kimliğidir.
+            // Yerel countries.id 197 ülkenin 171'inde tesadüfen aynı (eski
+            // aktarımda Siber GUID'i PK yapılmış), 26'sında DEĞİL — "TURKYE",
+            // "ÇEK CUMHURİYETİ", "BELARUS"... Yerel kimliği yazmak bu ülkelerde
+            // Siber'e yetim bir GUID bırakıyordu.
+            YuklemeUlkeId = refs.DepartureCountry?.SiberId,
+            BosaltmaUlkeId = refs.TargetCountry?.SiberId,
             CalismaSekli = load.WayOfWorking,
             // Olumlu'ya çekilme tarihi — yerelde loads.approval_date olarak
             // damgalanır (bkz. LoadWriteService.ResolveApprovalDate), Siber'de
@@ -303,7 +310,8 @@ public sealed class TransferSiberService : ITransferSiberService
         string? CustomerSiberId, string? CompanyPayFreightSiberId, string? SenderSiberId,
         string? ReceiverSiberId, string? StatusTypeSiberId, string? DepartmentSiberId,
         string? CustomerRepName, string? CustomerRepCode, string? SalesRepCode,
-        string? InsUserSiberCode);
+        string? InsUserSiberCode,
+        SiberCountry? DepartureCountry, SiberCountry? TargetCountry);
 
     /// <summary>
     /// <paramref name="currentUserId"/>: olsold <c>insuser</c>'ı <c>Auth::user()</c>'dan
@@ -333,6 +341,13 @@ public sealed class TransferSiberService : ITransferSiberService
             .Select(u => u.SiberCode)
             .FirstOrDefaultAsync(cancellationToken);
 
+        var countries = await _countries.ResolveAsync(
+            [load.DepartureCountryId?.ToString(), load.TargetCountryId?.ToString()],
+            cancellationToken);
+
+        SiberCountry? Country(Guid? id) =>
+            id is { } value && countries.TryGetValue(value.ToString(), out var country) ? country : null;
+
         return new OfferRefs(
             await CodeAsync(_db.Instructions.Where(i => i.Id == load.InstructionId).Select(i => i.Code), cancellationToken),
             await CodeAsync(_db.RomorkTypes.Where(r => r.Id == load.RomorkTypeId).Select(r => r.Code), cancellationToken),
@@ -353,7 +368,9 @@ public sealed class TransferSiberService : ITransferSiberService
             // hesabı) alan boş kalmasın diye operasyon yetkilisinin koduna düşülür —
             // Siber'in kendi kayıtlarında insuser 19023/19024 satırda dolu, boş
             // bırakmak kaydı oradaki alışılmış hâlden ayırırdı.
-            insUserSiberCode ?? operationOfficer?.SiberCode);
+            insUserSiberCode ?? operationOfficer?.SiberCode,
+            Country(load.DepartureCountryId),
+            Country(load.TargetCountryId));
     }
 
     private static async Task<string?> CodeAsync(
@@ -400,6 +417,8 @@ public sealed class TransferSiberService : ITransferSiberService
                 new("Gönderici", SiberReferenceTable.Firma, refs.SenderSiberId),
                 new("Alıcı", SiberReferenceTable.Firma, refs.ReceiverSiberId),
                 new("Navlun Ödeyecek Firma", SiberReferenceTable.Firma, refs.CompanyPayFreightSiberId),
+                new("Yükleme ülkesi", SiberReferenceTable.Ulke, refs.DepartureCountry?.SiberId),
+                new("Varış ülkesi", SiberReferenceTable.Ulke, refs.TargetCountry?.SiberId),
             ],
             cancellationToken);
 

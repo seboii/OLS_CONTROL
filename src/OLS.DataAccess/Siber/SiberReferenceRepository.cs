@@ -40,6 +40,13 @@ public enum SiberReferenceTable
 
     /// <summary><c>skn_kalem</c> — mali kalem.</summary>
     Kalem,
+
+    /// <summary>
+    /// <c>sbr_ulke</c> — yükleme / boşaltma ülkesi. FK yok, ama teklifte
+    /// <c>skn_rezervasyon.yuklemeulkeid</c> doğrudan bu tablonun kimliğini
+    /// taşıyor; karşılığı olmayan bir kimlik yazmak yetim değer bırakır.
+    /// </summary>
+    Ulke,
 }
 
 /// <summary>
@@ -77,6 +84,7 @@ public sealed class SiberReferenceRepository : ISiberReferenceRepository
         SiberReferenceTable.Arac => ("skn_arac", "aracid"),
         SiberReferenceTable.KapCins => ("skn_kapcins", "kapcinsid"),
         SiberReferenceTable.Kalem => ("skn_kalem", "kalemid"),
+        SiberReferenceTable.Ulke => ("sbr_ulke", "ulkeid"),
         _ => throw new ArgumentOutOfRangeException(nameof(table)),
     };
 

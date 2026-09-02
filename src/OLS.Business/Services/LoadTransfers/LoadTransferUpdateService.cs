@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Siber;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 using OLS.DataAccess.Siber;
@@ -57,6 +58,12 @@ public sealed class LoadTransferUpdateRequest
     public int? SecondCustomerRepresentativeUserId { get; set; }
     public string? DepartureCountryId { get; set; }
     public string? TargetCountryId { get; set; }
+
+    /// <summary>
+    /// Transit ülke — YALNIZCA YEREL. Siber'in <c>skn_yuk</c> tablosunda
+    /// karşılığı yok (bkz. <see cref="LoadTransfer.TransitCountryId"/>).
+    /// </summary>
+    public string? TransitCountryId { get; set; }
     public int? WayOfWorking { get; set; }
     public int? FrontTransportationByUs { get; set; }
     public int? FinalTransportationByUs { get; set; }
@@ -110,13 +117,16 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
 
     private readonly OlsDbContext _db;
     private readonly ISiberLoadRepository _siber;
+    private readonly ISiberCountryResolver _countries;
     private readonly IClock _clock;
 
     public LoadTransferUpdateService(
-        OlsDbContext db, ISiberLoadRepository siber, IClock clock)
+        OlsDbContext db, ISiberLoadRepository siber,
+        ISiberCountryResolver countries, IClock clock)
     {
         _db = db;
         _siber = siber;
+        _countries = countries;
         _clock = clock;
     }
 
@@ -202,6 +212,7 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         transfer.SecondCustomerRepresentativeName = request.SecondCustomerRepresentativeUserId;
         transfer.DepartureCountryId = request.DepartureCountryId;
         transfer.TargetCountryId = request.TargetCountryId;
+        transfer.TransitCountryId = request.TransitCountryId;
         transfer.WayOfWorking = request.WayOfWorking;
         transfer.FrontTransportationByUs = request.FrontTransportationByUs;
         transfer.FinalTransportationByUs = request.FinalTransportationByUs;
@@ -353,8 +364,10 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             DepartmanId = refs.DepartmentSiberId,
             TalimatGelisTarihi = transfer.RequestArrivalDate?.ToDateTime(TimeOnly.MinValue)
                                  ?? _clock.Now,
-            YuklemeUlke = refs.DepartureCountryName,
-            BosaltmaUlke = refs.TargetCountryName,
+            YuklemeUlke = refs.DepartureCountry?.Name,
+            BosaltmaUlke = refs.TargetCountry?.Name,
+            YuklemeKita = refs.DepartureCountry?.Continent,
+            BosaltmaKita = refs.TargetCountry?.Continent,
             CalismaSekli = transfer.WayOfWorking,
             TeslimSekil = refs.DeliveryMethodEdikod,
             OnTasimaTarafimizdanYapilir = transfer.FrontTransportationByUs,
@@ -490,7 +503,7 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         string? LoadStatusSiberId, string? LoadTypeCode, string? CustomerSiberId,
         string? SenderSiberId, string? ReceiverSiberId, string? PaymentTypeSiberId,
         string? InstructionCode, string? RomorkTypeCode, string? DepartmentSiberId,
-        string? DeliveryMethodEdikod, string? DepartureCountryName, string? TargetCountryName,
+        string? DeliveryMethodEdikod, SiberCountry? DepartureCountry, SiberCountry? TargetCountry,
         IReadOnlyDictionary<int, string?> CaseTypeCodes,
         IReadOnlyDictionary<int, string?> ProductTypeCodes,
         IReadOnlyDictionary<int, string?> FinancialItemCodes,
@@ -528,8 +541,8 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             await _db.LoadTransferDeliveryMethods.AsNoTracking()
                 .Where(d => d.Id == transfer.DeliveryMethodId)
                 .Select(d => d.Edikod).FirstOrDefaultAsync(cancellationToken),
-            await CountryNameAsync(transfer.DepartureCountryId, cancellationToken),
-            await CountryNameAsync(transfer.TargetCountryId, cancellationToken),
+            await CountryAsync(transfer.DepartureCountryId, cancellationToken),
+            await CountryAsync(transfer.TargetCountryId, cancellationToken),
             await _db.CaseTypes.AsNoTracking()
                 .ToDictionaryAsync(c => (int)c.Id, c => c.SiberId, cancellationToken),
             await _db.ProductTypes.AsNoTracking()
@@ -542,16 +555,18 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
     }
 
     /// <summary>
-    /// olsold: LoadTransferController.php satır 719-720 — Siber'in
-    /// <c>_yuklemeulke</c>/<c>_bosaltmaulke</c> sütununa ülkenin kendi GUID'i DEĞİL,
-    /// ADI yazılır (<c>$load_transfer->departureCountryId->name</c>). Gerçek Siber'de
-    /// bu kuralın ne kadar baskın olduğu doğrulandı: mevcut satırların %96'sı GUID
-    /// değil, düz ülke adı taşıyor — okuma tarafı da (LoadTransferService.
-    /// CountryRefAsync) buna göre önce GUID, olmazsa ada göre çözer.
+    /// Siber'in <c>_yuklemeulke</c>/<c>_bosaltmaulke</c> sütununa ülkenin GUID'i
+    /// DEĞİL, ADI yazılır; <c>_yuklemekita</c>/<c>_bosaltmakita</c> ise kıtanın
+    /// adını ister.
+    ///
+    /// BULUNAN GERÇEK BUG: bu alan eskiden yalnızca GUID biçimindeki yerel değeri
+    /// çözüyor, ad taşıyan değerde <c>null</c> dönüyordu — ve UPDATE bu null'ı
+    /// Siber'e DÜZ ATIYORDU. Yerel aynadaki 7.899 yükün 7.489'u Siber'den ADIYLA
+    /// senkronlandığı için, senkronla gelmiş bir yükü uygulamadan kaydetmek
+    /// Siber'deki ülke bilgisini SİLİYORDU. Artık ad da çözülüyor (bkz.
+    /// <see cref="ISiberCountryResolver"/>) ve UPDATE tarafında null yazma
+    /// korumaya alındı.
     /// </summary>
-    private async Task<string?> CountryNameAsync(string? countryId, CancellationToken cancellationToken) =>
-        Guid.TryParse(countryId, out var id)
-            ? await _db.Countries.AsNoTracking()
-                .Where(c => c.Id == id).Select(c => c.Name).FirstOrDefaultAsync(cancellationToken)
-            : null;
+    private async Task<SiberCountry?> CountryAsync(string? countryId, CancellationToken cancellationToken) =>
+        await _countries.ResolveOneAsync(countryId, cancellationToken);
 }

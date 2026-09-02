@@ -18,10 +18,10 @@ DELETE FROM sbr_teslimsekli; DELETE FROM skn_pozisyondurum;
 DELETE FROM skn_sabittanim; DELETE FROM sfy_muhasebeentegrekodu;
 GO
 
-INSERT INTO sbr_ulke (ulkeid, ad, telefonkod, kisaad) VALUES
-  ('11111111-1111-1111-1111-111111111111', N'Türkiye', '90', ' TR '),
-  ('22222222-2222-2222-2222-222222222222', N'Almanya', '49', ' DE '),
-  ('22222222-2222-2222-2222-222222222223', N'Rusya',   '7',  ' RU ');
+INSERT INTO sbr_ulke (ulkeid, ad, telefonkod, kisaad, kita) VALUES
+  ('11111111-1111-1111-1111-111111111111', N'Türkiye', '90', ' TR ', 2),
+  ('22222222-2222-2222-2222-222222222222', N'Almanya', '49', ' DE ', 2),
+  ('22222222-2222-2222-2222-222222222223', N'Rusya Federasyonu', '7', ' RU ', 1);
 
 INSERT INTO sbr_sehir (sehirid, ad, ulkeid) VALUES
   ('33333333-3333-3333-3333-333333333333', N'İstanbul', '11111111-1111-1111-1111-111111111111'),
@@ -109,6 +109,11 @@ INSERT INTO skn_sabittanim (sabittanimid, grupkod, ad, kod, ozelkod, ekkod) VALU
   ('1000-0000-0005', 'YUKLEMETIP',             N'Komple',   1, NULL, NULL),
   ('1000-0000-0016', 'YUKLEMETIP',             N'Parsiyel', 2, NULL, NULL),
   ('1000-0000-0006', 'YUKTUR',                 N'Parsiyel', 1, NULL, NULL),
+  ('1000-0000-0020', 'KITA',                   N'AFRİKA',      0, NULL, NULL),
+  ('1000-0000-0021', 'KITA',                   N'ASYA',        1, NULL, NULL),
+  ('1000-0000-0022', 'KITA',                   N'AVRUPA',      2, NULL, NULL),
+  ('1000-0000-0023', 'KITA',                   N'AMERİKA',     3, NULL, NULL),
+  ('1000-0000-0024', 'KITA',                   N'AVUSTURALYA', 4, NULL, NULL),
   ('1000-0000-0007', 'REZERVASYONTASIMASEKLI', N'Karayolu', 1, NULL, NULL),
   ('1000-0000-0008', 'ARACTIP',                N'Tır',      1, 10,   NULL),
   ('1000-0000-0017', 'ARACTIP',                N'Kamyon',   2, 20,   NULL),

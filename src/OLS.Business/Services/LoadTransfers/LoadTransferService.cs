@@ -152,6 +152,12 @@ public sealed class LoadTransferDetailDto
     [JsonPropertyName("target_country_id")] public CountryDto? TargetCountryId { get; init; }
 
     /// <summary>
+    /// Transit ülke. Siber'in yük tablosunda karşılığı YOK; yalnızca yerel
+    /// kayıtta tutulur (bkz. <c>LoadTransfer.TransitCountryId</c>).
+    /// </summary>
+    [JsonPropertyName("transit_country_id")] public CountryDto? TransitCountryId { get; init; }
+
+    /// <summary>
     /// DİKKAT: sütun adı <c>customer_representative_name</c> ama içeriği bir
     /// KULLANICI KİMLİĞİ (int) — olsold'da da aynı yanıltıcı adlandırma var.
     /// olsold: <c>LoadFormDrawer.vue</c> "Görevliler" sekmesi.
@@ -586,6 +592,7 @@ public sealed class LoadTransferService : ILoadTransferService
 
             DepartureCountryId = await CountryRefAsync(t.DepartureCountryId, cancellationToken),
             TargetCountryId = await CountryRefAsync(t.TargetCountryId, cancellationToken),
+            TransitCountryId = await CountryRefAsync(t.TransitCountryId, cancellationToken),
 
             CustomerRepresentative = await UserRefAsync(t.CustomerRepresentativeName, cancellationToken),
             SecondCustomerRepresentative = await UserRefAsync(t.SecondCustomerRepresentativeName, cancellationToken),

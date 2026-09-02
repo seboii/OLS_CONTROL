@@ -80,6 +80,15 @@ public partial class LoadTransfer
 
     public string? TargetCountryId { get; set; }
 
+    /// <summary>
+    /// Transit ülke. YALNIZCA YEREL: Siber'in <c>skn_yuk</c> tablosunda transit
+    /// ülke için sütun YOKTUR (400 sütunun tamamı tarandı — yalnızca yükleme,
+    /// boşaltma ve menşe ülkesi var). Alan formda toplanıyordu ama hiçbir yere
+    /// yazılmadığı için kaydetme anında sessizce kayboluyordu; en azından yerel
+    /// kayıtta ve ekranda korunsun diye burada tutuluyor.
+    /// </summary>
+    public string? TransitCountryId { get; set; }
+
     public string? LoadingContinent { get; set; }
 
     public string? UnloadingContinent { get; set; }

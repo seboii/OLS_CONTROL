@@ -90,7 +90,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator());
+        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator(), new FakeSiberCountryResolver(db));
 
         var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
 
@@ -137,7 +137,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator());
+        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator(), new FakeSiberCountryResolver(db));
 
         var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
 
@@ -188,7 +188,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator());
+        var service = new TransferSiberService(db, new FakeSiberReservationRepository(isConfigured: true), clock, new PassThroughReferenceValidator(), new FakeSiberCountryResolver(db));
 
         var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
 
@@ -216,7 +216,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), clock);
+        var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), new FakeSiberCountryResolver(db), clock);
 
         var result = await service.ConvertOfferAsync(siberId, currentUserId: 1);
 
@@ -244,7 +244,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), clock);
+        var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), new FakeSiberCountryResolver(db), clock);
 
         var result = await service.ConvertOfferAsync(siberId, currentUserId: 1);
 
@@ -272,7 +272,7 @@ public sealed class TransferSiberTests
         db.Loads.Add(load);
         await db.SaveChangesAsync();
 
-        var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), clock);
+        var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), new FakeSiberCountryResolver(db), clock);
 
         var result = await service.ConvertOfferAsync(siberId, currentUserId: 1);
 
@@ -387,7 +387,7 @@ public sealed class TransferSiberTests
         existingChargePeople[1].UserId = (int)repUser.Id;
         await db.SaveChangesAsync();
 
-        var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), clock);
+        var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), new FakeSiberCountryResolver(db), clock);
 
         var result = await service.ConvertOfferAsync(siberId, currentUserId: 1);
 
@@ -506,4 +506,41 @@ internal sealed class PassThroughReferenceValidator : ISiberReferenceValidator
     public Task<string?> ValidateAsync(
         IReadOnlyList<SiberReferenceCheck> checks, CancellationToken cancellationToken = default) =>
         Task.FromResult<string?>(null);
+}
+
+/// <summary>
+/// Ülke çözümlemesi canlı Siber'e (sbr_ulke) sorduğu için testte yerel
+/// countries tablosundan beslenir: Siber kimliği olarak siber_id, ad olarak da
+/// yerel ad kullanılır. Akışın konusu ülke sorgusu değil, dönüşüm kuralları.
+/// </summary>
+internal sealed class FakeSiberCountryResolver : ISiberCountryResolver
+{
+    private readonly OlsDbContext _db;
+
+    public FakeSiberCountryResolver(OlsDbContext db) => _db = db;
+
+    public async Task<SiberCountry?> ResolveOneAsync(
+        string? value, CancellationToken cancellationToken = default)
+    {
+        var map = await ResolveAsync([value], cancellationToken);
+        return value is not null && map.TryGetValue(value.Trim(), out var country) ? country : null;
+    }
+
+    public async Task<IReadOnlyDictionary<string, SiberCountry>> ResolveAsync(
+        IReadOnlyCollection<string?> values, CancellationToken cancellationToken = default)
+    {
+        var result = new Dictionary<string, SiberCountry>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var value in values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!.Trim()).Distinct())
+        {
+            var row = Guid.TryParse(value, out var id)
+                ? await _db.Countries.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
+                : await _db.Countries.AsNoTracking().FirstOrDefaultAsync(c => c.Name == value, cancellationToken);
+
+            if (row is not null)
+                result[value] = new SiberCountry(row.SiberId ?? row.Id.ToString(), row.Name, "AVRUPA");
+        }
+
+        return result;
+    }
 }

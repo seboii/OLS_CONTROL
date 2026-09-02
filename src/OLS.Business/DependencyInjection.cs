@@ -121,6 +121,7 @@ public static class DependencyInjection
 
         // Siber referans doğrulaması — teklif, yük ve sefer akışlarının ortak kapısı.
         services.AddScoped<Services.Siber.ISiberReferenceValidator, Services.Siber.SiberReferenceValidator>();
+        services.AddScoped<Services.Siber.ISiberCountryResolver, Services.Siber.SiberCountryResolver>();
         services.AddScoped<ITokenService, JwtTokenService>();
 
         return services;

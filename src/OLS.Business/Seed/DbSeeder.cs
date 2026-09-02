@@ -529,12 +529,19 @@ public static class DbSeeder
 
         await db.SaveChangesAsync(ct);
 
+        // AD, SİBER'DEKİ ADLA EŞLEŞMELİ. Tohum ülkelerin SiberId'si boş gelir;
+        // SiberImportService.ImportCountriesAsync bunu sonradan AD EŞLEŞMESİYLE
+        // dolduruyor (Key = NormalizeTurkish, yani yalnızca İ/I/ı katlanır).
+        // "Rusya" bu yüzden Siber'in "RUSYA FEDERASYONU" satırıyla HİÇ eşleşmiyor
+        // ve SiberId'si sonsuza kadar boş kalan bir seçenek olarak listede
+        // duruyordu — yük Siber'e ülke ADIYLA yazıldığı için böyle bir seçim
+        // Siber'de ülkesi boş bir kayıt bırakır (bkz. RemoveMockCountry).
         if (!await db.Countries.AnyAsync(ct))
         {
             db.Countries.AddRange(
                 new Country { Id = Guid.NewGuid(), Name = "Türkiye", CountryCode = "TR", PhoneCode = "90", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
                 new Country { Id = Guid.NewGuid(), Name = "Almanya", CountryCode = "DE", PhoneCode = "49", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now },
-                new Country { Id = Guid.NewGuid(), Name = "Rusya", CountryCode = "RU", PhoneCode = "7", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now });
+                new Country { Id = Guid.NewGuid(), Name = "Rusya Federasyonu", CountryCode = "RU", PhoneCode = "7", CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now });
             await db.SaveChangesAsync(ct);
         }
     }

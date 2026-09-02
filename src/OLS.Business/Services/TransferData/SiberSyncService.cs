@@ -706,6 +706,23 @@ public sealed class SiberSyncService : ISiberSyncService
         var departments = BySiberId(await _db.Departments.AsNoTracking().ToListAsync(cancellationToken), d => d.SiberId, d => d.Id);
         var accounts = BySiberId(await _db.Accounts.AsNoTracking().ToListAsync(cancellationToken), a => a.SiberId, a => a.Id);
 
+        // SİBER ÜLKE KİMLİĞİ → YEREL ÜLKE KİMLİĞİ.
+        //
+        // BULUNAN GERÇEK BUG: burada Siber'in ulkeid'si loads.departure_country_id'ye
+        // DOĞRUDAN yazılıyordu; "yerel countries.id Siber GUID'iyle aynıdır" varsayımı
+        // 197 ülkenin 171'inde doğru, 26'sında YANLIŞ ("TURKYE", "ÇEK CUMHURİYETİ",
+        // "BELARUS", "AUSTRİA"...). Sonuç: 1.778 teklif yerelde var olmayan bir ülke
+        // kimliğine işaret ediyor ve ekranda ülke alanı BOŞ görünüyordu — yalnızca
+        // "TURKYE" 1.454 kayıt. Artık siber_id üzerinden eşlenir.
+        var countryIdBySiberId = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var country in await _db.Countries.AsNoTracking()
+                     .Where(x => x.SiberId != null)
+                     .Select(x => new { x.Id, x.SiberId })
+                     .ToListAsync(cancellationToken))
+        {
+            countryIdBySiberId.TryAdd(country.SiberId!, country.Id);
+        }
+
         var existing = await ExistingByKeyAsync(
             _db.Loads.Where(l => l.SiberId != null).OrderBy(l => l.Id), l => l.SiberId, cancellationToken);
 
@@ -767,10 +784,13 @@ public sealed class SiberSyncService : ISiberSyncService
                 load.FrontTransportationByUs = row.Ontasimatarafimizdanyapilir ?? load.FrontTransportationByUs;
                 load.FinalTransportationByUs = row.Sontasimatarafimizdanyapilir ?? load.FinalTransportationByUs;
                 load.WayOfWorking = row.Calismasekli ?? load.WayOfWorking;
-                // Yuklemeulkeid/Bosaltmaulkeid: cities/countries GUID'i doğrudan Siber
-                // GUID'iyle aynı (bkz. proje kuralı) — parse başarısızsa dokunulmaz.
-                if (row.Yuklemeulkeid is { } dc && Guid.TryParse(dc, out var dcGuid)) load.DepartureCountryId = dcGuid;
-                if (row.Bosaltmaulkeid is { } tc && Guid.TryParse(tc, out var tcGuid)) load.TargetCountryId = tcGuid;
+                // Siber kimliği → yerel ülke kimliği (bkz. countryIdBySiberId).
+                // Eşleşme yoksa mevcut değere DOKUNULMAZ: yereldeki doğru seçimi
+                // tanınmayan bir kimlikle ezmek, alanı ekranda boşaltırdı.
+                if (row.Yuklemeulkeid is { } dc && countryIdBySiberId.TryGetValue(dc, out var dcId))
+                    load.DepartureCountryId = dcId;
+                if (row.Bosaltmaulkeid is { } tc && countryIdBySiberId.TryGetValue(tc, out var tcId))
+                    load.TargetCountryId = tcId;
                 load.TransferToSiber = 1;
                 load.UpdatedAt = DateTime.Now;
 

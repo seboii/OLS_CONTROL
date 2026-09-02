@@ -91,6 +91,7 @@ public sealed class DirectLoadService : IDirectLoadService
     private readonly OlsDbContext _db;
     private readonly ISiberLoadRepository _siber;
     private readonly ISiberReferenceValidator _references;
+    private readonly ISiberCountryResolver _countries;
     private readonly ICompanyScope _companyScope;
     private readonly IPermissionService _permissions;
     private readonly IClock _clock;
@@ -98,11 +99,12 @@ public sealed class DirectLoadService : IDirectLoadService
     public DirectLoadService(
         OlsDbContext db, ISiberLoadRepository siber, ICompanyScope companyScope,
         IPermissionService permissions, IClock clock,
-        ISiberReferenceValidator references)
+        ISiberReferenceValidator references, ISiberCountryResolver countries)
     {
         _db = db;
         _siber = siber;
         _references = references;
+        _countries = countries;
         _companyScope = companyScope;
         _permissions = permissions;
         _clock = clock;
@@ -171,6 +173,27 @@ public sealed class DirectLoadService : IDirectLoadService
         if (model.TargetCountryId is null) return LoadTransferWriteResult.Fail("Varış ülkesi boş olamaz");
         if (model.Packages.Count == 0) return LoadTransferWriteResult.Fail("En az bir paket girilmelidir");
 
+        // ÜLKELER SİBER'İN BEKLEDİĞİ BİÇİME ÇEVRİLİR.
+        //
+        // Buraya kadar elimizdeki YEREL ülke kimliği; Siber'in yük tablosunda ise
+        // ülke için kimlik sütunu yok, yalnızca çözülmüş AD (_yuklemeulke) ve
+        // KITA (_yuklemekita) var. Eskiden bu metin sütunlarına yerel GUID
+        // yazılıyordu: yük Siber ekranında ülkesiz/okunamaz görünüyor, kullanıcı
+        // her kaydı elle düzeltiyordu (canlıda 2600672EX'te üç ardışık düzeltme
+        // logu var). Kıta da sabit "ASYA" yazılıyordu — canlıdaki yüklerin
+        // 5.793'ü AVRUPA.
+        // Transit ülke BİLEREK yok: Siber'in yük tablosunda yazılacağı bir sütun
+        // olmadığı için çözümlenmesi gereksiz (yalnızca yerelde saklanır).
+        var countryMap = await _countries.ResolveAsync(
+            [model.DepartureCountryId?.ToString(), model.TargetCountryId?.ToString()],
+            cancellationToken);
+
+        SiberCountry? Country(Guid? id) =>
+            id is { } value && countryMap.TryGetValue(value.ToString(), out var country) ? country : null;
+
+        var departureCountry = Country(model.DepartureCountryId);
+        var targetCountry = Country(model.TargetCountryId);
+
         var paymentType = await _db.PaymentTypes.AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == model.PaymentTypeId, cancellationToken);
         var instruction = await _db.Instructions.AsNoTracking()
@@ -202,6 +225,12 @@ public sealed class DirectLoadService : IDirectLoadService
             new("Müşteri", SiberReferenceTable.Firma, customer),
             new("Gönderici", SiberReferenceTable.Firma, sender),
             new("Alıcı", SiberReferenceTable.Firma, receiver),
+
+            // ÜLKELER: skn_yuk'ta FK yok ama karşılığı bulunamayan bir ülke
+            // Siber'de adı ve kıtası BOŞ bir yük bırakır — sessiz veri kaybı
+            // yerine yazımdan önce anlaşılır bir hata verilir.
+            new("Yükleme ülkesi", SiberReferenceTable.Ulke, departureCountry?.SiberId),
+            new("Varış ülkesi", SiberReferenceTable.Ulke, targetCountry?.SiberId),
         };
 
         // KAP TİPİ: skn_yukkoli.kapid FK'li. Liste Siber'den senkronlanıyor,
@@ -257,8 +286,10 @@ public sealed class DirectLoadService : IDirectLoadService
                 MusteriTemsilcisiAd = userSiberCode,
                 DepartmanId = department.SiberId,
                 YukTurKod = loadTransferType?.Code,
-                YuklemeUlke = model.DepartureCountryId?.ToString(),
-                BosaltmaUlke = model.TargetCountryId?.ToString(),
+                YuklemeUlke = departureCountry?.Name,
+                BosaltmaUlke = targetCountry?.Name,
+                YuklemeKita = departureCountry?.Continent,
+                BosaltmaKita = targetCountry?.Continent,
                 CalismaSekli = model.WayOfWorking,
                 TalimatGelisTarihi = now,
                 KayitGiren = userSiberCode,
@@ -286,14 +317,18 @@ public sealed class DirectLoadService : IDirectLoadService
                 DepartmentId = (int?)model.DepartmentId,
                 DepartureCountryId = model.DepartureCountryId?.ToString(),
                 TargetCountryId = model.TargetCountryId?.ToString(),
+                // Transit ülke Siber'e GİTMEZ (skn_yuk'ta karşılığı yok), ama
+                // formda toplandığı için yerelde saklanır — eskiden hiçbir yere
+                // yazılmıyordu, yani kaydetme anında sessizce yok oluyordu.
+                TransitCountryId = model.TransitCountryId?.ToString(),
                 TotalGrossWeight = totalGross,
                 TotalVolume = totalVolume,
                 TotalLademeter = totalLademeter,
                 TotalCap = totalQuantity,
                 WeightFee = totalLademeter * SiberLoadRepository.LademeterMultiplier,
                 CarHeight = SiberLoadRepository.DefaultCarHeight,
-                LoadingContinent = "ASYA",
-                UnloadingContinent = "ASYA",
+                LoadingContinent = departureCountry?.Continent,
+                UnloadingContinent = targetCountry?.Continent,
                 CustomerRepresentativeName = (int)currentUserId,
                 SecondCustomerRepresentativeName = (int)currentUserId,
                 UsercodeWithNotification = (int)currentUserId,

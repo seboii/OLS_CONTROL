@@ -116,6 +116,8 @@ interface LoadTransferDetail extends LoadTransferItem {
   final_transportation_by_us: number | null;
   departure_country_id: { id: string; name: string | null } | null;
   target_country_id: { id: string; name: string | null } | null;
+  // Transit ülke YALNIZCA YEREL: Siber'in yük tablosunda karşılığı yok.
+  transit_country_id: { id: string; name: string | null } | null;
 }
 
 interface LinkedExpedition {
@@ -445,6 +447,7 @@ export function LoadsPage() {
   const [sender, setSender] = useState<AccountOption | null>(null);
   const [receiver, setReceiver] = useState<AccountOption | null>(null);
   const [departureCountry, setDepartureCountry] = useState("");
+  const [transitCountry, setTransitCountry] = useState("");
   const [targetCountry, setTargetCountry] = useState("");
   const [customerRep, setCustomerRep] = useState<UserOption | null>(null);
   const [secondCustomerRep, setSecondCustomerRep] = useState<UserOption | null>(null);
@@ -925,6 +928,7 @@ export function LoadsPage() {
       setCustomerRep(d.customer_representative);
       setSecondCustomerRep(d.second_customer_representative);
       setDepartureCountry(d.departure_country_id?.id ?? "");
+      setTransitCountry(d.transit_country_id?.id ?? "");
       setTargetCountry(d.target_country_id?.id ?? "");
       setExistingFiles(d.load_file);
       setPackages(
@@ -1237,6 +1241,7 @@ export function LoadsPage() {
         front_transportation_by_us: int(form.front_transportation_by_us),
         final_transportation_by_us: int(form.final_transportation_by_us),
         departure_country_id: departureCountry || null,
+        transit_country_id: transitCountry || null,
         target_country_id: targetCountry || null,
         instruction_arrival_date: form.instruction_arrival_date || null,
         request_arrival_date: form.request_arrival_date || null,
@@ -1894,6 +1899,9 @@ export function LoadsPage() {
                     </FormField>
                     <FormField label="Kalkış Ülkesi">
                       <SelectInput value={departureCountry} onChange={setDepartureCountry} options={opts(countries)} />
+                    </FormField>
+                    <FormField label="Transit Ülke">
+                      <SelectInput value={transitCountry} onChange={setTransitCountry} options={opts(countries)} />
                     </FormField>
                     <FormField label="Varış Ülkesi">
                       <SelectInput value={targetCountry} onChange={setTargetCountry} options={opts(countries)} />

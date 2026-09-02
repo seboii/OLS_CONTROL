@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Siber;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 using OLS.DataAccess.Siber;
@@ -62,15 +63,18 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
     private readonly OlsDbContext _db;
     private readonly ISiberLoadRepository _siber;
     private readonly ISiberReservationRepository _reservations;
+    private readonly ISiberCountryResolver _countries;
     private readonly IClock _clock;
 
     public LoadTransferWriteService(
         OlsDbContext db, ISiberLoadRepository siber,
-        ISiberReservationRepository reservations, IClock clock)
+        ISiberReservationRepository reservations, ISiberCountryResolver countries,
+        IClock clock)
     {
         _db = db;
         _siber = siber;
         _reservations = reservations;
+        _countries = countries;
         _clock = clock;
     }
 
@@ -172,8 +176,13 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             KayitGiren = context.CurrentUserSiberCode,
             TalimatGelisTarihi = load.OfferDate?.ToDateTime(TimeOnly.MinValue) ?? now,
             YukTurKod = context.LoadTransferType?.Code,
-            YuklemeUlke = load.DepartureCountryId?.ToString(),
-            BosaltmaUlke = load.TargetCountryId?.ToString(),
+            // skn_yuk'ta ülke için kimlik sütunu yok: yalnızca çözülmüş AD ve
+            // KITA var (bkz. ISiberCountryResolver). Eskiden buraya yerel GUID
+            // ve sabit "ASYA" yazılıyordu.
+            YuklemeUlke = context.DepartureCountry?.Name,
+            BosaltmaUlke = context.TargetCountry?.Name,
+            YuklemeKita = context.DepartureCountry?.Continent,
+            BosaltmaKita = context.TargetCountry?.Continent,
             CalismaSekli = load.WayOfWorking,
             KayitGirisTarih = now,
         }, year, context.WorkType.AdditionalCode ?? string.Empty, cancellationToken);
@@ -225,8 +234,11 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             LoadTransferTypeId = load.LoadTransferTypeId,
             DepartureCountryId = load.DepartureCountryId?.ToString(),
             TargetCountryId = load.TargetCountryId?.ToString(),
-            LoadingContinent = "ASYA",
-            UnloadingContinent = "ASYA",
+            // Transit ülke teklifte var, Siber'in yük tablosunda yok — en azından
+            // dönüşümde kaybolmasın diye yerel yüke taşınır.
+            TransitCountryId = load.TransitCountryId?.ToString(),
+            LoadingContinent = context.DepartureCountry?.Continent,
+            UnloadingContinent = context.TargetCountry?.Continent,
             UsercodeWithNotification = (int)currentUserId,
             SalesRepCode = (int)currentUserId,
             WayOfWorking = load.WayOfWorking,
@@ -637,7 +649,10 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
         StatusType? StatusType, string? CurrentUserSiberName, string? CurrentUserSiberCode,
         bool HasContents, bool HasFinancialItems, bool HasFinancialItemWithoutKalem,
         string? ChargePersonSiberName, string? ChargePersonSiberCode, string? SalesRepSiberCode,
-        Account? CompanyPayFreight);
+        Account? CompanyPayFreight,
+        // Ülkenin Siber karşılığı: kimliği (rezervasyon karşılaştırması), adı ve
+        // kıtası (skn_yuk metin sütunları). Bkz. ISiberCountryResolver.
+        SiberCountry? DepartureCountry, SiberCountry? TargetCountry);
 
     private async Task<OfferContext> LoadContextAsync(Load load, CancellationToken cancellationToken)
     {
@@ -647,6 +662,13 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             .Join(_db.Users, p => p.UserId, u => (int)u.Id,
                 (p, u) => new { u.SiberName, u.SiberCode })
             .ToListAsync(cancellationToken);
+
+        var countries = await _countries.ResolveAsync(
+            [load.DepartureCountryId?.ToString(), load.TargetCountryId?.ToString()],
+            cancellationToken);
+
+        SiberCountry? Country(Guid? id) =>
+            id is { } value && countries.TryGetValue(value.ToString(), out var country) ? country : null;
 
         return new OfferContext(
             await _db.WorkTypes.AsNoTracking().FirstOrDefaultAsync(w => w.Id == load.WorkTypeId, cancellationToken),
@@ -675,7 +697,9 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             chargePeople.ElementAtOrDefault(0)?.SiberName,
             chargePeople.ElementAtOrDefault(0)?.SiberCode,
             chargePeople.ElementAtOrDefault(1)?.SiberCode,
-            await _db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == load.CompanyPayFreightId, cancellationToken));
+            await _db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == load.CompanyPayFreightId, cancellationToken),
+            Country(load.DepartureCountryId),
+            Country(load.TargetCountryId));
     }
 
     /// <summary>
@@ -746,8 +770,11 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             && Same(c.Receiver?.SiberId, reservation.AliciId)
             && Same(c.StatusType?.SiberId, reservation.DurumId)
             && Same(c.Department?.SiberId, reservation.DepartmanId)
-            && Same(load.DepartureCountryId?.ToString(), reservation.YuklemeUlkeId)
-            && Same(load.TargetCountryId?.ToString(), reservation.BosaltmaUlkeId)
+            // Siber tarafındaki kimlik sbr_ulke'nin kendi GUID'i; yereldeki
+            // countries.id 197 ülkenin 26'sında ondan FARKLI. Ham karşılaştırma
+            // bu 26 ülkede "teklif Siber'le uyuşmuyor" hatası üretiyordu.
+            && Same(c.DepartureCountry?.SiberId, reservation.YuklemeUlkeId)
+            && Same(c.TargetCountry?.SiberId, reservation.BosaltmaUlkeId)
             && load.WayOfWorking == (reservation.CalismaSekli ?? 0);
     }
 
