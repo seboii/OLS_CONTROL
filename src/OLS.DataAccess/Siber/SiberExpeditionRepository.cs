@@ -65,8 +65,13 @@ public interface ISiberExpeditionRepository
     /// </summary>
     Task DeletePozisyonAsync(string pozisyonId, CancellationToken cancellationToken = default);
 
-    Task UpdatePozisyonAsync(
-        string pozisyonId, int? durumId, string? romorkId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Sefer güncellemesini Siber'e yansıtır. <paramref name="pozisyon"/>
+    /// içindeki güzergâh ve tarih alanları da yazılır — eskiden yalnızca durum
+    /// ve römork gidiyordu, kullanıcının girdiği şehirler/tarihler Siber'e
+    /// HİÇ ulaşmıyordu.
+    /// </summary>
+    Task UpdatePozisyonAsync(SiberPozisyon pozisyon, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Var olan bir seferin, yeniden kullanılabilirliğini belirleyen alanları.</summary>
@@ -127,6 +132,30 @@ public sealed class SiberPozisyon
     public string? SeferTurId { get; init; }
 
     public string? KayitGiren { get; init; }
+
+    /// <summary>
+    /// GÜZERGÂH VE TARİHLER. Sefer formu bu yedi alanı zaten topluyordu ama
+    /// HİÇBİRİ Siber'e gitmiyordu — kayıt Siber'de güzergâhsız ve tarihsiz
+    /// açılıyordu. Siber'in kendi verisinde hepsi yoğun kullanılıyor (4.398
+    /// pozisyonda: başlangıç şehri %72,9 · yükleme şehri %72,8 · bitiş şehri
+    /// %72,0 · çıkış %73,1 · dönüş %72,1 · yükleme tarihi %76,9 · araç çıkış
+    /// %69,0).
+    ///
+    /// Şehir kimlikleri <c>sbr_sehir</c>'in KENDİ kimlikleridir; başlangıç ve
+    /// bitiş FK'lidir (<c>FK_skn_pozisyon_sbr_sehir…</c>), yani karşılığı
+    /// olmayan değer INSERT'i düşürür.
+    ///
+    /// Tarihler ayrıca <c>skn_pozisyon_sefer_update</c> trigger'ını besliyor:
+    /// hafta/ay/yıl alanları COALESCE(çıkış, araç çıkış, yükleme, kayıt) ile
+    /// türetiliyor. Boş bırakıldığında sefer "kayıt tarihi" haftasına düşüyordu.
+    /// </summary>
+    public string? BaslangicSehirId { get; init; }
+    public string? YuklemeSehirId { get; init; }
+    public string? BitisSehirId { get; init; }
+    public DateTime? CikisTarih { get; init; }
+    public DateTime? DonusTarih { get; init; }
+    public DateTime? YuklemeTarih { get; init; }
+    public DateTime? AracCikisTarih { get; init; }
 }
 
 public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
@@ -275,19 +304,25 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
             INSERT INTO skn_pozisyon
                 (pozisyonid, seferid, isturu, sirketid, subeid, sirano, durumid, romorkid,
                  hafta, departmanid, kayitgiristarih, seferturid, kayitgiren,
-                 cektirmefirmaid, planlananbitistarih)
+                 cektirmefirmaid, planlananbitistarih,
+                 baslangicsehirid, yuklemesehirid, bitissehirid,
+                 cikistarih, donustarih, yuklemetarih, araccikistarih)
             VALUES
                 (@PozisyonId, @SeferId, @IsTuru, @SirketId, @SubeId, @Sirano, @DurumId, @RomorkId,
                  @Hafta, @DepartmanId, @KayitGirisTarih, @SeferTurId, @KayitGiren,
-                 NULL, NULL)
+                 NULL, NULL,
+                 @BaslangicSehirId, @YuklemeSehirId, @BitisSehirId,
+                 @CikisTarih, @DonusTarih, @YuklemeTarih, @AracCikisTarih)
             """;
 
-        await connection.ExecuteAsync(sql, new
+        await connection.ExecuteAsync(new CommandDefinition(sql, new
         {
             pozisyon.PozisyonId, pozisyon.SeferId, pozisyon.IsTuru, SirketId, SubeId,
             pozisyon.Sirano, pozisyon.DurumId, pozisyon.RomorkId, pozisyon.Hafta,
             pozisyon.DepartmanId, pozisyon.KayitGirisTarih, pozisyon.SeferTurId, pozisyon.KayitGiren,
-        });
+            pozisyon.BaslangicSehirId, pozisyon.YuklemeSehirId, pozisyon.BitisSehirId,
+            pozisyon.CikisTarih, pozisyon.DonusTarih, pozisyon.YuklemeTarih, pozisyon.AracCikisTarih,
+        }, cancellationToken: cancellationToken));
     }
 
     public async Task<string?> ReadPozisyonSeferNoAsync(
@@ -327,24 +362,43 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
     /// anlaşılır bir mesajla reddedilir.
     /// </summary>
     public async Task UpdatePozisyonAsync(
-        string pozisyonId, int? durumId, string? romorkId, CancellationToken cancellationToken = default)
+        SiberPozisyon pozisyon, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
         await connection.ExecuteAsync(new CommandDefinition(
             """
-            UPDATE s SET s.romorkid = @romorkid
+            UPDATE s SET s.romorkid = @RomorkId
             FROM skn_sefer s
             JOIN skn_pozisyon p ON p.seferid = s.seferid
-            WHERE p.pozisyonid = @id
+            WHERE p.pozisyonid = @PozisyonId
               AND s.aracsahip IN (0, 2)
               AND p.isturu IN (0, 1)
               AND (SELECT COUNT(*) FROM skn_pozisyon x WHERE x.seferid = s.seferid) = 1;
 
-            UPDATE skn_pozisyon SET durumid = @durumid, romorkid = @romorkid
-            WHERE pozisyonid = @id;
+            UPDATE skn_pozisyon SET
+                durumid          = @DurumId,
+                romorkid         = @RomorkId,
+                isturu           = ISNULL(@IsTuru, isturu),
+                departmanid      = ISNULL(@DepartmanId, departmanid),
+                seferturid       = ISNULL(@SeferTurId, seferturid),
+                baslangicsehirid = @BaslangicSehirId,
+                yuklemesehirid   = @YuklemeSehirId,
+                bitissehirid     = @BitisSehirId,
+                cikistarih       = @CikisTarih,
+                donustarih       = @DonusTarih,
+                yuklemetarih     = @YuklemeTarih,
+                araccikistarih   = @AracCikisTarih
+            WHERE pozisyonid = @PozisyonId;
             """,
-            new { durumid = durumId, romorkid = romorkId, id = pozisyonId },
+            new
+            {
+                pozisyon.PozisyonId, pozisyon.DurumId, pozisyon.RomorkId, pozisyon.IsTuru,
+                pozisyon.DepartmanId, pozisyon.SeferTurId,
+                pozisyon.BaslangicSehirId, pozisyon.YuklemeSehirId, pozisyon.BitisSehirId,
+                pozisyon.CikisTarih, pozisyon.DonusTarih, pozisyon.YuklemeTarih,
+                pozisyon.AracCikisTarih,
+            },
             cancellationToken: cancellationToken));
     }
 

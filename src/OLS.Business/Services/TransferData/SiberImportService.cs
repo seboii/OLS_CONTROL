@@ -778,17 +778,55 @@ public sealed class SiberImportService : ISiberImportService
         return (created, updated);
     }
 
+    /// <summary>
+    /// ŞEHİRLER: TÜRKİYE + OPERASYONDA GEÇEN HER ŞEHİR.
+    ///
+    /// <c>sbr_sehir</c> 118.393 satır — tamamını almak ne gerekli ne de
+    /// kullanışlı: sefer formundaki açılır liste tek seferde yükleniyor.
+    /// Buna karşılık yerel liste 104 satırdı ve TAMAMI Türkiye'ydi; Siber'in
+    /// kendi seferleri MOSKOVA (1.588), NOVOROSSIYSK (631), BAKÜ, Minsk gibi
+    /// şehirlere gidiyor. Sonuç: yurt dışı güzergâhı OLUŞTURULAMIYORDU ve
+    /// senkronla gelen 2.824 seferin bitiş şehri yerelde karşılıksız kalıyordu.
+    ///
+    /// Bu yüzden ölçüt "gerçekten kullanılan": Türkiye'nin tüm şehirleri +
+    /// pozisyonların başlangıç/yükleme/bitiş/giriş-çıkış kapısı olarak
+    /// geçirdiği her şehir. Bugün 351 satır ediyor ve her turda güncel kalıyor.
+    ///
+    /// EŞLEŞME ADA GÖRE DEĞİL, SİBER KİMLİĞİNE GÖRE: liste artık çok ülkeli ve
+    /// aynı ad birden çok ülkede geçiyor ("İSKENDERUN", "Bursa"...). Ada göre
+    /// eşleştirmek yabancı bir şehri Türkiye kaydının üstüne yazardı.
+    /// </summary>
     private async Task<(int, int)> ImportCitiesAsync(IDbConnection connection, CancellationToken cancellationToken)
     {
         var rows = await connection.QueryAsync(
             new CommandDefinition(
-                "SELECT CAST(sehirid AS VARCHAR(64)) AS sehirid, ad, CAST(ulkeid AS VARCHAR(64)) AS ulkeid FROM sbr_sehir",
+                """
+                SELECT CAST(s.sehirid AS VARCHAR(64)) AS sehirid, s.ad,
+                       CAST(s.ulkeid AS VARCHAR(64)) AS ulkeid
+                FROM sbr_sehir s
+                WHERE s.ulkeid IN (SELECT ulkeid FROM sbr_ulke WHERE LTRIM(RTRIM(kisaad)) = 'TR')
+                   OR s.sehirid IN (
+                        SELECT baslangicsehirid FROM skn_pozisyon WHERE baslangicsehirid IS NOT NULL
+                        UNION SELECT yuklemesehirid FROM skn_pozisyon WHERE yuklemesehirid IS NOT NULL
+                        UNION SELECT bitissehirid FROM skn_pozisyon WHERE bitissehirid IS NOT NULL
+                        UNION SELECT giriscikiskapiid FROM skn_pozisyon WHERE giriscikiskapiid IS NOT NULL)
+                """,
                 cancellationToken: cancellationToken));
 
         var countryBySiberId = await _db.Countries.AsNoTracking()
             .Where(c => c.SiberId != null)
             .ToDictionaryAsync(c => c.SiberId!, c => c.Id, cancellationToken);
-        var existingByName = await LoadExistingByNameAsync(_db.Cities, x => x.Name, cancellationToken);
+
+        var all = await _db.Cities.ToListAsync(cancellationToken);
+
+        var existingBySiberId = new Dictionary<string, City>(StringComparer.OrdinalIgnoreCase);
+        foreach (var city in all.Where(c => !string.IsNullOrWhiteSpace(c.SiberId)))
+            existingBySiberId.TryAdd(city.SiberId!, city);
+
+        // Siber kimliği HİÇ yazılmamış eski satırlar için tek seferlik ad köprüsü.
+        var orphansByName = new Dictionary<string, City>();
+        foreach (var city in all.Where(c => string.IsNullOrWhiteSpace(c.SiberId) && c.Name is not null))
+            orphansByName.TryAdd(Key(city.Name), city);
 
         int created = 0, updated = 0;
         foreach (var row in rows)
@@ -798,16 +836,32 @@ public sealed class SiberImportService : ISiberImportService
             if (string.IsNullOrWhiteSpace(name) || ulkeid is null || !countryBySiberId.TryGetValue(ulkeid, out var countryId))
                 continue;
 
-            if (existingByName.TryGetValue(Key(name), out var existing))
+            string sehirId = row.sehirid;
+
+            if (existingBySiberId.TryGetValue(sehirId, out var existing))
             {
-                existing.SiberId = row.sehirid;
+                existing.Name = name;
+                existing.CountryId = countryId.ToString();
+                updated++;
+            }
+            else if (orphansByName.TryGetValue(Key(name), out var orphan))
+            {
+                orphan.SiberId = sehirId;
+                orphan.Name = name;
+                orphan.CountryId = countryId.ToString();
+                existingBySiberId[sehirId] = orphan;
+                orphansByName.Remove(Key(name));
                 updated++;
             }
             else
             {
-                var fresh = new City { Id = Guid.NewGuid(), Name = name, CountryId = countryId.ToString(), SiberId = row.sehirid };
+                var fresh = new City
+                {
+                    Id = Guid.NewGuid(), Name = name,
+                    CountryId = countryId.ToString(), SiberId = sehirId,
+                };
                 _db.Cities.Add(fresh);
-                existingByName[Key(name)] = fresh;
+                existingBySiberId[sehirId] = fresh;
                 created++;
             }
         }

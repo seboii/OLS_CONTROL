@@ -1829,6 +1829,19 @@ public sealed class SiberSyncService : ISiberSyncService
 
         var carByPlate = ByCode(cars, c => c.PlateNumber, c => c.Id);
 
+        // SİBER ŞEHİR KİMLİĞİ → YEREL ŞEHİR KİMLİĞİ. Ülkelerdeki tuzağın aynısı:
+        // Siber'in sehirid'si yerel cities.id ile aynı olmak zorunda değil
+        // (bkz. ISiberCityResolver) ve içe aktarılan yeni şehirlerde hiç aynı
+        // olmayacak. Eskiden ham GUID yazılıyordu.
+        var cityIdBySiberId = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var city in await _db.Cities.AsNoTracking()
+                     .Where(x => x.SiberId != null)
+                     .Select(x => new { x.Id, x.SiberId })
+                     .ToListAsync(cancellationToken))
+        {
+            cityIdBySiberId.TryAdd(city.SiberId!, city.Id);
+        }
+
         var existing = await ExistingByKeyAsync(
             _db.Expeditions.Where(e => e.ExpeditionId != null).OrderBy(e => e.Id), e => e.ExpeditionId, cancellationToken);
 
@@ -1861,9 +1874,14 @@ public sealed class SiberSyncService : ISiberSyncService
                 expedition.CarExitDate = row.Araccikistarih is { } ac ? DateOnly.FromDateTime(ac) : expedition.CarExitDate;
                 expedition.ReleaseDate = row.Cikistarih is { } cs ? DateOnly.FromDateTime(cs) : expedition.ReleaseDate;
                 expedition.ReturnDate = row.Donustarih is { } dn ? DateOnly.FromDateTime(dn) : expedition.ReturnDate;
-                if (row.Baslangicsehirid is { } bs && Guid.TryParse(bs, out var bsGuid)) expedition.StartCityId = bsGuid;
-                if (row.Yuklemesehirid is { } ys && Guid.TryParse(ys, out var ysGuid)) expedition.LoadCityId = ysGuid;
-                if (row.Bitissehirid is { } bi && Guid.TryParse(bi, out var biGuid)) expedition.EndCityId = biGuid;
+                // Eşleşme yoksa mevcut değere DOKUNULMAZ: tanınmayan bir kimlikle
+                // ezmek alanı ekranda boşaltırdı.
+                if (row.Baslangicsehirid is { } bs && cityIdBySiberId.TryGetValue(bs, out var bsId))
+                    expedition.StartCityId = bsId;
+                if (row.Yuklemesehirid is { } ys && cityIdBySiberId.TryGetValue(ys, out var ysId))
+                    expedition.LoadCityId = ysId;
+                if (row.Bitissehirid is { } bi && cityIdBySiberId.TryGetValue(bi, out var biId))
+                    expedition.EndCityId = biId;
                 if (row.Romorkid is { } romorkId && carBySiberId.TryGetValue(romorkId, out var byId))
                     expedition.RomorkId = (int)byId;
                 else if (row.Romorkplakano is { } rp && carByPlate.TryGetValue(rp, out var rpId))

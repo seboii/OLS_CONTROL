@@ -35,6 +35,11 @@ type TripForm = {
   romork_id: string; romork_plate: string;
   work_type: string; department_id: string; expedition_type: string;
   release_date: string; entry_date: string; loading_date: string; return_date: string;
+  // Güzergâh ve araç çıkışı: Siber'de skn_pozisyon üzerinde ayrı sütunlar
+  // (baslangicsehirid / yuklemesehirid / bitissehirid / araccikistarih).
+  // Eskiden yalnızca sefer AÇILDIKTAN sonra, detay ekranından girilebiliyordu.
+  car_exit_date: string;
+  start_city_id: string; load_city_id: string; end_city_id: string;
 };
 
 type TripDraft = { savedAt: string; form: TripForm };
@@ -42,6 +47,7 @@ type TripDraft = { savedAt: string; form: TripForm };
 const EMPTY_TRIP_FORM: TripForm = {
   romork_id: "", romork_plate: "", work_type: "", department_id: "", expedition_type: "",
   release_date: "", entry_date: "", loading_date: "", return_date: "",
+  car_exit_date: "", start_city_id: "", load_city_id: "", end_city_id: "",
 };
 
 /** Boş formu taslak diye kaydetmeyelim — en az bir alan dolu olmalı. */
@@ -449,6 +455,10 @@ export function TripsPage() {
       entry_date: form.entry_date || null,
       loading_date: form.loading_date || null,
       return_date: form.return_date || null,
+      car_exit_date: form.car_exit_date || null,
+      start_city_id: form.start_city_id || null,
+      load_city_id: form.load_city_id || null,
+      end_city_id: form.end_city_id || null,
     };
     try {
       // YÜK EKLEME AKIŞI: yeni sefer formunda yük bağlama alanı OLAMAZ, çünkü
@@ -1063,6 +1073,18 @@ export function TripsPage() {
           </FormField>
           <FormField label="Dönüş Tarihi" error={errors.return_date?.[0]}>
             <TextInput value={form.return_date} onChange={(v) => setForm((f) => ({ ...f, return_date: v }))} type="date" error={!!errors.return_date} />
+          </FormField>
+          <FormField label="Araç Çıkış Tarihi" error={errors.car_exit_date?.[0]}>
+            <TextInput value={form.car_exit_date} onChange={(v) => setForm((f) => ({ ...f, car_exit_date: v }))} type="date" error={!!errors.car_exit_date} />
+          </FormField>
+          <FormField label="Başlangıç Şehri" error={errors.start_city_id?.[0]}>
+            <SelectInput value={form.start_city_id} onChange={(v) => setForm((f) => ({ ...f, start_city_id: v }))} options={opts(cities)} />
+          </FormField>
+          <FormField label="Yükleme Şehri" error={errors.load_city_id?.[0]}>
+            <SelectInput value={form.load_city_id} onChange={(v) => setForm((f) => ({ ...f, load_city_id: v }))} options={opts(cities)} />
+          </FormField>
+          <FormField label="Bitiş Şehri" error={errors.end_city_id?.[0]}>
+            <SelectInput value={form.end_city_id} onChange={(v) => setForm((f) => ({ ...f, end_city_id: v }))} options={opts(cities)} />
           </FormField>
         </div>
       </Drawer>

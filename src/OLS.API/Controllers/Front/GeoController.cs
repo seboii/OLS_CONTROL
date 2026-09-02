@@ -61,15 +61,22 @@ public sealed class GeoController : ApiControllerBase
     {
         var query = _db.Cities.AsNoTracking().AsQueryable();
 
-        // country_id metin olarak saklanıyor ve Siber GUID'leri büyük harf;
-        // olsold da karşılaştırmadan önce strtoupper uyguluyordu.
+        // BULUNAN GERÇEK BUG: burada değer BÜYÜK harfe çevrilip karşılaştırılıyordu
+        // (olsold'un strtoupper'ı taşınmış), ama yereldeki cities.country_id
+        // KÜÇÜK harfli — 104 satırın 104'ü. Yani ülkeye göre şehir sorgusu HER
+        // ZAMAN boş dönüyordu ve müşteri formundaki şehir listesi hiç dolmuyordu.
+        // Harfe duyarsız karşılaştırılır.
         if (!string.IsNullOrWhiteSpace(countryId))
-            query = query.Where(c => c.CountryId == countryId.ToUpperInvariant());
+            query = query.Where(c => c.CountryId != null && c.CountryId.ToLower() == countryId.ToLower());
 
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(c => EF.Functions.ILike(c.Name!, $"%{search}%"));
 
-        var ordered = query.OrderBy(c => c.Id);
+        // ADA GÖRE SIRALI. Eskiden kimliğe göre sıralanıyordu, yani açılır liste
+        // rastgele diziliydi; şehir sayısı Türkiye dışını da kapsayacak şekilde
+        // arttığı için (bkz. SiberImportService.ImportCitiesAsync) bu liste elle
+        // taranamaz hâle geliyordu.
+        var ordered = query.OrderBy(c => c.Name);
 
         var result = await ordered.ToPagedOrListAsync(perPage, page, CurrentPath, cancellationToken);
         return Ok(result, "Kayıtlar");
@@ -94,15 +101,16 @@ public sealed class GeoController : ApiControllerBase
     {
         var query = _db.Districts.AsNoTracking().AsQueryable();
 
+        // Şehirdeki ile aynı harf tuzağı (bkz. Cities).
         if (!string.IsNullOrWhiteSpace(cityId))
-            query = query.Where(d => d.CityId == cityId.ToUpperInvariant());
+            query = query.Where(d => d.CityId != null && d.CityId.ToLower() == cityId.ToLower());
 
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(d => EF.Functions.ILike(d.Name!, $"%{search}%"));
 
         // olsold burada yalnızca id, city_id, name, slug seçiyordu.
         var ordered = query
-            .OrderBy(d => d.Id)
+            .OrderBy(d => d.Name)
             .Select(d => new { id = d.Id, city_id = d.CityId, name = d.Name, slug = d.Slug });
 
         var result = await ordered.ToPagedOrListAsync(perPage, page, CurrentPath, cancellationToken);

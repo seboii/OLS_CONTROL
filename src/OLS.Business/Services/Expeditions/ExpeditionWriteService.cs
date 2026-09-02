@@ -70,17 +70,19 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
 
     private readonly OlsDbContext _db;
     private readonly ISiberExpeditionRepository _siber;
-    private readonly IClock _clock;
+    private readonly ISiberCityResolver _cities;
     private readonly ISiberReferenceValidator _references;
+    private readonly IClock _clock;
 
     public ExpeditionWriteService(
         OlsDbContext db, ISiberExpeditionRepository siber, IClock clock,
-        ISiberReferenceValidator references)
+        ISiberReferenceValidator references, ISiberCityResolver cities)
     {
         _db = db;
         _siber = siber;
         _clock = clock;
         _references = references;
+        _cities = cities;
     }
 
     public async Task<ExpeditionWriteResult> CreateAsync(
@@ -118,10 +120,18 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         // araç INSERT'i kesin düşürür. departmanid de FK'li ve SiberId'si boş
         // olsa sessizce NULL yazılır — sefer Siber'de departmansız açılırdı.
         // Bu akış eskiden yalnızca YEREL kaydın varlığına bakıyordu.
+        // GÜZERGÂH ŞEHİRLERİ de doğrulanır: baslangicsehirid ve bitissehirid
+        // skn_pozisyon'da FK'li, karşılığı olmayan şehir INSERT'i düşürür.
+        var cityMap = await _cities.ResolveAsync(
+            [model.StartCityId, model.LoadCityId, model.EndCityId], cancellationToken);
+
         var referenceFailure = await _references.ValidateAsync(
             [
                 new("Araç", SiberReferenceTable.Arac, car.SiberId),
                 new("Departman", SiberReferenceTable.Departman, department.SiberId),
+                new("Başlangıç şehri", SiberReferenceTable.Sehir, SiberCity(cityMap, model.StartCityId)),
+                new("Yükleme şehri", SiberReferenceTable.Sehir, SiberCity(cityMap, model.LoadCityId)),
+                new("Bitiş şehri", SiberReferenceTable.Sehir, SiberCity(cityMap, model.EndCityId)),
             ],
             cancellationToken);
 
@@ -213,6 +223,16 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
             KayitGirisTarih = now,
             SeferTurId = expeditionType.Code,
             KayitGiren = currentUserSiberCode,
+            // GÜZERGÂH VE TARİHLER. Form bunları zaten topluyordu ama ne Siber'e
+            // gidiyor ne de yerelde saklanıyordu; sefer Siber'de güzergâhsız ve
+            // tarihsiz açılıyordu (bkz. SiberPozisyon.BaslangicSehirId).
+            BaslangicSehirId = SiberCity(cityMap, model.StartCityId),
+            YuklemeSehirId = SiberCity(cityMap, model.LoadCityId),
+            BitisSehirId = SiberCity(cityMap, model.EndCityId),
+            CikisTarih = ToDateTime(model.ReleaseDate),
+            DonusTarih = ToDateTime(model.ReturnDate),
+            YuklemeTarih = ToDateTime(model.LoadingDate),
+            AracCikisTarih = ToDateTime(model.CarExitDate),
         }, cancellationToken);
 
         // Sefer numarasını Siber üretiyor; geri okuyup yerel kayda yazıyoruz.
@@ -230,6 +250,15 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
             ExpeditionTypeId = (int)expeditionType.Id,
             RegistrationLoginDate = DateOnly.FromDateTime(now),
             DepartmentId = (int)department.Id,
+            // Eskiden bu yedi alan oluşturmada yerelde de KAYBOLUYORDU; yalnızca
+            // güncelleme ekranından girilebiliyordu.
+            ReleaseDate = model.ReleaseDate,
+            LoadingDate = model.LoadingDate,
+            ReturnDate = model.ReturnDate,
+            CarExitDate = model.CarExitDate,
+            StartCityId = model.StartCityId,
+            LoadCityId = model.LoadCityId,
+            EndCityId = model.EndCityId,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -292,12 +321,33 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
 
         if (_siber.IsConfigured && expedition.ExpeditionId is not null)
         {
-            await _siber.UpdatePozisyonAsync(
-                expedition.ExpeditionId, status.ExpeditionStatusId, car.SiberId, cancellationToken);
+            var updateCities = await _cities.ResolveAsync(
+                [model.StartCityId, model.LoadCityId, model.EndCityId], cancellationToken);
+
+            await _siber.UpdatePozisyonAsync(new SiberPozisyon
+            {
+                PozisyonId = expedition.ExpeditionId,
+                DurumId = status.ExpeditionStatusId ?? 0,
+                RomorkId = car.SiberId,
+                IsTuru = workType.Code,
+                DepartmanId = department.SiberId,
+                SeferTurId = expeditionType.Code,
+                BaslangicSehirId = SiberCity(updateCities, model.StartCityId),
+                YuklemeSehirId = SiberCity(updateCities, model.LoadCityId),
+                BitisSehirId = SiberCity(updateCities, model.EndCityId),
+                CikisTarih = ToDateTime(model.ReleaseDate),
+                DonusTarih = ToDateTime(model.ReturnDate),
+                YuklemeTarih = ToDateTime(model.LoadingDate),
+                AracCikisTarih = ToDateTime(model.CarExitDate),
+            }, cancellationToken);
         }
 
         return ExpeditionWriteResult.Ok(expedition.Id);
     }
+
+    /// <summary>Yerel şehir kimliğinin Siber karşılığı; seçilmemişse null.</summary>
+    private static string? SiberCity(IReadOnlyDictionary<string, string> map, Guid? cityId) =>
+        cityId is { } id && map.TryGetValue(id.ToString(), out var siberId) ? siberId : null;
 
     /// <summary>
     /// olsold sefer silmede Siber'e dokunmuyordu; aynı davranış korunuyor

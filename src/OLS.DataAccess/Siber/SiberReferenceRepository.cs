@@ -47,6 +47,13 @@ public enum SiberReferenceTable
     /// taşıyor; karşılığı olmayan bir kimlik yazmak yetim değer bırakır.
     /// </summary>
     Ulke,
+
+    /// <summary>
+    /// <c>sbr_sehir</c> — seferin başlangıç / yükleme / bitiş şehri. Başlangıç
+    /// ve bitiş <c>skn_pozisyon</c>'da FK'li, yani karşılığı olmayan şehir
+    /// INSERT'i kesin düşürür.
+    /// </summary>
+    Sehir,
 }
 
 /// <summary>
@@ -85,6 +92,7 @@ public sealed class SiberReferenceRepository : ISiberReferenceRepository
         SiberReferenceTable.KapCins => ("skn_kapcins", "kapcinsid"),
         SiberReferenceTable.Kalem => ("skn_kalem", "kalemid"),
         SiberReferenceTable.Ulke => ("sbr_ulke", "ulkeid"),
+        SiberReferenceTable.Sehir => ("sbr_sehir", "sehirid"),
         _ => throw new ArgumentOutOfRangeException(nameof(table)),
     };
 
