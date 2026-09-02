@@ -399,7 +399,7 @@ public sealed class DirectLoadService : IDirectLoadService
 
             await WriteFinancialItemsAsync(
                 model, numberResult.LoadNumberWorkType, currentUserId, userSiberCode,
-                now, cancellationToken);
+                companyId, now, cancellationToken);
 
             await _db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
@@ -504,7 +504,8 @@ public sealed class DirectLoadService : IDirectLoadService
 
     private async Task WriteFinancialItemsAsync(
         DirectLoadModel model, string? loadNumberWorkType, long currentUserId,
-        string? userSiberCode, DateTime now, CancellationToken cancellationToken)
+        string? userSiberCode, string companyId, DateTime now,
+        CancellationToken cancellationToken)
     {
         if (model.FinancialItems.Count == 0 || loadNumberWorkType is null)
             return;
@@ -535,6 +536,9 @@ public sealed class DirectLoadService : IDirectLoadService
 
                     await _siber.InsertModulKalemAsync(new SiberModulKalem
                     {
+                        // Şube şirketi takip eder; Avrora yükünün kalemi de
+                        // Avrora şubesine yazılmalı.
+                        SirketId = companyId,
                         ModulKalemId = modulKalemId,
                         ModulId = modulKayit.ModulId,
                         ModulKod = modulKayit.ModulKod,

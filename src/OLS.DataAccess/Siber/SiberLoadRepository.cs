@@ -239,6 +239,12 @@ public sealed class SiberYukKoli
 
 public sealed class SiberModulKalem
 {
+    /// <summary>
+    /// Kalemin şirketi; şube bundan türer (bkz.
+    /// <see cref="SiberLoadRepository.SubeIdFor"/>). Boş bırakılırsa OLS.
+    /// </summary>
+    public string? SirketId { get; init; }
+
     public string ModulKalemId { get; init; } = string.Empty;
     public string? ModulId { get; init; }
     public string? ModulKod { get; init; }
@@ -288,7 +294,25 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
     /// doğduğu anda bozulurdu.
     /// </summary>
     public const string DefaultSirketId = "BA4888B1-A2B0-4142-B273-92481D932EAD";
-    private const string SubeId = "69588E44-731B-46E5-83A4-A338816E2300";
+
+    /// <summary>AVRORA şirketi — şube kimliği buna göre değişir.</summary>
+    public const string AvroraSirketId = "46258A01-8D77-4F87-AAF5-6B331DEDD8A7";
+
+    /// <summary>OLS şubesi.</summary>
+    public const string DefaultSubeId = "69588E44-731B-46E5-83A4-A338816E2300";
+
+    /// <summary>AVRORA şubesi.</summary>
+    public const string AvroraSubeId = "D019AE6E-3E81-47FF-8194-03C259C67013";
+
+    /// <summary>
+    /// ŞUBE ŞİRKETİ TAKİP EDER. Canlıda birebir örtüşüyor: 4.120 pozisyon
+    /// OLS şirketi + OLS şubesi, 279'u AVRORA şirketi + AVRORA şubesi.
+    /// Şubeyi sabit yazmak, Avrora kaydını OLS şubesine düşürüyordu.
+    /// </summary>
+    public static string SubeIdFor(string? sirketId) =>
+        string.Equals(sirketId, AvroraSirketId, StringComparison.OrdinalIgnoreCase)
+            ? AvroraSubeId
+            : DefaultSubeId;
 
     /// <summary>olsold'da sabit çarpanlar: ücret ağırlığı ve hacim hesabı için.</summary>
     public const decimal LademeterMultiplier = 1750m;
@@ -463,7 +487,8 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
 
         return await connection.QuerySingleAsync<SiberYukNumberResult>(sql, new
         {
-            yuk.YukId, SirketId = yuk.SirketId ?? DefaultSirketId, SubeId,
+            yuk.YukId, SirketId = yuk.SirketId ?? DefaultSirketId,
+            SubeId = SubeIdFor(yuk.SirketId),
             yuk.IsTuru, Yil = year, AdditionalCode = additionalCode,
             LockResource = $"skn_yuk_no:{yuk.IsTuru}:{year}",
             yuk.YuklemeTip, yuk.FirmaId, yuk.GondericiId, yuk.AliciId, yuk.OdemeSekliId,
@@ -525,7 +550,8 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
         {
             kalem.ModulKalemId, kalem.ModulId, kalem.ModulKod, kalem.KalemId, kalem.Gc,
             kalem.FirmaId, kalem.ToplamTutar, kalem.DovizKod, kalem.BirimFiyat,
-            kalem.Miktar, kalem.Tutar, SubeId, kalem.KayitGirisTarih, kalem.KayitGiren,
+            kalem.Miktar, kalem.Tutar, SubeId = SubeIdFor(kalem.SirketId),
+            kalem.KayitGirisTarih, kalem.KayitGiren,
         });
     }
 

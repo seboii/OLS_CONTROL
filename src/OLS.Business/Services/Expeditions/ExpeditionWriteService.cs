@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Siber;
 using OLS.DataAccess.Siber;
 
@@ -72,17 +73,20 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
     private readonly ISiberExpeditionRepository _siber;
     private readonly ISiberCityResolver _cities;
     private readonly ISiberReferenceValidator _references;
+    private readonly ICompanyScope _companyScope;
     private readonly IClock _clock;
 
     public ExpeditionWriteService(
         OlsDbContext db, ISiberExpeditionRepository siber, IClock clock,
-        ISiberReferenceValidator references, ISiberCityResolver cities)
+        ISiberReferenceValidator references, ISiberCityResolver cities,
+        ICompanyScope companyScope)
     {
         _db = db;
         _siber = siber;
         _clock = clock;
         _references = references;
         _cities = cities;
+        _companyScope = companyScope;
     }
 
     public async Task<ExpeditionWriteResult> CreateAsync(
@@ -153,6 +157,13 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         // kodlamasıyla birebir aynı (canlıda doğrulandı: aracsahip 0 -> OZ, 1 -> KR).
         var ownerFlag = owner?.Code ?? 0;
 
+        // SEFER, AÇAN KULLANICININ ŞİRKETİNE YAZILIR. Eskiden şirket ve şube
+        // depoda sabitti (hep OLS): Avrora kullanıcısının açtığı sefer OLS'e
+        // düşüyor ve görünürlük kuralı gereği KENDİ listesinde hiç
+        // görünmüyordu. Yük akışı bunu zaten böyle yapıyor.
+        var visibility = await _companyScope.ResolveAsync(model.CurrentUserId, cancellationToken);
+        var companyId = visibility.OnlyCompanyId ?? SiberLoadRepository.DefaultSirketId;
+
         var now = _clock.Now;
         var fullYear = now.ToString("yyyy");
         var shortYear = now.ToString("yy");
@@ -194,6 +205,7 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
             await _siber.InsertSeferWithLockedNumberAsync(new SiberSefer
             {
                 SeferId = newSeferId,
+                SirketId = companyId,
                 AracSahip = ownerFlag,
                 CikisTarih = ToDateTime(model.ReleaseDate),
                 DonusTarih = ToDateTime(model.EntryDate),
@@ -213,6 +225,7 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         await _siber.InsertPozisyonAsync(new SiberPozisyon
         {
             PozisyonId = pozisyonId,
+            SirketId = companyId,
             SeferId = seferId,
             IsTuru = workType.Code,
             Sirano = sirano,
@@ -243,6 +256,9 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
             ExpeditionId = pozisyonId,
             ExpeditionNumber = generatedSeferNo,
             SeferId = seferId,
+            // Senkron bunu Siber'den zaten getiriyor, ama ilk turdan ÖNCE de
+            // kayıt kendi listesinde görünsün diye burada da yazılır.
+            SiberCompanyId = companyId,
             StatusId = 1,
             WorkType = (int)workType.Id,
             RomorkId = (int)car.Id,

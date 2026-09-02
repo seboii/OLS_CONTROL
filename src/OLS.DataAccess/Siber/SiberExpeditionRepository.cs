@@ -95,6 +95,9 @@ public sealed class SiberSeferRef
 
 public sealed class SiberSefer
 {
+    /// <summary>Seferi açan kullanıcının şirketi; şube bundan türer.</summary>
+    public string? SirketId { get; init; }
+
     public string SeferId { get; init; } = string.Empty;
     public int? AracSahip { get; init; }
     public int SeferNo { get; init; }
@@ -118,6 +121,9 @@ public sealed class SiberSefer
 
 public sealed class SiberPozisyon
 {
+    /// <summary>Seferi açan kullanıcının şirketi; şube bundan türer.</summary>
+    public string? SirketId { get; init; }
+
     public string PozisyonId { get; init; } = string.Empty;
     public string SeferId { get; init; } = string.Empty;
     public string? IsTuru { get; init; }
@@ -160,9 +166,22 @@ public sealed class SiberPozisyon
 
 public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
 {
-    /// <summary>olsold'da sabit kodlu şirket/şube kimlikleri.</summary>
-    private const string SirketId = "BA4888B1-A2B0-4142-B273-92481D932EAD";
-    private const string SubeId = "69588E44-731B-46E5-83A4-A338816E2300";
+    /// <summary>
+    /// BULUNAN GERÇEK HATA — Avrora kullanıcısı açtığı seferi GÖREMİYORDU.
+    ///
+    /// Şirket ve şube burada SABİT yazılıyordu (olsold'dan taşınmış): her sefer,
+    /// kimin açtığından bağımsız olarak OLS şirketine ve OLS şubesine düşüyordu.
+    /// Görünürlük kuralı şirket kapsamına dayandığı için (Avrora ekibi yalnızca
+    /// Avrora kayıtlarını görür) Avrora kullanıcısının açtığı sefer kendi
+    /// listesinde HİÇ görünmüyordu.
+    ///
+    /// Siber'in kendi verisi iki şirketi de kullanıyor: 4.120 pozisyon OLS,
+    /// 279'u AVRORA — ve şube şirketle birebir örtüşüyor (4.120 / 279).
+    /// Yük akışı bunu zaten doğru yapıyordu (bkz. DirectLoadService), sefer
+    /// akışı yapmıyordu.
+    /// </summary>
+    private static string SirketIdOr(string? sirketId) =>
+        string.IsNullOrWhiteSpace(sirketId) ? SiberLoadRepository.DefaultSirketId : sirketId;
 
     /// <summary>Siber'de "boşaltıldı" durumu; bu durumdaki sefer aktif sayılmaz.</summary>
     private const int UnloadedStatusId = 14;
@@ -287,7 +306,10 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
 
         return await connection.QuerySingleAsync<int>(sql, new
         {
-            sefer.SeferId, SirketId, SubeId, sefer.AracSahip,
+            sefer.SeferId,
+            SirketId = SirketIdOr(sefer.SirketId),
+            SubeId = SiberLoadRepository.SubeIdFor(sefer.SirketId),
+            sefer.AracSahip,
             sefer.CikisTarih, sefer.DonusTarih, sefer.Yil, sefer.RomorkId,
             LockResource = $"skn_sefer_no:{sefer.Yil}:{sefer.AracSahip}",
         });
@@ -317,7 +339,9 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
 
         await connection.ExecuteAsync(new CommandDefinition(sql, new
         {
-            pozisyon.PozisyonId, pozisyon.SeferId, pozisyon.IsTuru, SirketId, SubeId,
+            pozisyon.PozisyonId, pozisyon.SeferId, pozisyon.IsTuru,
+            SirketId = SirketIdOr(pozisyon.SirketId),
+            SubeId = SiberLoadRepository.SubeIdFor(pozisyon.SirketId),
             pozisyon.Sirano, pozisyon.DurumId, pozisyon.RomorkId, pozisyon.Hafta,
             pozisyon.DepartmanId, pozisyon.KayitGirisTarih, pozisyon.SeferTurId, pozisyon.KayitGiren,
             pozisyon.BaslangicSehirId, pozisyon.YuklemeSehirId, pozisyon.BitisSehirId,
