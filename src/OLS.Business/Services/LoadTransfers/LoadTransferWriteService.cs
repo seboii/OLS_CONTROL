@@ -38,9 +38,20 @@ public interface ILoadTransferWriteService
 
 public sealed record LoadTransferWriteResult(string? LoadNumber, string? ErrorMessage)
 {
+    /// <summary>
+    /// Oluşan yükün yerel kimliği. Evrak arşivine dosya göndermek için gerekli:
+    /// arşiv kaydı yüke bağlanıyor ve yük ancak yazıldıktan sonra kimlik alıyor,
+    /// bu yüzden dosyalar kayıttan SONRA yükleniyor (bkz. LoadArchivePublisher).
+    /// Teklif dönüşümü bu alanı doldurmuyor; oradaki akış dosya yüklemiyor.
+    /// </summary>
+    public long? LoadTransferId { get; init; }
+
     public bool IsSuccess => ErrorMessage is null;
     public static LoadTransferWriteResult Fail(string message) => new(null, message);
     public static LoadTransferWriteResult Ok(string loadNumber) => new(loadNumber, null);
+
+    public static LoadTransferWriteResult Ok(string loadNumber, long loadTransferId) =>
+        new(loadNumber, null) { LoadTransferId = loadTransferId };
 }
 
 public sealed class LoadTransferWriteService : ILoadTransferWriteService

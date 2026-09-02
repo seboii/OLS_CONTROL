@@ -352,7 +352,10 @@ public sealed class DirectLoadService : IDirectLoadService
             await _db.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
 
-            return LoadTransferWriteResult.Ok(numberResult.LoadNumberWorkType ?? string.Empty);
+            // Kimlik de dönülüyor: evrak arşivine dosya göndermek için gerekli ve
+            // ancak SaveChanges'ten sonra biliniyor.
+            return LoadTransferWriteResult.Ok(
+                numberResult.LoadNumberWorkType ?? string.Empty, transfer.Id);
         }
         catch
         {

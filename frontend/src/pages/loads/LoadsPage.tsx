@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
-import { Package, Plus, Trash2, Upload, File as FileIcon, X, User, CalendarDays, Filter, ChevronDown, ChevronUp, Truck, AlertTriangle } from "lucide-react";
+import { FileText, Package, Plus, Trash2, Upload, File as FileIcon, X, User, CalendarDays, Filter, ChevronDown, ChevronUp, Truck, AlertTriangle } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
@@ -504,8 +504,6 @@ export function LoadsPage() {
   const [canDirect, setCanDirect] = useState(false);
   const [directOpen, setDirectOpen] = useState(false);
   const [directSaving, setDirectSaving] = useState(false);
-  const DIRECT_TABS = ["Genel Bilgiler", "Taraflar", "Güzergah", "Paketler", "Finans"];
-  const [directTab, setDirectTab] = useState(DIRECT_TABS[0]);
   const [directForm, setDirectForm] = useState({
     work_type_id: "", loading_type_id: "", load_transfer_type_id: "",
     instruction_id: "", romork_type_id: "", payment_type_id: "", department_id: "",
@@ -522,6 +520,23 @@ export function LoadsPage() {
   const [directFreightPayer, setDirectFreightPayer] = useState<AccountOption | null>(null);
   const [directPackages, setDirectPackages] = useState<PackageRow[]>([{ ...EMPTY_PACKAGE_ROW }]);
   const [directItems, setDirectItems] = useState<InvoiceItemRow[]>([]);
+
+  // DOSYA ARŞİVİ — yük oluşmadan dosya yüklenemiyor: arşiv kaydı yükün Siber
+  // kimliğine bağlanıyor ve o kimlik ancak kayıt sırasında oluşuyor. Bu yüzden
+  // dosyalar burada tutulup kayıttan SONRA gönderiliyor.
+  const [directFiles, setDirectFiles] = useState<File[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+  const directFileInput = useRef<HTMLInputElement | null>(null);
+
+  function addDirectFiles(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    // Aynı dosya iki kez eklenmesin (ad + boyut yeterli ayırt edici).
+    setDirectFiles((prev) => {
+      const key = (f: File) => `${f.name}:${f.size}`;
+      const seen = new Set(prev.map(key));
+      return [...prev, ...Array.from(list).filter((f) => !seen.has(key(f)))];
+    });
+  }
 
   // Taslaklar (tarayıcı belleğinde) — bkz. lib/directLoadDrafts.ts
   const [drafts, setDrafts] = useState<DirectLoadDraft[]>([]);
@@ -591,7 +606,7 @@ export function LoadsPage() {
     setDirectAgent(null); setDirectFreightPayer(null);
     setDirectPackages([{ ...EMPTY_PACKAGE_ROW }]);
     setDirectItems([]);
-    setDirectTab(DIRECT_TABS[0]);
+    setDirectFiles([]);
     setActiveDraftId(null);
   }
 
@@ -625,7 +640,6 @@ export function LoadsPage() {
     setActiveDraftId(draft.id);
     setDraftsOpen(false);
     setRecoverable(null);
-    setDirectTab(DIRECT_TABS[0]);
     addToast(`Taslak açıldı: ${draft.name}`);
   }
 
@@ -646,7 +660,7 @@ export function LoadsPage() {
     if (directSaving) return;
     setDirectSaving(true);
     try {
-      const res = await api.post<{ data: { yuk_no: string }; message: string }>(
+      const res = await api.post<{ data: { yuk_no: string; id: number | null }; message: string }>(
         "/api/v1/load_transfer/direct", {
           work_type_id: int(directForm.work_type_id),
           loading_type_id: int(directForm.loading_type_id),
@@ -699,6 +713,23 @@ export function LoadsPage() {
 
       addToast(`Yük oluşturuldu: ${res.data.yuk_no}`);
 
+      // Dosyalar ancak yük oluştuktan sonra arşive gidebiliyor. Yükleme
+      // başarısız olsa bile YÜK OLUŞMUŞ durumda — bu yüzden hata akışı
+      // durdurmuyor, yalnızca bildiriliyor.
+      if (directFiles.length > 0 && res.data.id) {
+        try {
+          const fd = new FormData();
+          for (const file of directFiles) fd.append("files", file);
+
+          const up = await api.postForm<{ data: { uploaded: number; total: number }; message: string }>(
+            `/api/v1/load_transfer/${res.data.id}/archive`, fd);
+
+          addToast(up.message, up.data.uploaded === up.data.total ? "success" : "error");
+        } catch {
+          addToast("Yük oluştu ancak dosyalar arşive gönderilemedi", "error");
+        }
+      }
+
       // Kayıt Siber'e gittiğine göre taslak da kurtarma kopyası da gereksiz.
       if (activeDraftId) deleteDraft(activeDraftId);
       clearAutosave();
@@ -713,6 +744,19 @@ export function LoadsPage() {
     } finally {
       setDirectSaving(false);
     }
+  }
+
+  /**
+   * Tek sayfalık formda bölüm başlığı. Form eskiden sekmeliydi; sekmeler
+   * kaldırılınca bölümlerin gözle ayrılması gerekti — kullanıcı artık tek
+   * ekranda yukarıdan aşağı dolduruyor.
+   */
+  function SectionTitle({ children }: { children: React.ReactNode }) {
+    return (
+      <h3 className="mb-4 border-b border-gray-200 pb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+        {children}
+      </h3>
+    );
   }
 
   function opts(list: { id: string | number; name: string }[]) {
@@ -1366,12 +1410,13 @@ export function LoadsPage() {
         oluşturmaz. Zorunlu alanlar sunucuda da doğrulanıyor; buradaki liste
         yalnızca kullanıcıyı erken uyarmak için.
       */}
+      {/* Form tek sayfaya indi (eskiden 5 sekmeydi); 760px'de alanlar sıkışıyordu. */}
       <Drawer
         open={directOpen}
         onClose={() => setDirectOpen(false)}
         title="Teklifsiz Yük Aç"
         subtitle="Teklif aşaması olmadan doğrudan yük oluşturur"
-        width="w-[760px]"
+        width="w-[1080px]"
         footer={
           <div className="flex gap-2">
             <Btn onClick={submitDirectLoad} disabled={directSaving}>
@@ -1387,7 +1432,6 @@ export function LoadsPage() {
           </div>
         }
       >
-        <Tabs tabs={DIRECT_TABS} active={directTab} onChange={setDirectTab} className="px-6" />
 
         {/* Kaza kurtarma: kaydedilmemiş bir form kalmışsa geri yüklenebilir.
             Sekme kapanması / sayfa yenilenmesi / elektrik kesintisi sonrası. */}
@@ -1483,8 +1527,23 @@ export function LoadsPage() {
           </div>
         )}
 
-        <div className="p-6 space-y-6">
-          {directTab === "Genel Bilgiler" && (
+        <div className="p-6 space-y-8">
+          {/* ---------------------------------------------------------------
+              1) GENEL BİLGİLER — tanımlar + taraflar tek blokta.
+
+              ÇALIŞMA ŞEKLİ ile YÜKLEME TİPİ aynı şey DEĞİL; ikisi de Siber'e
+              AYRI sütuna yazılıyor:
+                skn_yuk.yuklemetip   -> GRUPAJ(0) / KOMPLE(1) / CO-LOAD(2)
+                skn_yuk.calismasekli -> SPOT(0) / YILLIK(1)
+
+              Bu ekran eskiden çalışma şeklini "Komple/Parsiyel" diye
+              etiketliyordu, yani yükleme tipinin seçeneklerini gösteriyordu ve
+              iki alan aynı şeymiş gibi duruyordu. Gerçek liste
+              skn_sabittanim(CALISMASEKLI) = SPOT/YILLIK: işin spot mu yıllık
+              sözleşme mi olduğu.
+              --------------------------------------------------------------- */}
+          <section>
+            <SectionTitle>Genel Bilgiler</SectionTitle>
             <div className="grid grid-cols-3 gap-x-6 gap-y-5">
               <FormField label="İş Türü" required>
                 <SelectInput value={directForm.work_type_id} onChange={(v) => setDirectForm((f) => ({ ...f, work_type_id: v }))} options={opts(workTypes)} />
@@ -1498,6 +1557,9 @@ export function LoadsPage() {
               <FormField label="Departman" required>
                 <SelectInput value={directForm.department_id} onChange={(v) => setDirectForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
               </FormField>
+              <FormField label="Çalışma Şekli">
+                <SelectInput value={directForm.way_of_working} onChange={(v) => setDirectForm((f) => ({ ...f, way_of_working: v }))} options={[{ value: "0", label: "Spot" }, { value: "1", label: "Yıllık" }]} />
+              </FormField>
               <FormField label="Ödeme Tipi">
                 <SelectInput value={directForm.payment_type_id} onChange={(v) => setDirectForm((f) => ({ ...f, payment_type_id: v }))} options={opts(paymentTypes)} />
               </FormField>
@@ -1510,9 +1572,6 @@ export function LoadsPage() {
               <FormField label="İstenen Römork Cinsi">
                 <SelectInput value={directForm.romork_type_id} onChange={(v) => setDirectForm((f) => ({ ...f, romork_type_id: v }))} options={opts(romorkTypes)} />
               </FormField>
-              <FormField label="Çalışma Şekli">
-                <SelectInput value={directForm.way_of_working} onChange={(v) => setDirectForm((f) => ({ ...f, way_of_working: v }))} options={[{ value: "0", label: "Komple" }, { value: "1", label: "Parsiyel" }]} />
-              </FormField>
               <FormField label="Talimat Geliş Tarihi">
                 <TextInput type="date" value={directForm.instruction_arrival_date} onChange={(v) => setDirectForm((f) => ({ ...f, instruction_arrival_date: v }))} />
               </FormField>
@@ -1522,15 +1581,9 @@ export function LoadsPage() {
               <FormField label="Hazır Olma Tarihi">
                 <TextInput type="date" value={directForm.readiness_date} onChange={(v) => setDirectForm((f) => ({ ...f, readiness_date: v }))} />
               </FormField>
-              <div className="col-span-3">
-                <FormField label="Açıklama">
-                  <TextareaInput value={directForm.description} onChange={(v) => setDirectForm((f) => ({ ...f, description: v }))} />
-                </FormField>
-              </div>
             </div>
-          )}
 
-          {directTab === "Taraflar" && (
+            <div className="mt-6 space-y-5">
             <div className="space-y-5">
               <AccountPicker label="Müşteri" value={directCustomer} onChange={setDirectCustomer} required />
               <AccountPicker label="Gönderici" value={directSender} onChange={setDirectSender} required />
@@ -1541,133 +1594,205 @@ export function LoadsPage() {
                 <TextInput value={directForm.payer_company} onChange={(v) => setDirectForm((f) => ({ ...f, payer_company: v }))} />
               </FormField>
             </div>
-          )}
-
-          {directTab === "Güzergah" && (
-            <div className="grid grid-cols-3 gap-x-6 gap-y-5">
-              <FormField label="Yükleme Ülkesi" required>
-                <SelectInput value={directForm.departure_country_id} onChange={(v) => setDirectForm((f) => ({ ...f, departure_country_id: v }))} options={opts(countries)} />
-              </FormField>
-              <FormField label="Transit Ülke">
-                <SelectInput value={directForm.transit_country_id} onChange={(v) => setDirectForm((f) => ({ ...f, transit_country_id: v }))} options={opts(countries)} />
-              </FormField>
-              <FormField label="Varış Ülkesi" required>
-                <SelectInput value={directForm.target_country_id} onChange={(v) => setDirectForm((f) => ({ ...f, target_country_id: v }))} options={opts(countries)} />
-              </FormField>
-              <FormField label="Ön Taşıma Bizde">
-                <SelectInput value={directForm.front_transportation_by_us} onChange={(v) => setDirectForm((f) => ({ ...f, front_transportation_by_us: v }))} options={[{ value: "0", label: "Hayır" }, { value: "1", label: "Evet" }]} />
-              </FormField>
-              <FormField label="Son Taşıma Bizde">
-                <SelectInput value={directForm.final_transportation_by_us} onChange={(v) => setDirectForm((f) => ({ ...f, final_transportation_by_us: v }))} options={[{ value: "0", label: "Hayır" }, { value: "1", label: "Evet" }]} />
-              </FormField>
             </div>
-          )}
+          </section>
 
-          {directTab === "Paketler" && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Paketler (en az bir tane)</p>
-                <button type="button" onClick={() => setDirectPackages((l) => [...l, { ...EMPTY_PACKAGE_ROW }])} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
-                  <Plus size={12} />Paket Ekle
-                </button>
+          {/* 2) GÜZERGAH — taraflardan hemen sonra: önce kimden kime, sonra nereden nereye. */}
+          <section>
+            <SectionTitle>Güzergah</SectionTitle>
+          <div className="grid grid-cols-3 gap-x-6 gap-y-5">
+            <FormField label="Yükleme Ülkesi" required>
+              <SelectInput value={directForm.departure_country_id} onChange={(v) => setDirectForm((f) => ({ ...f, departure_country_id: v }))} options={opts(countries)} />
+            </FormField>
+            <FormField label="Transit Ülke">
+              <SelectInput value={directForm.transit_country_id} onChange={(v) => setDirectForm((f) => ({ ...f, transit_country_id: v }))} options={opts(countries)} />
+            </FormField>
+            <FormField label="Varış Ülkesi" required>
+              <SelectInput value={directForm.target_country_id} onChange={(v) => setDirectForm((f) => ({ ...f, target_country_id: v }))} options={opts(countries)} />
+            </FormField>
+            <FormField label="Ön Taşıma Bizde">
+              <SelectInput value={directForm.front_transportation_by_us} onChange={(v) => setDirectForm((f) => ({ ...f, front_transportation_by_us: v }))} options={[{ value: "0", label: "Hayır" }, { value: "1", label: "Evet" }]} />
+            </FormField>
+            <FormField label="Son Taşıma Bizde">
+              <SelectInput value={directForm.final_transportation_by_us} onChange={(v) => setDirectForm((f) => ({ ...f, final_transportation_by_us: v }))} options={[{ value: "0", label: "Hayır" }, { value: "1", label: "Evet" }]} />
+            </FormField>
+          </div>
+          </section>
+
+          {/* 3) PAKETLER */}
+          <section>
+            <SectionTitle>Paketler</SectionTitle>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Paketler (en az bir tane)</p>
+              <button type="button" onClick={() => setDirectPackages((l) => [...l, { ...EMPTY_PACKAGE_ROW }])} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                <Plus size={12} />Paket Ekle
+              </button>
+            </div>
+            {directPackages.map((p, i) => (
+              <div key={i} className="border border-gray-200 rounded-lg p-4 mb-2 relative">
+                {directPackages.length > 1 && (
+                  <button type="button" onClick={() => setDirectPackages((l) => l.filter((_, xi) => xi !== i))} className="absolute top-2 right-2 text-gray-300 hover:text-red-500">
+                    <Trash2 size={13} />
+                  </button>
+                )}
+                <div className="grid grid-cols-3 gap-3">
+                  <LookupPicker label="Ürün Tipi" endpoint="/api/v1/product_type" value={p.product_type_id}
+                    onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, product_type_id: v } : x)))} />
+                  <LookupPicker label="Kap Tipi" endpoint="/api/v1/case_type" value={p.case_type_id}
+                    onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, case_type_id: v } : x)))} />
+                  <FormField label="Adet">
+                    <TextInput value={p.quantity} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
+                  </FormField>
+                  <FormField label="Brüt Ağırlık (kg)">
+                    <TextInput value={p.gross_weight} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, gross_weight: v } : x)))} />
+                  </FormField>
+                  <FormField label="Net Ağırlık (kg)">
+                    <TextInput value={p.net_weight} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, net_weight: v } : x)))} />
+                  </FormField>
+                  <FormField label="Hacim (m3)">
+                    <TextInput value={p.volume} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, volume: v } : x)))} />
+                  </FormField>
+                  <FormField label="En (cm)">
+                    <TextInput value={p.width} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, width: v, lademeter: computeLademeter(v, x.length) } : x)))} />
+                  </FormField>
+                  <FormField label="Boy (cm)">
+                    <TextInput value={p.length} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, length: v, lademeter: computeLademeter(x.width, v) } : x)))} />
+                  </FormField>
+                  <FormField label="Yükseklik (cm)">
+                    <TextInput value={p.height} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, height: v } : x)))} />
+                  </FormField>
+                  <FormField label="Lademetre">
+                    <TextInput value={p.lademeter} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, lademeter: v } : x)))} />
+                  </FormField>
+                  <FormField label="İstiflenebilir">
+                    <SelectInput value={p.stackable} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, stackable: v } : x)))} options={[{ value: "1", label: "Evet" }, { value: "0", label: "Hayır" }]} />
+                  </FormField>
+                </div>
               </div>
-              {directPackages.map((p, i) => (
+            ))}
+          </div>
+          </section>
+
+          {/* 4) FİNANS */}
+          <section>
+            <SectionTitle>Finans</SectionTitle>
+          <div>
+            {/* Teklif akışındaki gibi her kalem Siber'de alış + satış olmak
+                üzere İKİ satır üretir; burada tek satır giriliyor. */}
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Mali Kalemler (isteğe bağlı)</p>
+              <button type="button" onClick={() => setDirectItems((l) => [...l, { ...EMPTY_INVOICE_ITEM_ROW }])} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                <Plus size={12} />Kalem Ekle
+              </button>
+            </div>
+            {directItems.length === 0 ? (
+              <p className="text-xs text-gray-400 py-6 text-center">Kalem eklenmedi. Yükü açtıktan sonra Finans sekmesinden de ekleyebilirsiniz.</p>
+            ) : (
+              directItems.map((item, i) => (
                 <div key={i} className="border border-gray-200 rounded-lg p-4 mb-2 relative">
-                  {directPackages.length > 1 && (
-                    <button type="button" onClick={() => setDirectPackages((l) => l.filter((_, xi) => xi !== i))} className="absolute top-2 right-2 text-gray-300 hover:text-red-500">
-                      <Trash2 size={13} />
-                    </button>
-                  )}
-                  <div className="grid grid-cols-3 gap-3">
-                    <LookupPicker label="Ürün Tipi" endpoint="/api/v1/product_type" value={p.product_type_id}
-                      onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, product_type_id: v } : x)))} />
-                    <LookupPicker label="Kap Tipi" endpoint="/api/v1/case_type" value={p.case_type_id}
-                      onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, case_type_id: v } : x)))} />
-                    <FormField label="Adet">
-                      <TextInput value={p.quantity} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
+                  <button type="button" onClick={() => setDirectItems((l) => l.filter((_, xi) => xi !== i))} className="absolute top-2 right-2 text-gray-300 hover:text-red-500">
+                    <Trash2 size={13} />
+                  </button>
+                  <div className="grid grid-cols-3 gap-3 mb-3">
+                    <FinancialItemPicker label="Kalem" value={item.item_id}
+                      onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? {
+                        ...x,
+                        item_id: v,
+                        account: x.account ?? (v?.default_account_id
+                          ? { id: v.default_account_id, name: v.default_account_name ?? null }
+                          : null),
+                      } : x)))} />
+                    <FormField label="Para Birimi">
+                      <SelectInput value={item.currency_code} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, currency_code: v } : x)))} options={opts(currencies)} />
                     </FormField>
-                    <FormField label="Brüt Ağırlık (kg)">
-                      <TextInput value={p.gross_weight} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, gross_weight: v } : x)))} />
+                    <FormField label="Miktar">
+                      <TextInput value={item.quantity} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
                     </FormField>
-                    <FormField label="Net Ağırlık (kg)">
-                      <TextInput value={p.net_weight} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, net_weight: v } : x)))} />
+                  </div>
+                  <div className="mb-3">
+                    <AccountPicker label="Cari" value={item.account}
+                      onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, account: v } : x)))} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField label="Net Fiyat">
+                      <TextInput value={item.net_price} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, net_price: v } : x)))} />
                     </FormField>
-                    <FormField label="Hacim (m3)">
-                      <TextInput value={p.volume} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, volume: v } : x)))} />
-                    </FormField>
-                    <FormField label="En (cm)">
-                      <TextInput value={p.width} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, width: v, lademeter: computeLademeter(v, x.length) } : x)))} />
-                    </FormField>
-                    <FormField label="Boy (cm)">
-                      <TextInput value={p.length} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, length: v, lademeter: computeLademeter(x.width, v) } : x)))} />
-                    </FormField>
-                    <FormField label="Yükseklik (cm)">
-                      <TextInput value={p.height} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, height: v } : x)))} />
-                    </FormField>
-                    <FormField label="Lademetre">
-                      <TextInput value={p.lademeter} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, lademeter: v } : x)))} />
-                    </FormField>
-                    <FormField label="İstiflenebilir">
-                      <SelectInput value={p.stackable} onChange={(v) => setDirectPackages((l) => l.map((x, xi) => (xi === i ? { ...x, stackable: v } : x)))} options={[{ value: "1", label: "Evet" }, { value: "0", label: "Hayır" }]} />
+                    <FormField label="Açıklama">
+                      <TextInput value={item.description} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, description: v } : x)))} />
                     </FormField>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
+          </section>
 
-          {directTab === "Finans" && (
-            <div>
-              {/* Teklif akışındaki gibi her kalem Siber'de alış + satış olmak
-                  üzere İKİ satır üretir; burada tek satır giriliyor. */}
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Mali Kalemler (isteğe bağlı)</p>
-                <button type="button" onClick={() => setDirectItems((l) => [...l, { ...EMPTY_INVOICE_ITEM_ROW }])} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
-                  <Plus size={12} />Kalem Ekle
-                </button>
-              </div>
-              {directItems.length === 0 ? (
-                <p className="text-xs text-gray-400 py-6 text-center">Kalem eklenmedi. Yükü açtıktan sonra Finans sekmesinden de ekleyebilirsiniz.</p>
-              ) : (
-                directItems.map((item, i) => (
-                  <div key={i} className="border border-gray-200 rounded-lg p-4 mb-2 relative">
-                    <button type="button" onClick={() => setDirectItems((l) => l.filter((_, xi) => xi !== i))} className="absolute top-2 right-2 text-gray-300 hover:text-red-500">
+          {/* 5) AÇIKLAMA — paketlerin ve finansın ALTINDA. */}
+          <section>
+            <SectionTitle>Açıklama</SectionTitle>
+            <TextareaInput value={directForm.description} onChange={(v) => setDirectForm((f) => ({ ...f, description: v }))} />
+          </section>
+
+          {/* ---------------------------------------------------------------
+              6) DOSYA ARŞİVİ — en altta.
+
+              Dosyalar BURADA gönderilmiyor: Siber'in evrak arşivi kaydı yükün
+              kimliğine bağlanıyor ve o kimlik ancak yük yazılırken oluşuyor.
+              Seçilenler tarayıcıda tutulup "Yükü Oluştur"dan SONRA
+              POST /api/v1/load_transfer/{id}/archive ile gönderiliyor.
+              --------------------------------------------------------------- */}
+          <section>
+            <SectionTitle>Dosya Arşivi</SectionTitle>
+
+            <div
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); addDirectFiles(e.dataTransfer.files); }}
+              className={clsx(
+                "rounded-lg border-2 border-dashed p-6 text-center transition-colors",
+                dragOver ? "border-blue-400 bg-blue-50" : "border-gray-200 bg-gray-50",
+              )}
+            >
+              <p className="text-sm text-gray-600">Dosyaları buraya sürükleyip bırakın</p>
+              <p className="mt-1 text-xs text-gray-400">
+                Yük oluşturulduktan sonra Siber evrak arşivine gönderilir
+              </p>
+
+              <input
+                ref={directFileInput}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => { addDirectFiles(e.target.files); e.target.value = ""; }}
+              />
+              <Btn variant="secondary" size="sm" className="mt-3" onClick={() => directFileInput.current?.click()}>
+                <Plus size={13} />Dosya Ekle
+              </Btn>
+            </div>
+
+            {directFiles.length > 0 && (
+              <ul className="mt-3 space-y-1.5">
+                {directFiles.map((f, i) => (
+                  <li key={f.name + i} className="flex items-center gap-2 rounded border border-gray-200 px-3 py-2">
+                    <FileText size={14} className="shrink-0 text-gray-400" />
+                    <span className="min-w-0 flex-1 truncate text-sm text-gray-700">{f.name}</span>
+                    <span className="shrink-0 text-[11px] text-gray-400">{(f.size / 1024).toFixed(0)} KB</span>
+                    <button
+                      type="button"
+                      title="Kaldır"
+                      className="shrink-0 text-gray-300 hover:text-red-500"
+                      onClick={() => setDirectFiles((l) => l.filter((_, xi) => xi !== i))}
+                    >
                       <Trash2 size={13} />
                     </button>
-                    <div className="grid grid-cols-3 gap-3 mb-3">
-                      <FinancialItemPicker label="Kalem" value={item.item_id}
-                        onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? {
-                          ...x,
-                          item_id: v,
-                          account: x.account ?? (v?.default_account_id
-                            ? { id: v.default_account_id, name: v.default_account_name ?? null }
-                            : null),
-                        } : x)))} />
-                      <FormField label="Para Birimi">
-                        <SelectInput value={item.currency_code} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, currency_code: v } : x)))} options={opts(currencies)} />
-                      </FormField>
-                      <FormField label="Miktar">
-                        <TextInput value={item.quantity} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
-                      </FormField>
-                    </div>
-                    <div className="mb-3">
-                      <AccountPicker label="Cari" value={item.account}
-                        onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, account: v } : x)))} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <FormField label="Net Fiyat">
-                        <TextInput value={item.net_price} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, net_price: v } : x)))} />
-                      </FormField>
-                      <FormField label="Açıklama">
-                        <TextInput value={item.description} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, description: v } : x)))} />
-                      </FormField>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
+
       </Drawer>
 
       <Drawer

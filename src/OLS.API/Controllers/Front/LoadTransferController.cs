@@ -7,6 +7,7 @@ using OLS.DataAccess.Siber;
 using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Expeditions;
 using OLS.Business.Services.LoadTransfers;
+using OLS.Business.Services.Loads;
 
 namespace OLS.API.Controllers.Front;
 
@@ -28,6 +29,8 @@ public sealed class LoadTransferController : ApiControllerBase
     private readonly ISiberArchiveRepository _archive;
     private readonly ISiberArchiveFileReader _archiveFiles;
     private readonly IDirectLoadService _direct;
+    private readonly ILoadArchivePublisher _archivePublisher;
+    private readonly ILogger<LoadTransferController> _logger;
 
     public LoadTransferController(
         ILoadTransferService transfers,
@@ -36,7 +39,9 @@ public sealed class LoadTransferController : ApiControllerBase
         ICurrentUser currentUser,
         ISiberArchiveRepository archive,
         ISiberArchiveFileReader archiveFiles,
-        IDirectLoadService direct)
+        IDirectLoadService direct,
+        ILoadArchivePublisher archivePublisher,
+        ILogger<LoadTransferController> logger)
     {
         _transfers = transfers;
         _write = write;
@@ -45,6 +50,61 @@ public sealed class LoadTransferController : ApiControllerBase
         _archive = archive;
         _archiveFiles = archiveFiles;
         _direct = direct;
+        _archivePublisher = archivePublisher;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Yüke ait dosyaları Siber'in evrak arşivine (FTP) gönderir.
+    ///
+    /// YÜK OLUŞTUKTAN SONRA çağrılır: arşiv kaydı yükün Siber kimliğine
+    /// bağlanıyor, kimlik ise yük yazılırken oluşuyor (bkz. LoadArchivePublisher).
+    /// Bu yüzden teklifsiz yük formunda dosyalar önce tarayıcıda tutulup
+    /// kayıttan sonra buraya gönderiliyor.
+    ///
+    /// Dosya yazılamazsa akış DURMAZ — yük zaten oluşmuş durumda; kaç dosyanın
+    /// arşive ulaştığı yanıtta dönüyor ve eksik varsa loglanıyor.
+    /// </summary>
+    [HttpPost("{id:long}/archive")]
+    [RequiresPermission(PermissionAction.Create, "load_management")]
+    [RequestSizeLimit(64 * 1024 * 1024)]
+    public async Task<IActionResult> UploadArchive(
+        long id, [FromForm] IFormFileCollection files, CancellationToken cancellationToken)
+    {
+        if (files is null || files.Count == 0)
+            return BadRequestError("En az bir dosya seçilmelidir.");
+
+        var contents = new List<(string Name, byte[] Content)>();
+
+        foreach (var file in files)
+        {
+            if (file.Length == 0)
+                continue;
+
+            using var buffer = new MemoryStream();
+            await using (var source = file.OpenReadStream())
+                await source.CopyToAsync(buffer, cancellationToken);
+
+            contents.Add((file.FileName, buffer.ToArray()));
+        }
+
+        if (contents.Count == 0)
+            return BadRequestError("Seçilen dosyalar boş.");
+
+        var written = await _archivePublisher.PushAsync(null, id, contents, cancellationToken);
+
+        if (written < contents.Count)
+        {
+            _logger.LogWarning(
+                "Yük {LoadTransferId}: Siber arşivine {Basarili}/{Toplam} dosya yazılabildi.",
+                id, written, contents.Count);
+        }
+
+        return base.Ok(ApiResponse.Success(
+            new { uploaded = written, total = contents.Count },
+            written == contents.Count
+                ? $"{written} dosya arşive eklendi."
+                : $"{written}/{contents.Count} dosya arşive eklenebildi."));
     }
 
     [HttpGet]
@@ -192,7 +252,10 @@ public sealed class LoadTransferController : ApiControllerBase
                 ["message"] = [result.ErrorMessage!],
             }));
 
-        return base.Ok(ApiResponse.Success(new { yuk_no = result.LoadNumber }, "Yük oluşturuldu"));
+        // id de dönüyor: arayüz dosyaları kayıttan SONRA arşive gönderiyor.
+        return base.Ok(ApiResponse.Success(
+            new { yuk_no = result.LoadNumber, id = result.LoadTransferId },
+            "Yük oluşturuldu"));
     }
 
     /// <summary>
