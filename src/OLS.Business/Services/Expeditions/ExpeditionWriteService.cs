@@ -160,10 +160,20 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
                 nextNumber = parsed + 1;
         }
 
-        var seferId = await _siber.FindSeferIdAsync(
+        var existing = await _siber.FindSeferAsync(
             shortYear, owner?.AdditionalCode, nextNumber, cancellationToken);
 
-        // Sefer yoksa önce onu oluştur.
+        // MEVCUT SEFER HER ZAMAN YENİDEN KULLANILAMAZ. Siber'in
+        // skn_pozisyon_seferromorkkontrol_tr trigger'ı, EX/IM iş türünde ve
+        // özmal/sözleşmeli kiralık seferde pozisyonun römorkunun seferinkiyle
+        // AYNI olmasını şart koşuyor. Başka bir römorkla açılmış sefere
+        // eklemeye çalışmak INSERT'i ROLLBACK ettiriyor ve kullanıcıya
+        // "beklenmedik hata" olarak yansıyordu; böyle bir durumda kendi
+        // seferimizi açıyoruz.
+        var seferId = existing is not null && existing.AcceptsPosition(workType.Code, car.SiberId)
+            ? existing.SeferId
+            : null;
+
         if (seferId is null)
         {
             var newSeferId = (await _siber.GenerateSeferIdAsync(cancellationToken)).ToString();
@@ -178,6 +188,8 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
                 CikisTarih = ToDateTime(model.ReleaseDate),
                 DonusTarih = ToDateTime(model.EntryDate),
                 Yil = shortYear,
+                // Trigger'ın aradığı eşitlik: seferin römorku pozisyonunkiyle aynı.
+                RomorkId = car.SiberId,
             }, cancellationToken);
 
             seferId = newSeferId;

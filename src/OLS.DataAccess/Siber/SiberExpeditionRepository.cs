@@ -25,7 +25,7 @@ public interface ISiberExpeditionRepository
         string year, string? workTypeCode, int carOwnerFlag, CancellationToken cancellationToken = default);
 
     /// <summary>Yıl + araç sahibi kodu + sefer numarası ile mevcut seferi bulur.</summary>
-    Task<string?> FindSeferIdAsync(
+    Task<SiberSeferRef?> FindSeferAsync(
         string year, string? ownerAdditionalCode, int seferNo, CancellationToken cancellationToken = default);
 
     Task<Guid> GeneratePozisyonIdAsync(CancellationToken cancellationToken = default);
@@ -69,6 +69,25 @@ public interface ISiberExpeditionRepository
         string pozisyonId, int? durumId, string? romorkId, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Var olan bir seferin, yeniden kullanılabilirliğini belirleyen alanları.</summary>
+public sealed class SiberSeferRef
+{
+    public string SeferId { get; init; } = string.Empty;
+    public string? RomorkId { get; init; }
+    public int? AracSahip { get; init; }
+
+    /// <summary>
+    /// Bu sefere, verilen iş türü ve römorkla yeni bir pozisyon eklenebilir mi?
+    /// <c>skn_pozisyon_seferromorkkontrol_tr</c> yalnızca EX/IM (isturu 0,1) ve
+    /// özmal/sözleşmeli kiralık (aracsahip 0,2) seferlerde römork eşitliği arar.
+    /// </summary>
+    public bool AcceptsPosition(string? isTuruCode, string? romorkId) =>
+        !(isTuruCode is "0" or "1"
+          && AracSahip is 0 or 2
+          && !string.Equals(RomorkId ?? string.Empty, romorkId ?? string.Empty,
+                            StringComparison.OrdinalIgnoreCase));
+}
+
 public sealed class SiberSefer
 {
     public string SeferId { get; init; } = string.Empty;
@@ -77,6 +96,19 @@ public sealed class SiberSefer
     public DateTime? CikisTarih { get; init; }
     public DateTime? DonusTarih { get; init; }
     public string Yil { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Seferin römorku. ÖZMAL VE SÖZLEŞMELİ KİRALIK SEFERLERDE ZORUNLU:
+    /// <c>skn_pozisyon_seferromorkkontrol_tr</c> trigger'ı, iş türü EX/IM (0,1)
+    /// ve araç sahibi 0/2 olan seferlerde <c>skn_pozisyon.romorkid</c> ile
+    /// <c>skn_sefer.romorkid</c>'nin AYNI olmasını şart koşuyor; aksi hâlde
+    /// pozisyon INSERT'i "EX,IM Seferlerde sefer romork bilgisi pozisyondan
+    /// farklı olamaz!" ile ROLLBACK ediliyordu. Siber'in kendi verisi de bunu
+    /// doğruluyor: 154 özmal/sözleşmeli seferin 148'inde dolu, 2.874 kiralık
+    /// seferin yalnızca 1'inde. Bu yüzden yalnızca 0/2 için yazılır — kiralık
+    /// seferde birden çok römork olabildiği için orada boş bırakmak DOĞRU.
+    /// </summary>
+    public string? RomorkId { get; init; }
 }
 
 public sealed class SiberPozisyon
@@ -138,14 +170,36 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
             new { year, isturu = workTypeCode, sahip = carOwnerFlag });
     }
 
-    public async Task<string?> FindSeferIdAsync(
+    /// <summary>
+    /// BULUNAN GERÇEK HATA — sefer oluşturma HER SEFERİNDE "beklenmedik hata"
+    /// veriyordu. <c>skn_sefer.seferid</c> <c>uniqueidentifier</c>; Dapper bunu
+    /// doğrudan <c>string?</c>'a okuyamıyor ve
+    /// <c>InvalidCastException: Object must implement IConvertible</c> fırlatıyor
+    /// (proje kuralı: uniqueidentifier okurken HER ZAMAN CAST). Sorgu satır
+    /// DÖNMEDİĞİNDE null geldiği için hata yalnızca aranan sefer gerçekten
+    /// VARKEN çıkıyordu — yani o yıl/araç sahibi için ilk seferden sonra her
+    /// defasında.
+    ///
+    /// Artık yalnızca kimlik değil, seferin ARAÇ SAHİBİ ve RÖMORKU da dönüyor:
+    /// çağıran, römork trigger'ının (bkz. <see cref="SiberSefer.RomorkId"/>)
+    /// reddedeceği bir seferi yeniden kullanmamalı.
+    /// </summary>
+    public async Task<SiberSeferRef?> FindSeferAsync(
         string year, string? ownerAdditionalCode, int seferNo, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
-        return await connection.ExecuteScalarAsync<string?>(
-            "SELECT TOP 1 seferid FROM skn_sefer WHERE yil = @yil AND aracsahipad = @ad AND seferno = @no",
-            new { yil = year, ad = ownerAdditionalCode, no = seferNo });
+        return await connection.QuerySingleOrDefaultAsync<SiberSeferRef>(new CommandDefinition(
+            """
+            SELECT TOP 1
+                   CAST(seferid AS VARCHAR(64))  AS SeferId,
+                   CAST(romorkid AS VARCHAR(64)) AS RomorkId,
+                   aracsahip                     AS AracSahip
+            FROM skn_sefer
+            WHERE yil = @yil AND aracsahipad = @ad AND seferno = @no
+            """,
+            new { yil = year, ad = ownerAdditionalCode, no = seferNo },
+            cancellationToken: cancellationToken));
     }
 
     public Task<Guid> GeneratePozisyonIdAsync(CancellationToken cancellationToken = default) =>
@@ -191,9 +245,11 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
                 WHERE yil = @Yil AND aracsahip = @AracSahip) + 1;
 
             INSERT INTO skn_sefer
-                (seferid, sirketid, subeid, aracsahip, seferno, cikistarih, donustarih, yil, yici)
+                (seferid, sirketid, subeid, aracsahip, seferno, cikistarih, donustarih, yil, yici,
+                 romorkid)
             VALUES
-                (@SeferId, @SirketId, @SubeId, @AracSahip, @nextNo, @CikisTarih, @DonusTarih, @Yil, 0);
+                (@SeferId, @SirketId, @SubeId, @AracSahip, @nextNo, @CikisTarih, @DonusTarih, @Yil, 0,
+                 CASE WHEN @AracSahip IN (0, 2) THEN @RomorkId END);
 
             COMMIT TRANSACTION;
 
@@ -203,7 +259,7 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
         return await connection.QuerySingleAsync<int>(sql, new
         {
             sefer.SeferId, SirketId, SubeId, sefer.AracSahip,
-            sefer.CikisTarih, sefer.DonusTarih, sefer.Yil,
+            sefer.CikisTarih, sefer.DonusTarih, sefer.Yil, sefer.RomorkId,
             LockResource = $"skn_sefer_no:{sefer.Yil}:{sefer.AracSahip}",
         });
     }
@@ -256,14 +312,40 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
             """, new { id = pozisyonId });
     }
 
+    /// <summary>
+    /// Pozisyonun durumunu ve römorkunu günceller.
+    ///
+    /// RÖMORK DEĞİŞİNCE SEFER DE HİZALANIR. Aynı trigger
+    /// (<c>skn_pozisyon_seferromorkkontrol_tr</c>) UPDATE'te de çalışıyor: EX/IM
+    /// ve özmal/sözleşmeli kiralık bir seferde pozisyonun römorkunu değiştirmek,
+    /// sefer römorku eski değerde kaldığı için reddediliyordu. Sefer önce
+    /// güncelleniyor, pozisyon sonra — trigger pozisyon yazılırken bakıyor.
+    ///
+    /// YALNIZCA TEK POZİSYONLU SEFERDE hizalanır. Sefere başka pozisyonlar da
+    /// bağlıysa seferin römorkunu değiştirmek onları da sessizce yanlış duruma
+    /// düşürürdü; o durumda Siber'in kendi kuralı devrede kalır ve işlem
+    /// anlaşılır bir mesajla reddedilir.
+    /// </summary>
     public async Task UpdatePozisyonAsync(
         string pozisyonId, int? durumId, string? romorkId, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
-        await connection.ExecuteAsync(
-            "UPDATE skn_pozisyon SET durumid = @durumid, romorkid = @romorkid WHERE pozisyonid = @id",
-            new { durumid = durumId, romorkid = romorkId, id = pozisyonId });
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE s SET s.romorkid = @romorkid
+            FROM skn_sefer s
+            JOIN skn_pozisyon p ON p.seferid = s.seferid
+            WHERE p.pozisyonid = @id
+              AND s.aracsahip IN (0, 2)
+              AND p.isturu IN (0, 1)
+              AND (SELECT COUNT(*) FROM skn_pozisyon x WHERE x.seferid = s.seferid) = 1;
+
+            UPDATE skn_pozisyon SET durumid = @durumid, romorkid = @romorkid
+            WHERE pozisyonid = @id;
+            """,
+            new { durumid = durumId, romorkid = romorkId, id = pozisyonId },
+            cancellationToken: cancellationToken));
     }
 
     private async Task<Guid> GenerateUniqueAsync(

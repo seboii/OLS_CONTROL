@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 
@@ -51,6 +52,18 @@ public sealed class ExceptionHandlingMiddleware
                     translator.Get("Kayıt Bulunamadı")),
                 UnauthorizedAccessException => (StatusCodes.Status403Forbidden,
                     translator.Get("Yetkisiz Erişim")),
+
+                // SİBER'İN KENDİ İŞ KURALI MESAJI KULLANICIYA GÖSTERİLİR.
+                // Siber, iş kurallarını trigger'larda RAISERROR ile uyguluyor ve
+                // mesajlar zaten Türkçe ve anlaşılır ("EX,IM Seferlerde sefer
+                // romork bilgisi pozisyondan farklı olamaz!"). Bunları
+                // "Beklenmeyen bir hata oluştu." ile örtmek, kullanıcıya
+                // düzeltebileceği bir sorunu ARIZA gibi gösteriyordu. Yalnızca
+                // RAISERROR ile üretilenler (hata numarası 50000) geçirilir;
+                // bağlantı/FK gibi teknik hatalar genel mesajda kalır.
+                SqlException { Number: SiberRuleErrorNumber } sql
+                    => (StatusCodes.Status422UnprocessableEntity, SiberRuleMessage(sql)),
+
                 DbUpdateException => (StatusCodes.Status500InternalServerError,
                     translator.Get("Form hataydı! Lütfen geliştiricinizle iletişime geçin.")),
                 _ => (StatusCodes.Status500InternalServerError,
@@ -67,5 +80,22 @@ public sealed class ExceptionHandlingMiddleware
 
             await context.Response.WriteAsync(JsonSerializer.Serialize(payload));
         }
+    }
+
+    /// <summary>SQL Server'da RAISERROR ile üretilen kullanıcı hatalarının numarası.</summary>
+    private const int SiberRuleErrorNumber = 50000;
+
+    /// <summary>
+    /// Siber mesajlarının sonunda tetikleyicinin adı bir işaretle duruyor
+    /// ("... olamaz! #skn_pozisyon_seferromorkkontrol_tr"). Kullanıcıya
+    /// gösterilmeden önce bu teknik kuyruk atılır; log'da tam metin duruyor.
+    /// </summary>
+    private static string SiberRuleMessage(SqlException exception)
+    {
+        var text = exception.Message.Split('#')[0].Trim();
+
+        return string.IsNullOrWhiteSpace(text)
+            ? "Siber bu kaydı kabul etmedi."
+            : text;
     }
 }
