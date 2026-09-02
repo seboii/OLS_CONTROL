@@ -1427,7 +1427,8 @@ export function LoadsPage() {
 
         <div className="p-8 space-y-10">
           {/* ---------------------------------------------------------------
-              1) GENEL BİLGİLER — tanımlar + taraflar tek blokta.
+              GENEL BİLGİLER — tanımlar, taraflar ve güzergah tek blokta.
+              Alan alt-başlığı YOK; alanlar tek sürekli akışta.
 
               ÇALIŞMA ŞEKLİ ile YÜKLEME TİPİ aynı şey DEĞİL; ikisi de Siber'e
               AYRI sütuna yazılıyor:
@@ -1492,12 +1493,10 @@ export function LoadsPage() {
                 <TextInput value={directForm.payer_company} onChange={(v) => setDirectForm((f) => ({ ...f, payer_company: v }))} />
               </FormField>
             </div>
-          </section>
 
-          {/* 2) GÜZERGAH — taraflardan hemen sonra: önce kimden kime, sonra nereden nereye. */}
-          <section>
-            <SectionTitle>Güzergah</SectionTitle>
-          <div className="grid grid-cols-3 gap-x-6 gap-y-6">
+            {/* Güzergah alanları — ayrı başlık YOK: taraflardan hemen sonra
+                aynı akışta devam eder (önce kimden kime, sonra nereden nereye). */}
+            <div className="mt-6 grid grid-cols-3 gap-x-6 gap-y-6">
             <FormField label="Yükleme Ülkesi" required>
               <SelectInput value={directForm.departure_country_id} onChange={(v) => setDirectForm((f) => ({ ...f, departure_country_id: v }))} options={opts(countries)} />
             </FormField>
@@ -1513,10 +1512,10 @@ export function LoadsPage() {
             <FormField label="Son Taşıma Bizde">
               <SelectInput value={directForm.final_transportation_by_us} onChange={(v) => setDirectForm((f) => ({ ...f, final_transportation_by_us: v }))} options={[{ value: "0", label: "Hayır" }, { value: "1", label: "Evet" }]} />
             </FormField>
-          </div>
+            </div>
           </section>
 
-          {/* 3) PAKETLER */}
+          {/* PAKETLER */}
           <section>
             <SectionTitle>Paketler</SectionTitle>
           <div>
@@ -1571,7 +1570,7 @@ export function LoadsPage() {
           </div>
           </section>
 
-          {/* 4) FİNANS */}
+          {/* FİNANS */}
           <section>
             <SectionTitle>Finans</SectionTitle>
           <div>
@@ -1625,14 +1624,14 @@ export function LoadsPage() {
           </div>
           </section>
 
-          {/* 5) AÇIKLAMA — paketlerin ve finansın ALTINDA. */}
+          {/* AÇIKLAMA — paketlerin ve finansın ALTINDA. */}
           <section>
             <SectionTitle>Açıklama</SectionTitle>
             <TextareaInput value={directForm.description} onChange={(v) => setDirectForm((f) => ({ ...f, description: v }))} />
           </section>
 
           {/* ---------------------------------------------------------------
-              6) DOSYA ARŞİVİ — en altta.
+              DOSYA ARŞİVİ — en altta.
 
               Dosyalar BURADA gönderilmiyor: Siber'in evrak arşivi kaydı yükün
               kimliğine bağlanıyor ve o kimlik ancak yük yazılırken oluşuyor.
