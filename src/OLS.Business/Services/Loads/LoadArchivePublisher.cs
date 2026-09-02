@@ -24,6 +24,16 @@ public interface ILoadArchivePublisher
         long? loadId, long? loadTransferId,
         IReadOnlyList<(string Name, byte[] Content)> files,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sefer evrakı — yük/teklif evrakından AYRI bir kayda bağlanır.
+    /// Siber'de sefer evrakı <c>pozisyonid</c>'ye, yük evrakı <c>yukid</c>'ye
+    /// bağlanıyor; modül kodu 0405.
+    /// </summary>
+    Task<int> PushToExpeditionAsync(
+        long expeditionId,
+        IReadOnlyList<(string Name, byte[] Content)> files,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class LoadArchivePublisher : ILoadArchivePublisher
@@ -52,6 +62,35 @@ public sealed class LoadArchivePublisher : ILoadArchivePublisher
         if (target is null)
             return 0;
 
+        return await WriteAsync(target.Value, files, cancellationToken);
+    }
+
+    public async Task<int> PushToExpeditionAsync(
+        long expeditionId,
+        IReadOnlyList<(string Name, byte[] Content)> files,
+        CancellationToken cancellationToken = default)
+    {
+        if (files.Count == 0 || !_writer.IsConfigured)
+            return 0;
+
+        // expeditions.expedition_id = Siber skn_pozisyon.pozisyonid
+        var pozisyonId = await _db.Expeditions.AsNoTracking()
+            .Where(e => e.Id == expeditionId)
+            .Select(e => e.ExpeditionId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(pozisyonId))
+            return 0;
+
+        return await WriteAsync(
+            (pozisyonId, SiberArchiveWriter.ExpeditionModulKod), files, cancellationToken);
+    }
+
+    private async Task<int> WriteAsync(
+        (string ModulId, string ModulKod) target,
+        IReadOnlyList<(string Name, byte[] Content)> files,
+        CancellationToken cancellationToken)
+    {
         var userCode = _currentUser.Id is { } id
             ? await _db.Users.AsNoTracking()
                 .Where(u => u.Id == id).Select(u => u.SiberCode)
@@ -64,8 +103,8 @@ public sealed class LoadArchivePublisher : ILoadArchivePublisher
         {
             var arsivId = await _writer.UploadAsync(new SiberArchiveUpload
             {
-                ModulId = target.Value.ModulId,
-                ModulKod = target.Value.ModulKod,
+                ModulId = target.ModulId,
+                ModulKod = target.ModulKod,
                 FileName = name,
                 Content = content,
                 UserCode = userCode,

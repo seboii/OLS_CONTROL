@@ -167,7 +167,6 @@ interface AvailableLoad {
 }
 
 const PER_PAGE = 24;
-const DETAIL_TABS = ["Genel Bilgiler", "Bağlı Yükler", "Hareketler", "İşlem Geçmişi"];
 // İş Tipi ham id'leri seed'e göre değişebilir (bkz. QuotesPage STATUS_TABS notu),
 // bu yüzden sekmeler workTypes listesinden AD ile eşleştirilir, sabit id kullanılmaz.
 const WORK_TYPE_TABS = ["Tümü", "İhracat", "İthalat", "Transit", "Yurtiçi"];
@@ -251,6 +250,18 @@ function ExpeditionCard({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+/**
+ * Tek sayfalık detayda bölüm başlığı. Detay eskiden 4 sekmeliydi; sekmeler
+ * kaldırılınca bölümlerin gözle ayrılması gerekti.
+ */
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="mb-4 border-b border-gray-200 pb-2 text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+      {children}
+    </h3>
   );
 }
 
@@ -450,9 +461,10 @@ export function TripsPage() {
       setDrawerOpen(false);
       load();
 
+      // Kayıttan sonra detay açılır. Eskiden burada "Bağlı Yükler" sekmesine
+      // geçiliyordu; detay artık tek sayfa olduğu için o bölüm zaten görünür.
       if (created?.data?.id) {
         await openDetail(created.data.id);
-        setDetailTab("Bağlı Yükler");
       }
     } catch (err) {
       if (err instanceof ApiError && err.errors) setErrors(err.errors);
@@ -475,9 +487,45 @@ export function TripsPage() {
 
   // --- Detay/düzenleme drawer'ı (Genel Bilgiler + Bağlı Yükler) ---
 
+  // SEFER EVRAKI YÜKLEME — sefer zaten kayıtlı olduğu için dosya doğrudan
+  // gönderilebiliyor (teklifsiz yük formunda kayıt sonrasına bırakılıyordu,
+  // orada henüz kimlik yoktu). Siber'de sefer evrakı pozisyonid'ye bağlanır.
+  const [archiveFiles, setArchiveFiles] = useState<File[]>([]);
+  const [archiveDragOver, setArchiveDragOver] = useState(false);
+  const [archiveUploading, setArchiveUploading] = useState(false);
+  const archiveInputRef = useRef<HTMLInputElement | null>(null);
+
+  function addArchiveFiles(list: FileList | null) {
+    if (!list || list.length === 0) return;
+    setArchiveFiles((prev) => {
+      const key = (f: File) => f.name + ":" + f.size;
+      const seen = new Set(prev.map(key));
+      return [...prev, ...Array.from(list).filter((f) => !seen.has(key(f)))];
+    });
+  }
+
+  async function uploadArchiveFiles() {
+    if (!detail?.id || archiveFiles.length === 0 || archiveUploading) return;
+    setArchiveUploading(true);
+    try {
+      const fd = new FormData();
+      for (const file of archiveFiles) fd.append("files", file);
+
+      const res = await api.postForm<{ data: { uploaded: number; total: number }; message: string }>(
+        `/api/v1/expedition/${detail.id}/archive`, fd);
+
+      addToast(res.message, res.data.uploaded === res.data.total ? "success" : "error");
+      setArchiveFiles([]);
+      await openDetail(detail.id);          // arşiv listesi tazelensin
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Dosyalar yüklenemedi", "error");
+    } finally {
+      setArchiveUploading(false);
+    }
+  }
+
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
-  const [detailTab, setDetailTab] = useState(DETAIL_TABS[0]);
   const [detail, setDetail] = useState<ExpeditionDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailSaving, setDetailSaving] = useState(false);
@@ -547,7 +595,6 @@ export function TripsPage() {
 
   async function openDetail(id: number) {
     setDetailId(id);
-    setDetailTab(DETAIL_TABS[0]);
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailErrors({});
@@ -957,7 +1004,7 @@ export function TripsPage() {
         onClose={() => setDrawerOpen(false)}
         title="Yeni Sefer"
         subtitle="Yeni sefer kaydı oluştur"
-        width="w-[720px]"
+        width="w-[min(900px,95vw)]"
         footer={
           canCreate && (
             <div className="flex gap-2">
@@ -1011,9 +1058,9 @@ export function TripsPage() {
         onClose={() => { setDetailOpen(false); clearExpeditionDeepLink(); }}
         title={detail?.expedition_number ?? "Sefer"}
         subtitle={detail?.romork_id?.plate_number ?? undefined}
-        width="w-[760px]"
+        width="w-[min(1080px,95vw)]"
         footer={
-          detailTab === "Genel Bilgiler" && canUpdate ? (
+          canUpdate ? (
             <div className="flex gap-2">
               <Btn onClick={handleDetailSave} disabled={detailSaving || detailLoading}>
                 <BusyLabel busy={detailSaving} busyText="Kaydediliyor...">Kaydet</BusyLabel>
@@ -1029,13 +1076,18 @@ export function TripsPage() {
           </div>
         )}
 
-        <Tabs tabs={DETAIL_TABS} active={detailTab} onChange={setDetailTab} className="px-6" />
         {detailLoading ? (
           <div className="p-10 text-center text-sm text-gray-400">Yükleniyor...</div>
         ) : (
           detail && (
             <div className="p-8">
-              {detailTab === "Genel Bilgiler" && (
+              {/* ---------------------------------------------------------------
+                  TEK SAYFA: detay eskiden 4 sekmeliydi. Sıra işin sırası:
+                  seferin kendi bilgileri -> bağlı yükler -> hareketler ->
+                  dosya arşivi -> işlem geçmişi.
+                  --------------------------------------------------------------- */}
+              <section>
+                <SectionTitle>Genel Bilgiler</SectionTitle>
                 <div>
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 mb-5">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Sefer Bilgisi</p>
@@ -1102,23 +1154,11 @@ export function TripsPage() {
                   </FormField>
                   </div>
                 </div>
-              )}
+              </section>
 
-              {detailTab === "Bağlı Yükler" && (
+              <section>
+                <SectionTitle>Bağlı Yükler</SectionTitle>
                 <div>
-                  {/* SEFERİN KENDİ evrakları — bağlı yüklerinkinden ayrı.
-                      Siber'de ikisi farklı kayda bağlanıyor: sefer evrakı
-                      pozisyonid'ye, yük evrakı yukid'ye. */}
-                  <div className="mb-5 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
-                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
-                      Sefer Evrakları (Siber Arşivi)
-                    </p>
-                    <ArchiveList
-                      files={detail?.siber_archive ?? []}
-                      empty="Bu sefer için Siber arşivinde evrak yok."
-                    />
-                  </div>
-
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Bağlı Yükler</p>
                     {canUpdate && (
@@ -1277,13 +1317,10 @@ export function TripsPage() {
                     </>
                   )}
                 </div>
-              )}
+              </section>
 
-              {detailTab === "İşlem Geçmişi" && (
-                <RecordHistoryTab resource="expedition" recordId={detail?.id ?? null} />
-              )}
-
-              {detailTab === "Hareketler" && (
+              <section>
+                <SectionTitle>Hareketler</SectionTitle>
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Hareketler</p>
@@ -1323,7 +1360,79 @@ export function TripsPage() {
                     ))
                   )}
                 </div>
-              )}
+              </section>
+
+              <section>
+                <SectionTitle>Dosya Arşivi</SectionTitle>
+                {/* SEFERİN KENDİ evrakları — bağlı yüklerinkinden ayrı.
+                    Siber'de ikisi farklı kayda bağlanıyor: sefer evrakı
+                    pozisyonid'ye, yük evrakı yukid'ye. */}
+                <div className="mb-5 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                  <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    Sefer Evrakları (Siber Arşivi)
+                  </p>
+                  <ArchiveList
+                    files={detail?.siber_archive ?? []}
+                    empty="Bu sefer için Siber arşivinde evrak yok."
+                  />
+                </div>
+
+                {canUpdate && (
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setArchiveDragOver(true); }}
+                    onDragLeave={() => setArchiveDragOver(false)}
+                    onDrop={(e) => { e.preventDefault(); setArchiveDragOver(false); addArchiveFiles(e.dataTransfer.files); }}
+                    className={clsx(
+                      "flex flex-col items-center gap-2 rounded-lg border-2 border-dashed p-5 text-xs transition-colors",
+                      archiveDragOver ? "border-blue-400 bg-blue-50 text-blue-700" : "border-gray-200 text-gray-500",
+                    )}
+                  >
+                    <span>Dosyaları buraya sürükleyip bırakın</span>
+                    <input
+                      ref={archiveInputRef}
+                      type="file"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => { addArchiveFiles(e.target.files); e.target.value = ""; }}
+                    />
+                    <Btn variant="secondary" size="sm" onClick={() => archiveInputRef.current?.click()}>
+                      <Plus size={13} />Dosya Ekle
+                    </Btn>
+                  </div>
+                )}
+
+                {archiveFiles.length > 0 && (
+                  <>
+                    <ul className="mt-3 space-y-1.5">
+                      {archiveFiles.map((f, i) => (
+                        <li key={f.name + i} className="flex items-center gap-2 rounded border border-gray-200 px-3 py-2">
+                          <span className="min-w-0 flex-1 truncate text-sm text-gray-700">{f.name}</span>
+                          <span className="shrink-0 text-[11px] text-gray-400">{(f.size / 1024).toFixed(0)} KB</span>
+                          <button
+                            type="button"
+                            title="Kaldır"
+                            className="shrink-0 text-gray-300 hover:text-red-500"
+                            onClick={() => setArchiveFiles((l) => l.filter((_, xi) => xi !== i))}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-3 flex justify-end">
+                      <Btn onClick={uploadArchiveFiles} disabled={archiveUploading}>
+                        <BusyLabel busy={archiveUploading} busyText="Yükleniyor...">Arşive Yükle</BusyLabel>
+                      </Btn>
+                    </div>
+                  </>
+                )}
+              </section>
+
+              <section>
+                <SectionTitle>İşlem Geçmişi</SectionTitle>
+                <RecordHistoryTab resource="expedition" recordId={detail?.id ?? null} />
+              </section>
+
             </div>
           )
         )}

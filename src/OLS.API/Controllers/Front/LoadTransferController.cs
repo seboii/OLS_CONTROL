@@ -367,17 +367,74 @@ public sealed class ExpeditionController : ApiControllerBase
     private readonly IExpeditionWriteService _write;
     private readonly IMovementService _movements;
     private readonly ICurrentUser _currentUser;
+    private readonly ILoadArchivePublisher _archivePublisher;
+    private readonly ILogger<ExpeditionController> _logger;
 
     public ExpeditionController(
         IExpeditionService expeditions,
         IExpeditionWriteService write,
         IMovementService movements,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        ILoadArchivePublisher archivePublisher,
+        ILogger<ExpeditionController> logger)
     {
         _expeditions = expeditions;
         _write = write;
         _movements = movements;
         _currentUser = currentUser;
+        _archivePublisher = archivePublisher;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Sefer evrakını Siber'in arşivine (FTP) gönderir.
+    ///
+    /// Sefer evrakı yük evrakından AYRI bir kayda bağlanır: Siber'de sefer
+    /// evrakı <c>pozisyonid</c>'ye, yük evrakı <c>yukid</c>'ye bağlanıyor
+    /// (modül kodu 0405). Bkz. LoadArchivePublisher.PushToExpeditionAsync.
+    ///
+    /// Dosya yazılamazsa akış DURMAZ; kaç dosyanın ulaştığı yanıtta döner.
+    /// </summary>
+    [HttpPost("{id:long}/archive")]
+    [RequiresPermission(PermissionAction.Update, "expedition_management")]
+    [RequestSizeLimit(64 * 1024 * 1024)]
+    public async Task<IActionResult> UploadArchive(
+        long id, [FromForm] IFormFileCollection files, CancellationToken cancellationToken)
+    {
+        if (files is null || files.Count == 0)
+            return BadRequestError("En az bir dosya seçilmelidir.");
+
+        var contents = new List<(string Name, byte[] Content)>();
+
+        foreach (var file in files)
+        {
+            if (file.Length == 0)
+                continue;
+
+            using var buffer = new MemoryStream();
+            await using (var source = file.OpenReadStream())
+                await source.CopyToAsync(buffer, cancellationToken);
+
+            contents.Add((file.FileName, buffer.ToArray()));
+        }
+
+        if (contents.Count == 0)
+            return BadRequestError("Seçilen dosyalar boş.");
+
+        var written = await _archivePublisher.PushToExpeditionAsync(id, contents, cancellationToken);
+
+        if (written < contents.Count)
+        {
+            _logger.LogWarning(
+                "Sefer {ExpeditionId}: Siber arşivine {Basarili}/{Toplam} dosya yazılabildi.",
+                id, written, contents.Count);
+        }
+
+        return base.Ok(ApiResponse.Success(
+            new { uploaded = written, total = contents.Count },
+            written == contents.Count
+                ? $"{written} dosya arşive eklendi."
+                : $"{written}/{contents.Count} dosya arşive eklenebildi."));
     }
 
     [HttpGet]
