@@ -211,8 +211,10 @@ public sealed class RoleService : IRoleService
 
     public async Task<IReadOnlyList<RoleDto>> ListAsync(CancellationToken cancellationToken = default)
     {
+        // Rol kartındaki sayı Kullanıcılar ekranıyla aynı kapsamı gösterir:
+        // silinmiş ve pasif hesaplar sayılmaz.
         var counts = await _db.Users.AsNoTracking()
-            .Where(u => u.RoleId != null)
+            .Where(u => u.RoleId != null && u.DeletedAt == null && u.Status)
             .GroupBy(u => u.RoleId!.Value)
             .Select(g => new { RoleId = g.Key, Count = g.Count() })
             .ToDictionaryAsync(x => x.RoleId, x => x.Count, cancellationToken);

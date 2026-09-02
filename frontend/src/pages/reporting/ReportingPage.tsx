@@ -17,7 +17,6 @@ interface ReportingKpi {
   total_expeditions: number;
   total_accounts: number;
   total_invoice_amount: number;
-  active_users: number;
   total_users: number;
   expected_income_try: number;
   expected_expense_try: number;
@@ -309,7 +308,7 @@ export function ReportingPage() {
           <KpiCard label="Sefer" value={loading ? "—" : String(kpi?.total_expeditions ?? 0)} icon={Truck} color="bg-cyan-50 text-cyan-600" />
           <KpiCard label="Toplam Müşteri" value={loading ? "—" : String(kpi?.total_accounts ?? 0)} icon={Users} color="bg-emerald-50 text-emerald-600" />
           <KpiCard label="Fatura Tutarı" value={loading ? "—" : money(kpi?.total_invoice_amount ?? 0)} icon={Receipt} color="bg-orange-50 text-orange-600" />
-          <KpiCard label="Aktif / Toplam Kullanıcı" value={loading ? "—" : `${kpi?.active_users ?? 0} / ${kpi?.total_users ?? 0}`} icon={UserCheck} color="bg-purple-50 text-purple-600" />
+          <KpiCard label="Kullanıcı" value={loading ? "—" : String(kpi?.total_users ?? 0)} icon={UserCheck} color="bg-purple-50 text-purple-600" />
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">

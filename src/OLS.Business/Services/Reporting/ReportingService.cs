@@ -50,7 +50,7 @@ public sealed record ReportingKpiDto
     public required int TotalExpeditions { get; init; }
     public required decimal TotalInvoiceAmount { get; init; }
     public required int TotalAccounts { get; init; }
-    public required int ActiveUsers { get; init; }
+    /// <summary>Pasif hesaplar sayılmaz — bkz. UserService.ListAsync.</summary>
     public required int TotalUsers { get; init; }
     public required decimal ExpectedIncomeTry { get; init; }
     public required decimal ExpectedExpenseTry { get; init; }
@@ -146,9 +146,9 @@ public sealed class ReportingService : IReportingService
         var realizedExpense = await financeQuery.SumAsync(f => (decimal?)f.RealizedExpenseTry, cancellationToken) ?? 0m;
 
         var users = await _db.Users.AsNoTracking()
-            .Where(u => u.DeletedAt == null)
+            .Where(u => u.DeletedAt == null && u.Status)
             .OrderBy(u => u.Name).ThenBy(u => u.Surname)
-            .Select(u => new { u.Id, u.Name, u.Surname, u.Email, u.Avatar, u.Status })
+            .Select(u => new { u.Id, u.Name, u.Surname, u.Email, u.Avatar })
             .ToListAsync(cancellationToken);
 
         // olsold: aynı kullanıcı bir teklife hem Operasyon Yetkilisi hem Satış
@@ -186,10 +186,7 @@ public sealed class ReportingService : IReportingService
             .ToListAsync(cancellationToken);
         var accountDict = accountCountsRaw.ToDictionary(x => (long)x.UserId, x => x.Count);
 
-        // Kullanıcı isteğiyle: rapor tablosu yalnızca aktif kullanıcıları listeler
-        // (pasif kullanıcılar sayılmaz) — KPI kartındaki "Aktif/Toplam" oranı ise
-        // hâlâ TÜM kullanıcılardan (users, filtrelenmeden önce) hesaplanır.
-        var rows = users.Where(u => u.Status).Select(u => new UserReportRowDto
+        var rows = users.Select(u => new UserReportRowDto
         {
             UserId = u.Id,
             Name = u.Name,
@@ -213,7 +210,6 @@ public sealed class ReportingService : IReportingService
                 TotalExpeditions = totalExpeditions,
                 TotalInvoiceAmount = totalInvoiceAmount,
                 TotalAccounts = totalAccounts,
-                ActiveUsers = users.Count(u => u.Status),
                 TotalUsers = users.Count,
                 ExpectedIncomeTry = expectedIncome,
                 ExpectedExpenseTry = expectedExpense,

@@ -9,7 +9,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
-import { Badge, Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
+import { Btn, FormField, SelectInput, Tabs, TextInput } from "@/components/ui/primitives";
 
 interface NamedRef {
   id: string;
@@ -22,7 +22,6 @@ interface UserItem {
   surname: string | null;
   email: string | null;
   phone: string | null;
-  status: boolean;
   avatar: string | null;
 }
 
@@ -105,7 +104,6 @@ function UserCard({
           <p className="text-sm font-semibold text-gray-900 truncate min-w-0">{row.name} {row.surname}</p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <Badge label={row.status ? "Aktif" : "Pasif"} />
           {canDelete && (
             <button
               type="button"
@@ -147,16 +145,14 @@ export function UsersPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const [fStatus, setFStatus] = useState("");
   const [fPhoneCountry, setFPhoneCountry] = useState("");
   const [fWorkingTracking, setFWorkingTracking] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const hasActiveAdvancedFilters = !!(fStatus || fPhoneCountry || fWorkingTracking);
+  const hasActiveAdvancedFilters = !!(fPhoneCountry || fWorkingTracking);
   const hasActiveFilters = !!(search || hasActiveAdvancedFilters);
 
   function clearFilters() {
     setSearch("");
-    setFStatus("");
     setFPhoneCountry("");
     setFWorkingTracking("");
     setPage(1);
@@ -213,7 +209,6 @@ export function UsersPage() {
     api
       .get<DataMessage<Paginated<UserItem>>>("/api/v1/user", {
         search: debouncedSearch || undefined,
-        status: fStatus || undefined,
         phone_country_id: fPhoneCountry || undefined,
         working_tracking: fWorkingTracking || undefined,
         per_page: PER_PAGE,
@@ -230,7 +225,7 @@ export function UsersPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page, fStatus, fPhoneCountry, fWorkingTracking]);
+  }, [debouncedSearch, page, fPhoneCountry, fWorkingTracking]);
 
   function openNew() {
     setEditingId(null);
@@ -511,10 +506,7 @@ export function UsersPage() {
                 transition={{ duration: 0.2, ease: "easeInOut" }}
                 className="overflow-hidden"
               >
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-4 mt-4 border-t border-gray-100">
-                  <FormField label="Durum">
-                    <SelectInput value={fStatus} onChange={(v) => { setFStatus(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, { value: "true", label: "Aktif" }, { value: "false", label: "Pasif" }]} />
-                  </FormField>
+                <div className="grid grid-cols-2 gap-3 pt-4 mt-4 border-t border-gray-100">
                   <FormField label="Ülke Kodu">
                     <SelectInput value={fPhoneCountry} onChange={(v) => { setFPhoneCountry(v); setPage(1); }} options={[{ value: "", label: "Seçiniz" }, ...countries.map((c) => ({ value: String(c.id), label: c.phone_code ? `+${c.phone_code}` : c.name }))]} />
                   </FormField>

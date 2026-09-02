@@ -44,7 +44,7 @@ public interface IUserService
 
 public sealed record UserListQuery(
     string? Search, bool? WorkingTracking, int? PerPage, int Page, string Path,
-    bool? Status = null, Guid? PhoneCountryId = null);
+    Guid? PhoneCountryId = null);
 
 public sealed class UserDto
 {
@@ -101,7 +101,13 @@ public sealed class UserService : IUserService
     public async Task<object> ListAsync(
         UserListQuery query, CancellationToken cancellationToken = default)
     {
-        var users = _db.Users.AsNoTracking().Where(u => u.DeletedAt == null);
+        // PASİF HESAPLAR KAPSAM DIŞI. Siber'de engellenen (işten ayrılmış)
+        // kullanıcılar senkronda pasife çekiliyor — bkz.
+        // RoleService.ApplyFromSiberAsync. Girişleri zaten kapalıydı
+        // (AuthService), ama listede ve UserPicker'da duruyorlardı: 2026-09-02
+        // ölçümünde silinmemiş 130 kaydın 82'si pasifti, ekranda kalan 48.
+        // Durum süzgeci de bu yüzden kaldırıldı — seçilebilecek tek değer kaldı.
+        var users = _db.Users.AsNoTracking().Where(u => u.DeletedAt == null && u.Status);
 
         if (!string.IsNullOrWhiteSpace(query.Search))
         {
@@ -120,9 +126,6 @@ public sealed class UserService : IUserService
         if (query.WorkingTracking == true)
             users = users.Where(u => u.WorkingTracking);
 
-        if (query.Status is { } status)
-            users = users.Where(u => u.Status == status);
-
         if (query.PhoneCountryId is { } phoneCountryId)
             users = users.Where(u => u.PhoneCountryId == phoneCountryId);
 
@@ -134,7 +137,7 @@ public sealed class UserService : IUserService
 
     public async Task<UserDto?> SingleAsync(long id, CancellationToken cancellationToken = default) =>
         await _db.Users.AsNoTracking()
-            .Where(u => u.Id == id && u.DeletedAt == null)
+            .Where(u => u.Id == id && u.DeletedAt == null && u.Status)
             .Select(Project)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -192,7 +195,8 @@ public sealed class UserService : IUserService
         CancellationToken cancellationToken = default)
     {
         var user = await _db.Users
-            .FirstOrDefaultAsync(u => u.Id == request.Id && u.DeletedAt == null, cancellationToken);
+            .FirstOrDefaultAsync(
+                u => u.Id == request.Id && u.DeletedAt == null && u.Status, cancellationToken);
 
         if (user is null)
             return null;
@@ -228,7 +232,7 @@ public sealed class UserService : IUserService
             return [];
 
         var users = await _db.Users
-            .Where(u => ids.Contains(u.Id) && u.DeletedAt == null)
+            .Where(u => ids.Contains(u.Id) && u.DeletedAt == null && u.Status)
             .ToListAsync(cancellationToken);
 
         if (users.Count == 0)
@@ -249,6 +253,11 @@ public sealed class UserService : IUserService
         return avatars;
     }
 
+    /// <summary>
+    /// Benzersizlik kontrolü PASİF hesapları da sayar: e-posta ve telefon onlarda
+    /// da duruyor, ekranda görünmemeleri çakışmayı ortadan kaldırmıyor. Aksi hâlde
+    /// ayrılmış bir çalışanın e-postasıyla ikinci kayıt açılabilirdi.
+    /// </summary>
     public async Task<bool> EmailExistsAsync(
         string email, long? exceptId, CancellationToken cancellationToken = default) =>
         await _db.Users.AsNoTracking()

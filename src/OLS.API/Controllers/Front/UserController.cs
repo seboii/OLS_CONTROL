@@ -39,12 +39,11 @@ public sealed class UserController : ApiControllerBase
         [FromQuery(Name = "working_tracking")] bool? workingTracking,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
-        [FromQuery(Name = "status")] bool? status = null,
         [FromQuery(Name = "phone_country_id")] Guid? phoneCountryId = null,
         CancellationToken cancellationToken = default)
     {
         var result = await _users.ListAsync(
-            new UserListQuery(search, workingTracking, perPage, page, CurrentPath, status, phoneCountryId),
+            new UserListQuery(search, workingTracking, perPage, page, CurrentPath, phoneCountryId),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");
