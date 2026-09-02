@@ -1,34 +1,26 @@
 /**
- * Teklifsiz yük formunun TASLAKLARI — tarayıcı belleğinde (localStorage).
+ * Teklifsiz yük formunun OTOMATİK taslağı — tarayıcı belleğinde (localStorage).
  *
- * NEDEN: form uzun (5 sekme, paketler, mali kalemler) ve tek oturumda
- * doldurulamayabiliyor. Sekme kapanması, sayfa yenilenmesi ya da ani elektrik
- * kesintisi doldurulanı tamamen kaybettiriyordu.
+ * NEDEN: form uzun (tanımlar, taraflar, güzergah, paketler, mali kalemler) ve
+ * tek oturumda doldurulamayabiliyor. Sekme kapanması, sayfa yenilenmesi ya da
+ * ani elektrik kesintisi doldurulanı tamamen kaybettiriyordu.
  *
- * İKİ AYRI ŞEY VAR, karıştırılmamalı:
- *   * OTOMATİK taslak — kullanıcı bir şey yapmadan, form her değiştiğinde
- *     yazılır. Amacı kaza kurtarma. Tek tanedir ve kaydedilince silinir.
- *   * ADLI taslaklar — kullanıcının bilerek "Taslak Kaydet" dediği kayıtlar.
- *     BİRDEN FAZLA olabilir; kullanıcı aralarında geçiş yapar.
+ * ELLE KAYDETME YOK. Bir ara "Taslak Kaydet" düğmesi ve adlı taslaklar vardı;
+ * kullanıcı kaydetmeyi unuttuğunda emeği yine kayboluyordu. Artık form her
+ * değiştiğinde kendiliğinden yazılıyor, bir sonraki açılışta "kaldığınız
+ * yerden devam" olarak sunuluyor ve istenirse siliniyor. Teklif ekranındaki
+ * davranışın aynısı (bkz. lib/autodraft.ts).
  *
  * SUNUCUYA YAZILMIYOR: taslak henüz Siber'e gitmemiş, numarası olmayan bir
  * veri. Sunucuda tutulsaydı yarım kayıtlar için ayrı bir yaşam döngüsü ve
- * temizleme işi doğardı. Tarayıcı belleği bu iş için yeterli ve anında.
+ * temizleme işi doğardı. Bunun kabul edilen bedeli, taslağın yalnızca o
+ * tarayıcıda görünmesidir.
+ *
+ * DOSYALAR TAŞINMAZ: seçilen dosyalar File nesnesi ve localStorage'a
+ * yazılamıyor. Taslaktan devam edilirken dosyaların yeniden seçilmesi gerekir.
  */
 
-const STORAGE_KEY = "ols.directLoad.drafts.v1";
 const AUTOSAVE_KEY = "ols.directLoad.autosave.v1";
-
-/** Aynı anda tutulacak en fazla adlı taslak. */
-const MAX_DRAFTS = 20;
-
-export interface DirectLoadDraft {
-  id: string;
-  name: string;
-  savedAt: string;
-  /** Formun tüm durumu — şekli çağıran sayfaya ait, burada opak taşınır. */
-  payload: unknown;
-}
 
 /**
  * localStorage her ortamda çalışmayabilir (gizli sekme, site verisi kapalı).
@@ -52,55 +44,7 @@ function safeWrite(key: string, value: string): boolean {
   }
 }
 
-function safeRemove(key: string) {
-  try {
-    window.localStorage.removeItem(key);
-  } catch {
-    /* yok sayılır */
-  }
-}
-
-export function listDrafts(): DirectLoadDraft[] {
-  const raw = safeRead(STORAGE_KEY);
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // En yeni önce.
-    return (parsed as DirectLoadDraft[]).sort((a, b) => b.savedAt.localeCompare(a.savedAt));
-  } catch {
-    return [];
-  }
-}
-
-export function saveDraft(name: string, payload: unknown, id?: string): DirectLoadDraft | null {
-  const drafts = listDrafts();
-  const now = new Date().toISOString();
-
-  const draft: DirectLoadDraft = {
-    id: id ?? `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`,
-    name: name.trim() || `Taslak ${new Date().toLocaleString("tr-TR")}`,
-    savedAt: now,
-    payload,
-  };
-
-  // Aynı id varsa güncellenir, yoksa başa eklenir.
-  const rest = drafts.filter((d) => d.id !== draft.id);
-  const next = [draft, ...rest].slice(0, MAX_DRAFTS);
-
-  return safeWrite(STORAGE_KEY, JSON.stringify(next)) ? draft : null;
-}
-
-export function deleteDraft(id: string) {
-  const next = listDrafts().filter((d) => d.id !== id);
-  safeWrite(STORAGE_KEY, JSON.stringify(next));
-}
-
-/**
- * Kaza kurtarma kopyası. Kullanıcı kaydetmeden kapatırsa/kesinti olursa
- * form bir sonraki açılışta buradan geri yüklenir.
- */
+/** Form her değiştiğinde çağrılır. */
 export function writeAutosave(payload: unknown) {
   safeWrite(AUTOSAVE_KEY, JSON.stringify({ savedAt: new Date().toISOString(), payload }));
 }
@@ -118,10 +62,14 @@ export function readAutosave(): { savedAt: string; payload: unknown } | null {
 }
 
 export function clearAutosave() {
-  safeRemove(AUTOSAVE_KEY);
+  try {
+    window.localStorage.removeItem(AUTOSAVE_KEY);
+  } catch {
+    /* yukarıdaki ile aynı */
+  }
 }
 
-/** Taslağın dolu olup olmadığını kabaca ölçer — boş formu kaydetmemek için. */
+/** Taslağın dolu olup olmadığını kabaca ölçer — boş formu taslak yapmamak için. */
 export function isPayloadEmpty(payload: Record<string, unknown> | null | undefined): boolean {
   if (!payload) return true;
 

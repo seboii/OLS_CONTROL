@@ -20,8 +20,7 @@ import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 import {
-  listDrafts, saveDraft, deleteDraft, writeAutosave, readAutosave, clearAutosave,
-  isPayloadEmpty, type DirectLoadDraft,
+  writeAutosave, readAutosave, clearAutosave, isPayloadEmpty,
 } from "@/lib/directLoadDrafts";
 
 interface NamedRef {
@@ -538,11 +537,13 @@ export function LoadsPage() {
     });
   }
 
-  // Taslaklar (tarayıcı belleğinde) — bkz. lib/directLoadDrafts.ts
-  const [drafts, setDrafts] = useState<DirectLoadDraft[]>([]);
-  const [draftsOpen, setDraftsOpen] = useState(false);
-  // Açık olan adlı taslak; "Kaydet" aynı taslağın üzerine yazsın diye tutulur.
-  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
+  // TASLAK OTOMATİKTİR — elle "kaydet" yok.
+  //
+  // Eskiden adlı taslaklar ve bir "Taslak Kaydet" düğmesi vardı; kullanıcı
+  // kaydetmeyi unutursa emeği yine kayboluyordu. Artık form her değiştiğinde
+  // kendiliğinden yazılıyor, kullanıcı yanlışlıkla çıksa da kaldığı yerden
+  // devam edebiliyor ve isterse taslağı siliyor. Teklif ekranındaki davranışın
+  // aynısı (bkz. QuotesPage / lib/autodraft.ts).
   const [recoverable, setRecoverable] = useState<{ savedAt: string; payload: unknown } | null>(null);
 
   /** Formun tüm durumu tek nesnede — taslak da kurtarma da bunu saklar. */
@@ -585,11 +586,7 @@ export function LoadsPage() {
   // Açılışta: kurtarılabilir bir kopya varsa kullanıcıya sorulur.
   useEffect(() => {
     if (!directOpen) return;
-    setDrafts(listDrafts());
-    const auto = readAutosave();
-    if (auto && !activeDraftId) setRecoverable(auto);
-    // activeDraftId bilerek dışarıda: taslak açıldıktan sonra tekrar sormasın.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setRecoverable(readAutosave());
   }, [directOpen]);
 
   function resetDirectForm() {
@@ -607,47 +604,8 @@ export function LoadsPage() {
     setDirectPackages([{ ...EMPTY_PACKAGE_ROW }]);
     setDirectItems([]);
     setDirectFiles([]);
-    setActiveDraftId(null);
   }
 
-  function handleSaveDraft() {
-    const snap = directSnapshot();
-    if (isPayloadEmpty(snap as unknown as Record<string, unknown>)) {
-      addToast("Boş form taslak olarak kaydedilmez", "error");
-      return;
-    }
-
-    const suggested = directCustomer?.name
-      ? `${directCustomer.name}${directForm.work_type_id ? "" : ""}`
-      : `Taslak ${new Date().toLocaleString("tr-TR")}`;
-
-    const name = window.prompt("Taslak adı:", suggested);
-    if (name === null) return;
-
-    const saved = saveDraft(name, snap, activeDraftId ?? undefined);
-    if (!saved) {
-      addToast("Taslak kaydedilemedi (tarayıcı belleği dolu olabilir)", "error");
-      return;
-    }
-
-    setActiveDraftId(saved.id);
-    setDrafts(listDrafts());
-    addToast(`Taslak kaydedildi: ${saved.name}`);
-  }
-
-  function handleOpenDraft(draft: DirectLoadDraft) {
-    applySnapshot(draft.payload);
-    setActiveDraftId(draft.id);
-    setDraftsOpen(false);
-    setRecoverable(null);
-    addToast(`Taslak açıldı: ${draft.name}`);
-  }
-
-  function handleDeleteDraft(draft: DirectLoadDraft) {
-    deleteDraft(draft.id);
-    setDrafts(listDrafts());
-    if (activeDraftId === draft.id) setActiveDraftId(null);
-  }
 
   useEffect(() => {
     api
@@ -730,10 +688,8 @@ export function LoadsPage() {
         }
       }
 
-      // Kayıt Siber'e gittiğine göre taslak da kurtarma kopyası da gereksiz.
-      if (activeDraftId) deleteDraft(activeDraftId);
+      // Kayıt Siber'e gittiğine göre taslak gereksiz.
       clearAutosave();
-      setDrafts(listDrafts());
       setRecoverable(null);
 
       setDirectOpen(false);
@@ -1422,12 +1378,6 @@ export function LoadsPage() {
             <Btn onClick={submitDirectLoad} disabled={directSaving}>
               <BusyLabel busy={directSaving} busyText="Oluşturuluyor...">Yükü Oluştur</BusyLabel>
             </Btn>
-            <Btn variant="secondary" onClick={handleSaveDraft} disabled={directSaving}>
-              Taslak Kaydet
-            </Btn>
-            <Btn variant="secondary" onClick={() => { setDraftsOpen((o) => !o); setDrafts(listDrafts()); }} disabled={directSaving}>
-              Taslaklar{drafts.length > 0 ? ` (${drafts.length})` : ""}
-            </Btn>
             <Btn variant="secondary" onClick={() => setDirectOpen(false)} disabled={directSaving}>İptal</Btn>
           </div>
         }
@@ -1439,77 +1389,25 @@ export function LoadsPage() {
           <div className="mx-6 mt-4 flex items-start gap-2 rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             <AlertTriangle size={14} className="mt-0.5 shrink-0" />
             <div className="flex-1">
-              Kaydedilmemiş bir form bulundu
+              Kaydedilmemiş bir taslak bulundu
               <span className="text-amber-700">
                 {" "}({new Date(recoverable.savedAt).toLocaleString("tr-TR")})
               </span>
-              . Geri yüklemek ister misiniz?
+              . Kaldığınız yerden devam edebilirsiniz.
             </div>
             <button
               className="shrink-0 font-medium text-amber-900 underline"
               onClick={() => { applySnapshot(recoverable.payload); setRecoverable(null); }}
             >
-              Geri yükle
+              Devam et
             </button>
             <button
               className="shrink-0 text-amber-700"
+              title="Taslağı sil"
               onClick={() => { clearAutosave(); setRecoverable(null); }}
             >
-              Yoksay
+              Taslağı sil
             </button>
-          </div>
-        )}
-
-        {/* Taslak listesi — birden fazla taslak tutulabilir. */}
-        {draftsOpen && (
-          <div className="mx-6 mt-4 rounded border border-gray-200">
-            <div className="flex items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2">
-              <span className="text-xs font-semibold text-gray-700">
-                Kayıtlı taslaklar ({drafts.length})
-              </span>
-              <button className="text-xs text-gray-500" onClick={() => setDraftsOpen(false)}>
-                Kapat
-              </button>
-            </div>
-
-            {drafts.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-gray-400">
-                Henüz taslak yok. Formu doldurup "Taslak Kaydet" deyin.
-              </div>
-            ) : (
-              <div className="max-h-56 overflow-y-auto">
-                {drafts.map((d) => (
-                  <div
-                    key={d.id}
-                    className={clsx(
-                      "flex items-center gap-2 border-t border-gray-100 px-3 py-2 first:border-t-0",
-                      activeDraftId === d.id && "bg-blue-50",
-                    )}
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm text-gray-800">{d.name}</div>
-                      <div className="text-[11px] text-gray-400">
-                        {new Date(d.savedAt).toLocaleString("tr-TR")}
-                        {activeDraftId === d.id && " · açık"}
-                      </div>
-                    </div>
-                    <button
-                      className="shrink-0 text-xs font-medium text-blue-600"
-                      onClick={() => handleOpenDraft(d)}
-                    >
-                      Aç
-                    </button>
-                    <button
-                      className="shrink-0 rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                      title="Taslağı sil"
-                      onClick={() => handleDeleteDraft(d)}
-                    >
-                      <Trash2 size={13} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         )}
 
