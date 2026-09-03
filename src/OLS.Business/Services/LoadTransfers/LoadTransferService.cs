@@ -157,6 +157,10 @@ public sealed class LoadTransferDetailDto
     /// </summary>
     [JsonPropertyName("transit_country_id")] public CountryDto? TransitCountryId { get; init; }
 
+    /// <summary>Kaydın şirketi; süper admin bunu değiştirebilir.</summary>
+    [JsonPropertyName("siber_company_id")] public string? SiberCompanyId { get; init; }
+
+
     /// <summary>
     /// DİKKAT: sütun adı <c>customer_representative_name</c> ama içeriği bir
     /// KULLANICI KİMLİĞİ (int) — olsold'da da aynı yanıltıcı adlandırma var.
@@ -593,6 +597,7 @@ public sealed class LoadTransferService : ILoadTransferService
             DepartureCountryId = await CountryRefAsync(t.DepartureCountryId, cancellationToken),
             TargetCountryId = await CountryRefAsync(t.TargetCountryId, cancellationToken),
             TransitCountryId = await CountryRefAsync(t.TransitCountryId, cancellationToken),
+            SiberCompanyId = t.SiberCompanyId,
 
             CustomerRepresentative = await UserRefAsync(t.CustomerRepresentativeName, cancellationToken),
             SecondCustomerRepresentative = await UserRefAsync(t.SecondCustomerRepresentativeName, cancellationToken),

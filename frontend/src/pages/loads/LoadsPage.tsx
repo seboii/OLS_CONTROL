@@ -119,6 +119,7 @@ interface LoadTransferDetail extends LoadTransferItem {
   target_country_id: { id: string; name: string | null } | null;
   // Transit ülke YALNIZCA YEREL: Siber'in yük tablosunda karşılığı yok.
   transit_country_id: { id: string; name: string | null } | null;
+  siber_company_id: string | null;
 }
 
 interface LinkedExpedition {
@@ -451,6 +452,8 @@ export function LoadsPage() {
   const [sender, setSender] = useState<AccountOption | null>(null);
   const [receiver, setReceiver] = useState<AccountOption | null>(null);
   const [departureCountry, setDepartureCountry] = useState("");
+  // Mevcut yükün şirketi; süper admin bunu değiştirip kaydı taşıyabilir.
+  const [loadCompany, setLoadCompany] = useState("");
   const [transitCountry, setTransitCountry] = useState("");
   const [targetCountry, setTargetCountry] = useState("");
   const [customerRep, setCustomerRep] = useState<UserOption | null>(null);
@@ -935,6 +938,7 @@ export function LoadsPage() {
       setCustomerRep(d.customer_representative);
       setSecondCustomerRep(d.second_customer_representative);
       setDepartureCountry(d.departure_country_id?.id ?? "");
+      setLoadCompany(d.siber_company_id ?? "");
       setTransitCountry(d.transit_country_id?.id ?? "");
       setTargetCountry(d.target_country_id?.id ?? "");
       setExistingFiles(d.load_file);
@@ -1248,6 +1252,7 @@ export function LoadsPage() {
         front_transportation_by_us: int(form.front_transportation_by_us),
         final_transportation_by_us: int(form.final_transportation_by_us),
         departure_country_id: departureCountry || null,
+        siber_company_id: loadCompany || null,
         transit_country_id: transitCountry || null,
         target_country_id: targetCountry || null,
         instruction_arrival_date: form.instruction_arrival_date || null,
@@ -1893,6 +1898,11 @@ export function LoadsPage() {
                     <FormField label="Yük Türü">
                       <SelectInput value={form.load_transfer_type_id} onChange={(v) => setForm((f) => ({ ...f, load_transfer_type_id: v }))} options={opts(loadTransferTypes)} />
                     </FormField>
+                    <CompanyPicker
+                      label="Şirket (taşı)"
+                      value={loadCompany}
+                      onChange={setLoadCompany}
+                    />
                     <FormField label="Talimat">
                       <SelectInput value={form.instruction_id} onChange={(v) => setForm((f) => ({ ...f, instruction_id: v }))} options={opts(instructions)} />
                     </FormField>

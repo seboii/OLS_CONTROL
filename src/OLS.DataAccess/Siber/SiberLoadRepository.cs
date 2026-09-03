@@ -73,6 +73,14 @@ public interface ISiberLoadRepository
     /// </summary>
     Task UpdateYukAsync(SiberYuk yuk, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Var olan yükü başka şirkete taşır. Yalnızca yerelde değiştirmek
+    /// yetmez: senkron her turda skn_yuk.sirketid'yi yerel aynanın üzerine
+    /// yazıyor, değişiklik bir sonraki turda geri alınırdı.
+    /// </summary>
+    Task MoveYukCompanyAsync(
+        string yukId, string sirketId, CancellationToken cancellationToken = default);
+
     Task UpdateYukKoliAsync(SiberYukKoli koli, CancellationToken cancellationToken = default);
     Task UpdateModulKalemAsync(SiberModulKalem kalem, CancellationToken cancellationToken = default);
 
@@ -570,6 +578,27 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             """;
 
         await connection.ExecuteAsync(sql, evrak);
+    }
+
+    /// <summary>
+    /// Var olan bir yükü başka şirkete taşır (şube şirketi takip eder).
+    /// Yalnızca yerelde değiştirmek yetmez: senkron her turda
+    /// <c>skn_yuk.sirketid</c>'yi yerel aynanın üzerine yazıyor.
+    ///
+    /// Yüke bağlı mali kalemlerin (<c>sfy_modulkalem.subeid</c>) şubesi
+    /// DEĞİŞTİRİLMEZ — kalem satırı modül kaydı üzerinden bağlı, yükün kimliği
+    /// üzerinden değil; görünürlük ve şirket kararı <c>skn_yuk.sirketid</c>'ye
+    /// dayandığı için taşımanın etkisi buradan tam olarak alınıyor.
+    /// </summary>
+    public async Task MoveYukCompanyAsync(
+        string yukId, string sirketId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            "UPDATE skn_yuk SET sirketid = @SirketId, subeid = @SubeId WHERE yukid = @YukId",
+            new { YukId = yukId, SirketId = sirketId, SubeId = SubeIdFor(sirketId) },
+            cancellationToken: cancellationToken));
     }
 
     public async Task UpdateYukAsync(SiberYuk yuk, CancellationToken cancellationToken = default)

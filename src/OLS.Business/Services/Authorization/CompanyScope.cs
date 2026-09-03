@@ -60,6 +60,12 @@ public interface ICompanyScope
     /// </summary>
     Task<IReadOnlyList<CompanyOption>> ListWritableCompaniesAsync(
         long? userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Kullanıcı kaydın şirketini SEÇEBİLİR mi (yeni kayıtta ve mevcut kaydı
+    /// taşırken). Yalnızca iki şirketi de gören kullanıcı için true.
+    /// </summary>
+    Task<bool> CanChooseCompanyAsync(long? userId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Şirket seçicisinin bir seçeneği.</summary>
@@ -196,6 +202,10 @@ public sealed class CompanyScope : ICompanyScope
             ? requested!
             : OlsCompanyId;
     }
+
+    public async Task<bool> CanChooseCompanyAsync(
+        long? userId, CancellationToken cancellationToken = default) =>
+        (await ResolveAsync(userId, cancellationToken)).SeesEverything;
 
     public async Task<IReadOnlyList<CompanyOption>> ListWritableCompaniesAsync(
         long? userId, CancellationToken cancellationToken = default)

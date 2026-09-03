@@ -105,6 +105,7 @@ interface ExpeditionDetail extends ExpeditionItem {
   tractor_id: { id: number; plate_number: string | null } | null;
   driver_id: NamedRef | null;
   rented_company_id: NamedRef | null;
+  siber_company_id: string | null;
   expedition_id: string | null;
   sefer_id: string | null;
   year_week: string | null;
@@ -580,6 +581,7 @@ export function TripsPage() {
     release_date: "", entry_date: "", loading_date: "", return_date: "", car_exit_date: "",
     start_city_id: "", load_city_id: "", end_city_id: "",
     tractor_id: "", tractor_plate: "", driver_id: "", rented_company_id: "", rented_company_name: "",
+    siber_company_id: "",
   });
 
   const [mappings, setMappings] = useState<ExpeditionMapping[]>([]);
@@ -668,6 +670,7 @@ export function TripsPage() {
         driver_id: d.driver_id ? String(d.driver_id.id) : "",
         rented_company_id: d.rented_company_id ? String(d.rented_company_id.id) : "",
         rented_company_name: d.rented_company_id?.name ?? "",
+        siber_company_id: d.siber_company_id ?? "",
       });
       loadMappings(id);
       fetchMovements(id);
@@ -720,6 +723,7 @@ export function TripsPage() {
         tractor_id: detailForm.tractor_id ? Number(detailForm.tractor_id) : null,
         driver_id: detailForm.driver_id ? Number(detailForm.driver_id) : null,
         rented_company_id: detailForm.rented_company_id ? Number(detailForm.rented_company_id) : null,
+        siber_company_id: detailForm.siber_company_id || null,
       });
       addToast("Sefer güncellendi");
       load();
@@ -1252,6 +1256,11 @@ export function TripsPage() {
                   <FormField label="Yükleme Şehri" error={detailErrors.load_city_id?.[0]} hint="Sefer durumu 8 iken zorunlu.">
                     <SelectInput value={detailForm.load_city_id} onChange={(v) => setDetailForm((f) => ({ ...f, load_city_id: v }))} options={opts(cities)} />
                   </FormField>
+                  <CompanyPicker
+                    label="Şirket (taşı)"
+                    value={detailForm.siber_company_id}
+                    onChange={(v) => setDetailForm((f) => ({ ...f, siber_company_id: v }))}
+                  />
                   <CarPicker
                     label="Çekici (Plaka)"
                     carTypeId={TRACTOR_CAR_TYPE_ID}

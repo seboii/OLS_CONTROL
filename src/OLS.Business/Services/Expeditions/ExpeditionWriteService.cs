@@ -361,6 +361,26 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         expedition.StartCityId = model.StartCityId;
         expedition.LoadCityId = model.LoadCityId;
         expedition.EndCityId = model.EndCityId;
+        // ŞİRKET TAŞIMA — yalnızca iki şirketi de gören kullanıcı yapabilir ve
+        // yalnızca değer GÖNDERİLDİĞİNDE. Kapsamlı kullanıcının her kaydetmesi
+        // kaydı sessizce kendi şirketine çekmesin diye alan boşsa dokunulmuyor.
+        if (!string.IsNullOrWhiteSpace(model.SiberCompanyId)
+            && await _companyScope.CanChooseCompanyAsync(model.CurrentUserId, cancellationToken))
+        {
+            var target = await _companyScope.ResolveWriteCompanyAsync(
+                model.CurrentUserId, model.SiberCompanyId, cancellationToken);
+
+            if (!string.Equals(target, expedition.SiberCompanyId, StringComparison.OrdinalIgnoreCase))
+            {
+                // Siber'e de yazılmalı: senkron her turda sirketid'yi yerel
+                // aynanın üzerine yazıyor, yalnızca yerel değişiklik geri alınırdı.
+                if (_siber.IsConfigured && expedition.ExpeditionId is not null)
+                    await _siber.MovePozisyonCompanyAsync(expedition.ExpeditionId, target, cancellationToken);
+
+                expedition.SiberCompanyId = target;
+            }
+        }
+
         expedition.TractorId = (int?)model.TractorId;
         expedition.DriverId = model.DriverId;
         expedition.RentedCompanyId = (int?)model.RentedCompanyId;

@@ -72,6 +72,22 @@ public interface ISiberExpeditionRepository
     /// HİÇ ulaşmıyordu.
     /// </summary>
     Task UpdatePozisyonAsync(SiberPozisyon pozisyon, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Var olan bir seferi başka şirkete taşır (şube şirketi takip eder).
+    ///
+    /// YEREL TARAFA YAZMAK YETMEZ: senkron her turda <c>skn_pozisyon.sirketid</c>
+    /// değerini yerel <c>expeditions.siber_company_id</c> üzerine yazıyor, yani
+    /// yalnızca yerelde yapılan değişiklik bir sonraki turda geri alınırdı.
+    ///
+    /// ÜST SEFER YALNIZCA TEK POZİSYONLUYSA taşınır. Siber'in kendi verisinde
+    /// 23 seferin altında birden çok şirketin pozisyonu var ve 25 pozisyonun
+    /// şirketi üst seferinden farklı — yani Siber bu ayrışmaya izin veriyor.
+    /// Paylaşılan bir seferi taşımak diğer pozisyonları sessizce yanlış şirkete
+    /// düşürürdü.
+    /// </summary>
+    Task MovePozisyonCompanyAsync(
+        string pozisyonId, string sirketId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Var olan bir seferin, yeniden kullanılabilirliğini belirleyen alanları.</summary>
@@ -440,6 +456,31 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
                 pozisyon.CikisTarih, pozisyon.DonusTarih, pozisyon.YuklemeTarih,
                 pozisyon.AracCikisTarih,
                 pozisyon.CekiciId, pozisyon.SurucuId, pozisyon.KiralananFirmaId,
+            },
+            cancellationToken: cancellationToken));
+    }
+
+    public async Task MovePozisyonCompanyAsync(
+        string pozisyonId, string sirketId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        await connection.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE s SET s.sirketid = @SirketId, s.subeid = @SubeId
+            FROM skn_sefer s
+            JOIN skn_pozisyon p ON p.seferid = s.seferid
+            WHERE p.pozisyonid = @PozisyonId
+              AND (SELECT COUNT(*) FROM skn_pozisyon x WHERE x.seferid = s.seferid) = 1;
+
+            UPDATE skn_pozisyon SET sirketid = @SirketId, subeid = @SubeId
+            WHERE pozisyonid = @PozisyonId;
+            """,
+            new
+            {
+                PozisyonId = pozisyonId,
+                SirketId = SirketIdOr(sirketId),
+                SubeId = SiberLoadRepository.SubeIdFor(sirketId),
             },
             cancellationToken: cancellationToken));
     }

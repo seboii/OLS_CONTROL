@@ -115,6 +115,36 @@ public sealed class CompanyWriteScopeTests
             .Should().Be(2, "sbr_sirket'te tam olarak iki şirket var");
     }
 
+    /// <summary>
+    /// MEVCUT KAYDI TAŞIMA da aynı kapıdan geçer: yük ve sefer güncelleme
+    /// akışları şirketi yalnızca <c>CanChooseCompanyAsync</c> true iken
+    /// değiştirir. Kapsamlı kullanıcıda false olmalı, yoksa her kaydetmesi
+    /// kaydı sessizce kendi şirketine çekerdi.
+    /// </summary>
+    [Fact]
+    public async Task OnlyUsersSeeingBothCompanies_MayMoveRecords()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var companyScope = scope.ServiceProvider.GetRequiredService<ICompanyScope>();
+        var context = scope.ServiceProvider.GetRequiredService<OLS.DataAccess.Context.OlsDbContext>();
+
+        var adminId = await context.Users
+            .Where(u => u.Email == "admin@ols-scoped.local")
+            .Select(u => u.Id)
+            .FirstAsync();
+
+        (await companyScope.CanChooseCompanyAsync(adminId))
+            .Should().BeTrue("süper admin kaydı iki şirket arasında taşıyabilir");
+
+        var scopedId = await CreateUserAsync($"tasima-{Guid.NewGuid():N}@avroralog.com");
+        (await companyScope.CanChooseCompanyAsync(scopedId))
+            .Should().BeFalse("kapsamlı kullanıcı kaydı taşıyamaz");
+
+        var plainId = await CreateUserAsync($"tasima-{Guid.NewGuid():N}@example.test");
+        (await companyScope.CanChooseCompanyAsync(plainId))
+            .Should().BeFalse("kapsamsız kullanıcı da taşıyamaz");
+    }
+
     [Fact]
     public async Task Capabilities_HidesCompanyChoice_ForScopedUser()
     {

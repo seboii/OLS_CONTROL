@@ -194,6 +194,9 @@ public sealed class LoadTransferDocumentTests
             throw new NotSupportedException();
         public Task DeleteModulKalemAsync(string modulKalemId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task MoveYukCompanyAsync(string yukId, string sirketId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task UpdateYukAsync(SiberYuk yuk, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task UpdateYukKoliAsync(SiberYukKoli koli, CancellationToken cancellationToken = default) =>

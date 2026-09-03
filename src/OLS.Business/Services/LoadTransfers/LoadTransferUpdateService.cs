@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Siber;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
@@ -64,6 +65,12 @@ public sealed class LoadTransferUpdateRequest
     /// karşılığı yok (bkz. <see cref="LoadTransfer.TransitCountryId"/>).
     /// </summary>
     public string? TransitCountryId { get; set; }
+
+    /// <summary>
+    /// Kaydı BAŞKA ŞİRKETE TAŞI. Yalnızca iki şirketi de gören kullanıcı
+    /// (süper admin) için işler ve yalnızca değer gönderildiğinde uygulanır.
+    /// </summary>
+    public string? SiberCompanyId { get; set; }
     public int? WayOfWorking { get; set; }
     public int? FrontTransportationByUs { get; set; }
     public int? FinalTransportationByUs { get; set; }
@@ -118,15 +125,17 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
     private readonly OlsDbContext _db;
     private readonly ISiberLoadRepository _siber;
     private readonly ISiberCountryResolver _countries;
+    private readonly ICompanyScope _companyScope;
     private readonly IClock _clock;
 
     public LoadTransferUpdateService(
         OlsDbContext db, ISiberLoadRepository siber,
-        ISiberCountryResolver countries, IClock clock)
+        ISiberCountryResolver countries, ICompanyScope companyScope, IClock clock)
     {
         _db = db;
         _siber = siber;
         _countries = countries;
+        _companyScope = companyScope;
         _clock = clock;
     }
 
@@ -166,6 +175,25 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         // Siber tarafı yalnızca bağlantı yapılandırılmışsa güncellenir; yerel
         // kayıt her hâlükârda kaydedilir (olsold Siber hatasında tamamını geri
         // alıyordu — yerel düzenlemenin kaybolması daha kötü bir sonuç).
+        // ŞİRKET TAŞIMA — yalnızca seçim hakkı olan kullanıcı ve yalnızca
+        // değer GÖNDERİLDİĞİNDE. Yerel tarafa yazmak yetmez: senkron her turda
+        // skn_yuk.sirketid'yi yerel aynanın üzerine yazıyor.
+        if (!string.IsNullOrWhiteSpace(request.SiberCompanyId)
+            && await _companyScope.CanChooseCompanyAsync(currentUserId, cancellationToken))
+        {
+            var target = await _companyScope.ResolveWriteCompanyAsync(
+                currentUserId, request.SiberCompanyId, cancellationToken);
+
+            if (!string.Equals(target, transfer.SiberCompanyId, StringComparison.OrdinalIgnoreCase))
+            {
+                if (_siber.IsConfigured && !string.IsNullOrEmpty(transfer.LoadTransferId))
+                    await _siber.MoveYukCompanyAsync(transfer.LoadTransferId, target, cancellationToken);
+
+                transfer.SiberCompanyId = target;
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+        }
+
         if (_siber.IsConfigured && !string.IsNullOrEmpty(transfer.LoadTransferId))
         {
             await SyncSiberAsync(transfer, user, now, cancellationToken);
