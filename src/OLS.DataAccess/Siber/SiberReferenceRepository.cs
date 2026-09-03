@@ -54,6 +54,11 @@ public enum SiberReferenceTable
     /// INSERT'i kesin düşürür.
     /// </summary>
     Sehir,
+
+    /// <summary>
+    /// <c>sbr_personel</c> — sefer sürücüsü. <c>skn_pozisyon.surucuid</c> FK'li.
+    /// </summary>
+    Personel,
 }
 
 /// <summary>
@@ -93,6 +98,7 @@ public sealed class SiberReferenceRepository : ISiberReferenceRepository
         SiberReferenceTable.Kalem => ("skn_kalem", "kalemid"),
         SiberReferenceTable.Ulke => ("sbr_ulke", "ulkeid"),
         SiberReferenceTable.Sehir => ("sbr_sehir", "sehirid"),
+        SiberReferenceTable.Personel => ("sbr_personel", "personelid"),
         _ => throw new ArgumentOutOfRangeException(nameof(table)),
     };
 

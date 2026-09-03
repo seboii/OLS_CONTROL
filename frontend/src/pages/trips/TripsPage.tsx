@@ -13,6 +13,7 @@ import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, SearchInput, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerModal";
 import { CarPicker } from "@/components/shared/CarPicker";
+import { AccountPicker } from "@/components/shared/AccountPicker";
 import { listDrafts, saveDraft, removeDraft, newDraftId, formatDraftTime, type Draft } from "@/lib/autodraft";
 import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
@@ -40,7 +41,18 @@ type TripForm = {
   // Eskiden yalnızca sefer AÇILDIKTAN sonra, detay ekranından girilebiliyordu.
   car_exit_date: string;
   start_city_id: string; load_city_id: string; end_city_id: string;
+  // Siber'de römork ve çekici AYRI plakalar; sürücü ve kiralanan firma da
+  // pozisyon üzerinde ayrı alanlar.
+  tractor_id: string; tractor_plate: string;
+  driver_id: string; rented_company_id: string; rented_company_name: string;
 };
+
+/**
+ * car_types.id — Çekici. Siber'in aractip kodlamasıyla eşleşiyor (Çekici 0,
+ * Kamyon 1, Römork 2). Çekici seçicisi bu tiple süzülüyor: 4.249 aracın 3.891'i
+ * römork, yalnızca 111'i çekici.
+ */
+const TRACTOR_CAR_TYPE_ID = 3;
 
 type TripDraft = { savedAt: string; form: TripForm };
 
@@ -48,6 +60,7 @@ const EMPTY_TRIP_FORM: TripForm = {
   romork_id: "", romork_plate: "", work_type: "", department_id: "", expedition_type: "",
   release_date: "", entry_date: "", loading_date: "", return_date: "",
   car_exit_date: "", start_city_id: "", load_city_id: "", end_city_id: "",
+  tractor_id: "", tractor_plate: "", driver_id: "", rented_company_id: "", rented_company_name: "",
 };
 
 /** Boş formu taslak diye kaydetmeyelim — en az bir alan dolu olmalı. */
@@ -85,6 +98,9 @@ interface ExpeditionDetail extends ExpeditionItem {
   return_date: string | null;
   car_exit_date: string | null;
   load_city_id: NamedRef | null;
+  tractor_id: { id: number; plate_number: string | null } | null;
+  driver_id: NamedRef | null;
+  rented_company_id: NamedRef | null;
   expedition_id: string | null;
   sefer_id: string | null;
   year_week: string | null;
@@ -343,6 +359,8 @@ export function TripsPage() {
   const { options: expeditionStatuses } = useLookupOptions("/api/v1/expedition_status");
   const { options: destinations } = useLookupOptions("/api/v1/destination");
   const { options: cities } = useLookupOptions("/api/v1/city");
+  // Yalnızca sürücü işaretli personel (canlıda 25 personelin 22'si).
+  const { options: drivers } = useLookupOptions("/api/v1/personnel");
   // olsold: ExpeditionFormDrawer.vue — Römork/Sefer Durumu/Sefer Tipi/Çalışma
   // Tipi/Departman alanlarının HEPSİNİN "Yeni Ekle" düğmesi kopyala-yapıştır
   // sonucu AYNI Departmanlar penceresini açıyor (yalnızca Departman alanı için
@@ -459,6 +477,9 @@ export function TripsPage() {
       start_city_id: form.start_city_id || null,
       load_city_id: form.load_city_id || null,
       end_city_id: form.end_city_id || null,
+      tractor_id: form.tractor_id ? Number(form.tractor_id) : null,
+      driver_id: form.driver_id ? Number(form.driver_id) : null,
+      rented_company_id: form.rented_company_id ? Number(form.rented_company_id) : null,
     };
     try {
       // YÜK EKLEME AKIŞI: yeni sefer formunda yük bağlama alanı OLAMAZ, çünkü
@@ -553,6 +574,7 @@ export function TripsPage() {
     romork_id: "", romork_plate: "", work_type: "", department_id: "", expedition_type: "", status_id: "",
     release_date: "", entry_date: "", loading_date: "", return_date: "", car_exit_date: "",
     start_city_id: "", load_city_id: "", end_city_id: "",
+    tractor_id: "", tractor_plate: "", driver_id: "", rented_company_id: "", rented_company_name: "",
   });
 
   const [mappings, setMappings] = useState<ExpeditionMapping[]>([]);
@@ -636,6 +658,11 @@ export function TripsPage() {
         start_city_id: d.start_city_id ? String(d.start_city_id.id) : "",
         load_city_id: d.load_city_id ? String(d.load_city_id.id) : "",
         end_city_id: d.end_city_id ? String(d.end_city_id.id) : "",
+        tractor_id: d.tractor_id ? String(d.tractor_id.id) : "",
+        tractor_plate: d.tractor_id?.plate_number ?? "",
+        driver_id: d.driver_id ? String(d.driver_id.id) : "",
+        rented_company_id: d.rented_company_id ? String(d.rented_company_id.id) : "",
+        rented_company_name: d.rented_company_id?.name ?? "",
       });
       loadMappings(id);
       fetchMovements(id);
@@ -685,6 +712,9 @@ export function TripsPage() {
         start_city_id: detailForm.start_city_id || null,
         load_city_id: detailForm.load_city_id || null,
         end_city_id: detailForm.end_city_id || null,
+        tractor_id: detailForm.tractor_id ? Number(detailForm.tractor_id) : null,
+        driver_id: detailForm.driver_id ? Number(detailForm.driver_id) : null,
+        rented_company_id: detailForm.rented_company_id ? Number(detailForm.rented_company_id) : null,
       });
       addToast("Sefer güncellendi");
       load();
@@ -1086,6 +1116,34 @@ export function TripsPage() {
           <FormField label="Bitiş Şehri" error={errors.end_city_id?.[0]}>
             <SelectInput value={form.end_city_id} onChange={(v) => setForm((f) => ({ ...f, end_city_id: v }))} options={opts(cities)} />
           </FormField>
+          {/* Siber'de römork ve çekici AYRI plakalar. Seçici araç tipine göre
+              süzülüyor: 4.249 aracın yalnızca 111'i çekici. */}
+          <CarPicker
+            label="Çekici (Plaka)"
+            carTypeId={TRACTOR_CAR_TYPE_ID}
+            error={errors.tractor_id?.[0]}
+            value={form.tractor_id ? { id: Number(form.tractor_id), plate_number: form.tractor_plate || null } : null}
+            onChange={(v) => setForm((f) => ({
+              ...f,
+              tractor_id: v ? String(v.id) : "",
+              tractor_plate: v?.plate_number ?? "",
+            }))}
+          />
+          <FormField label="Sürücü" error={errors.driver_id?.[0]}>
+            <SelectInput value={form.driver_id} onChange={(v) => setForm((f) => ({ ...f, driver_id: v }))} options={opts(drivers)} />
+          </FormField>
+          <AccountPicker
+            label="Kiralanan Firma"
+            error={errors.rented_company_id?.[0]}
+            value={form.rented_company_id
+              ? { id: Number(form.rented_company_id), name: form.rented_company_name || null }
+              : null}
+            onChange={(v) => setForm((f) => ({
+              ...f,
+              rented_company_id: v ? String(v.id) : "",
+              rented_company_name: v?.name ?? "",
+            }))}
+          />
         </div>
       </Drawer>
 
@@ -1185,6 +1243,34 @@ export function TripsPage() {
                   <FormField label="Yükleme Şehri" error={detailErrors.load_city_id?.[0]} hint="Sefer durumu 8 iken zorunlu.">
                     <SelectInput value={detailForm.load_city_id} onChange={(v) => setDetailForm((f) => ({ ...f, load_city_id: v }))} options={opts(cities)} />
                   </FormField>
+                  <CarPicker
+                    label="Çekici (Plaka)"
+                    carTypeId={TRACTOR_CAR_TYPE_ID}
+                    error={detailErrors.tractor_id?.[0]}
+                    value={detailForm.tractor_id
+                      ? { id: Number(detailForm.tractor_id), plate_number: detailForm.tractor_plate || null }
+                      : null}
+                    onChange={(v) => setDetailForm((f) => ({
+                      ...f,
+                      tractor_id: v ? String(v.id) : "",
+                      tractor_plate: v?.plate_number ?? "",
+                    }))}
+                  />
+                  <FormField label="Sürücü" error={detailErrors.driver_id?.[0]}>
+                    <SelectInput value={detailForm.driver_id} onChange={(v) => setDetailForm((f) => ({ ...f, driver_id: v }))} options={opts(drivers)} />
+                  </FormField>
+                  <AccountPicker
+                    label="Kiralanan Firma"
+                    error={detailErrors.rented_company_id?.[0]}
+                    value={detailForm.rented_company_id
+                      ? { id: Number(detailForm.rented_company_id), name: detailForm.rented_company_name || null }
+                      : null}
+                    onChange={(v) => setDetailForm((f) => ({
+                      ...f,
+                      rented_company_id: v ? String(v.id) : "",
+                      rented_company_name: v?.name ?? "",
+                    }))}
+                  />
                   <FormField label="Bitiş Şehri" error={detailErrors.end_city_id?.[0]} hint="Sefer durumu 8 iken zorunlu.">
                     <SelectInput value={detailForm.end_city_id} onChange={(v) => setDetailForm((f) => ({ ...f, end_city_id: v }))} options={opts(cities)} />
                   </FormField>

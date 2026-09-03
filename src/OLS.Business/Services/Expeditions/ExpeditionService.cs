@@ -93,6 +93,12 @@ public sealed class ExpeditionDetailDto
     [JsonPropertyName("status_id")] public NamedRefDto? StatusId { get; init; }
     [JsonPropertyName("department_id")] public NamedRefDto? DepartmentId { get; init; }
     [JsonPropertyName("romork_id")] public CarRefDto? RomorkId { get; init; }
+
+    /// <summary>Çekici — Siber'de römorktan AYRI plaka (skn_pozisyon.cekiciid).</summary>
+    [JsonPropertyName("tractor_id")] public CarRefDto? TractorId { get; init; }
+    [JsonPropertyName("driver_id")] public NamedRefDto? DriverId { get; init; }
+    [JsonPropertyName("rented_company_id")] public NamedRefDto? RentedCompanyId { get; init; }
+
     [JsonPropertyName("start_city_id")] public CityRefDto? StartCityId { get; init; }
     [JsonPropertyName("load_city_id")] public CityRefDto? LoadCityId { get; init; }
     [JsonPropertyName("end_city_id")] public CityRefDto? EndCityId { get; init; }
@@ -274,6 +280,15 @@ public sealed class ExpeditionService : IExpeditionService
                 .FirstOrDefaultAsync(cancellationToken),
             RomorkId = await _db.Cars.AsNoTracking().Where(c => c.Id == e.RomorkId)
                 .Select(c => new CarRefDto { Id = c.Id, PlateNumber = c.PlateNumber, SiberId = c.SiberId })
+                .FirstOrDefaultAsync(cancellationToken),
+            TractorId = await _db.Cars.AsNoTracking().Where(c => c.Id == e.TractorId)
+                .Select(c => new CarRefDto { Id = c.Id, PlateNumber = c.PlateNumber, SiberId = c.SiberId })
+                .FirstOrDefaultAsync(cancellationToken),
+            DriverId = await _db.Personnel.AsNoTracking().Where(x => x.Id == e.DriverId)
+                .Select(x => new NamedRefDto { Id = x.Id, Name = x.Name })
+                .FirstOrDefaultAsync(cancellationToken),
+            RentedCompanyId = await _db.Accounts.AsNoTracking().Where(a => a.Id == e.RentedCompanyId)
+                .Select(a => new NamedRefDto { Id = a.Id, Name = a.Name })
                 .FirstOrDefaultAsync(cancellationToken),
             StartCityId = await CityAsync(e.StartCityId, cancellationToken),
             LoadCityId = await CityAsync(e.LoadCityId, cancellationToken),

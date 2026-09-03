@@ -606,6 +606,9 @@ public sealed class ExpeditionController : ApiControllerBase
         [JsonPropertyName("start_city_id")] public Guid? StartCityId { get; set; }
         [JsonPropertyName("load_city_id")] public Guid? LoadCityId { get; set; }
         [JsonPropertyName("end_city_id")] public Guid? EndCityId { get; set; }
+        [JsonPropertyName("tractor_id")] public long? TractorId { get; set; }
+        [JsonPropertyName("driver_id")] public long? DriverId { get; set; }
+        [JsonPropertyName("rented_company_id")] public long? RentedCompanyId { get; set; }
 
         public ExpeditionWriteModel ToModel(long? currentUserId) => new()
         {
@@ -624,6 +627,9 @@ public sealed class ExpeditionController : ApiControllerBase
             StartCityId = StartCityId,
             LoadCityId = LoadCityId,
             EndCityId = EndCityId,
+            TractorId = TractorId,
+            DriverId = DriverId,
+            RentedCompanyId = RentedCompanyId,
             CurrentUserId = currentUserId,
         };
     }

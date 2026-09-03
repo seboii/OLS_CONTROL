@@ -1739,6 +1739,9 @@ public sealed class SiberSyncService : ISiberSyncService
         public DateTime? Araccikistarih { get; set; }
         public DateTime? Cikistarih { get; set; }
         public DateTime? Donustarih { get; set; }
+        public string? Cekiciid { get; set; }
+        public string? Surucuid { get; set; }
+        public string? Kiralananfirmaid { get; set; }
         public string? Baslangicsehirid { get; set; }
         public string? Yuklemesehirid { get; set; }
         public string? Bitissehirid { get; set; }
@@ -1787,6 +1790,9 @@ public sealed class SiberSyncService : ISiberSyncService
                        CAST(p.departmanid AS VARCHAR(64)) AS Departmanid, p.kayitgiristarih AS Kayitgiristarih,
                        CAST(p.seferturid AS VARCHAR(64)) AS Seferturid, p.araccikistarih AS Araccikistarih,
                        s.cikistarih AS Cikistarih, s.donustarih AS Donustarih,
+                       CAST(p.cekiciid AS VARCHAR(64)) AS Cekiciid,
+                       CAST(p.surucuid AS VARCHAR(64)) AS Surucuid,
+                       CAST(p.kiralananfirmaid AS VARCHAR(64)) AS Kiralananfirmaid,
                        CAST(p.baslangicsehirid AS VARCHAR(64)) AS Baslangicsehirid,
                        CAST(p.yuklemesehirid AS VARCHAR(64)) AS Yuklemesehirid,
                        CAST(p.bitissehirid AS VARCHAR(64)) AS Bitissehirid,
@@ -1833,6 +1839,19 @@ public sealed class SiberSyncService : ISiberSyncService
         // Siber'in sehirid'si yerel cities.id ile aynı olmak zorunda değil
         // (bkz. ISiberCityResolver) ve içe aktarılan yeni şehirlerde hiç aynı
         // olmayacak. Eskiden ham GUID yazılıyordu.
+        var accountIdBySiberId = BySiberId(
+            await _db.Accounts.AsNoTracking().Select(a => new { a.Id, a.SiberId }).ToListAsync(cancellationToken),
+            a => a.SiberId, a => a.Id);
+
+        var driverIdBySiberId = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach (var person in await _db.Personnel.AsNoTracking()
+                     .Where(x => x.SiberId != null)
+                     .Select(x => new { x.Id, x.SiberId })
+                     .ToListAsync(cancellationToken))
+        {
+            driverIdBySiberId.TryAdd(person.SiberId!, person.Id);
+        }
+
         var cityIdBySiberId = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
         foreach (var city in await _db.Cities.AsNoTracking()
                      .Where(x => x.SiberId != null)
@@ -1876,6 +1895,13 @@ public sealed class SiberSyncService : ISiberSyncService
                 expedition.ReturnDate = row.Donustarih is { } dn ? DateOnly.FromDateTime(dn) : expedition.ReturnDate;
                 // Eşleşme yoksa mevcut değere DOKUNULMAZ: tanınmayan bir kimlikle
                 // ezmek alanı ekranda boşaltırdı.
+                // Çekici, sürücü ve kiralanan firma: eşleşme yoksa mevcut değer korunur.
+                if (row.Cekiciid is { } ck && carBySiberId.TryGetValue(ck, out var ckId))
+                    expedition.TractorId = (int)ckId;
+                if (row.Surucuid is { } sr && driverIdBySiberId.TryGetValue(sr, out var srId))
+                    expedition.DriverId = srId;
+                if (row.Kiralananfirmaid is { } kf && accountIdBySiberId.TryGetValue(kf, out var kfId))
+                    expedition.RentedCompanyId = (int)kfId;
                 if (row.Baslangicsehirid is { } bs && cityIdBySiberId.TryGetValue(bs, out var bsId))
                     expedition.StartCityId = bsId;
                 if (row.Yuklemesehirid is { } ys && cityIdBySiberId.TryGetValue(ys, out var ysId))

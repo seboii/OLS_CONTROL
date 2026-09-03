@@ -48,6 +48,26 @@ public partial class Expedition
 
     public Guid? EndCityId { get; set; }
 
+    /// <summary>
+    /// ÇEKİCİ. Siber'de römork ve çekici AYRI plakalar
+    /// (<c>skn_pozisyon.romorkid</c> ve <c>cekiciid</c>, ikisi de
+    /// <c>skn_arac</c>'a FK'li). Özmal seferlerin %92'sinde çekici dolu
+    /// (240/260); kiralık seferlerde araç karşı firmanın olduğu için boş.
+    /// </summary>
+    public int? TractorId { get; set; }
+
+    /// <summary>
+    /// SÜRÜCÜ (<c>skn_pozisyon.surucuid</c> → <c>sbr_personel</c>). Özmal
+    /// seferlerin %92'sinde dolu (239/260), kiralıkta hiç kullanılmıyor.
+    /// </summary>
+    public long? DriverId { get; set; }
+
+    /// <summary>
+    /// KİRALANAN FİRMA (<c>skn_pozisyon.kiralananfirmaid</c> → <c>sbr_firma</c>).
+    /// Aracın kiralandığı nakliyeci; kiralık seferlerin %20'sinde dolu.
+    /// </summary>
+    public int? RentedCompanyId { get; set; }
+
     public DateTime? CreatedAt { get; set; }
 
     public DateTime? UpdatedAt { get; set; }

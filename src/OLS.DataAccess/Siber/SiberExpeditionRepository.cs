@@ -155,6 +155,17 @@ public sealed class SiberPozisyon
     /// hafta/ay/yıl alanları COALESCE(çıkış, araç çıkış, yükleme, kayıt) ile
     /// türetiliyor. Boş bırakıldığında sefer "kayıt tarihi" haftasına düşüyordu.
     /// </summary>
+    /// <summary>
+    /// ÇEKİCİ / SÜRÜCÜ / KİRALANAN FİRMA. Siber'de römork ile çekici AYRI
+    /// plakalar; form yalnızca römorku topluyordu. Doluluk (canlı, 4.400
+    /// pozisyon): özmal seferlerin %92'sinde çekici (240/260) ve sürücü
+    /// (239/260) dolu; kiralık seferlerin %20'sinde kiralanan firma (831/4.140).
+    /// Üçü de FK'li — <c>skn_arac</c>, <c>sbr_personel</c>, <c>sbr_firma</c>.
+    /// </summary>
+    public string? CekiciId { get; init; }
+    public string? SurucuId { get; init; }
+    public string? KiralananFirmaId { get; init; }
+
     public string? BaslangicSehirId { get; init; }
     public string? YuklemeSehirId { get; init; }
     public string? BitisSehirId { get; init; }
@@ -328,13 +339,15 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
                  hafta, departmanid, kayitgiristarih, seferturid, kayitgiren,
                  cektirmefirmaid, planlananbitistarih,
                  baslangicsehirid, yuklemesehirid, bitissehirid,
-                 cikistarih, donustarih, yuklemetarih, araccikistarih)
+                 cikistarih, donustarih, yuklemetarih, araccikistarih,
+                 cekiciid, surucuid, kiralananfirmaid)
             VALUES
                 (@PozisyonId, @SeferId, @IsTuru, @SirketId, @SubeId, @Sirano, @DurumId, @RomorkId,
                  @Hafta, @DepartmanId, @KayitGirisTarih, @SeferTurId, @KayitGiren,
                  NULL, NULL,
                  @BaslangicSehirId, @YuklemeSehirId, @BitisSehirId,
-                 @CikisTarih, @DonusTarih, @YuklemeTarih, @AracCikisTarih)
+                 @CikisTarih, @DonusTarih, @YuklemeTarih, @AracCikisTarih,
+                 @CekiciId, @SurucuId, @KiralananFirmaId)
             """;
 
         await connection.ExecuteAsync(new CommandDefinition(sql, new
@@ -346,6 +359,7 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
             pozisyon.DepartmanId, pozisyon.KayitGirisTarih, pozisyon.SeferTurId, pozisyon.KayitGiren,
             pozisyon.BaslangicSehirId, pozisyon.YuklemeSehirId, pozisyon.BitisSehirId,
             pozisyon.CikisTarih, pozisyon.DonusTarih, pozisyon.YuklemeTarih, pozisyon.AracCikisTarih,
+            pozisyon.CekiciId, pozisyon.SurucuId, pozisyon.KiralananFirmaId,
         }, cancellationToken: cancellationToken));
     }
 
@@ -412,7 +426,10 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
                 cikistarih       = @CikisTarih,
                 donustarih       = @DonusTarih,
                 yuklemetarih     = @YuklemeTarih,
-                araccikistarih   = @AracCikisTarih
+                araccikistarih   = @AracCikisTarih,
+                cekiciid         = @CekiciId,
+                surucuid         = @SurucuId,
+                kiralananfirmaid = @KiralananFirmaId
             WHERE pozisyonid = @PozisyonId;
             """,
             new
@@ -422,6 +439,7 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
                 pozisyon.BaslangicSehirId, pozisyon.YuklemeSehirId, pozisyon.BitisSehirId,
                 pozisyon.CikisTarih, pozisyon.DonusTarih, pozisyon.YuklemeTarih,
                 pozisyon.AracCikisTarih,
+                pozisyon.CekiciId, pozisyon.SurucuId, pozisyon.KiralananFirmaId,
             },
             cancellationToken: cancellationToken));
     }

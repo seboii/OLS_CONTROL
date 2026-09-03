@@ -309,6 +309,7 @@ public sealed class SiberImportService : ISiberImportService
         if (_cityWarnings is { } cityNote)
             errors.Add($"City not: {cityNote}");
         await RunAsync("District", () => ImportDistrictsAsync(connection, cancellationToken));
+        await RunAsync("Personnel", () => ImportPersonnelAsync(connection, cancellationToken));
         await RunAsync("Currency", () => ImportCurrenciesAsync(connection, cancellationToken));
         await RunAsync("User", () => ImportUsersAsync(connection, cancellationToken));
 
@@ -892,6 +893,64 @@ public sealed class SiberImportService : ISiberImportService
 
     /// <summary>Son şehir içe aktarımında bulunan öksüz satır uyarısı.</summary>
     private string? _cityWarnings;
+
+    /// <summary>
+    /// <c>sbr_personel</c> → yerel <c>personnel</c>. Sefer sürücüsü buradan
+    /// seçiliyor; canlıda 25 personel var, 22'si sürücü işaretli.
+    ///
+    /// EŞLEŞME SİBER KİMLİĞİNE GÖRE: aynı ad birden çok kez geçiyor (canlıda
+    /// "MUSTAFA AKIN" ve "BAHTİYAR EROS" ikişer kayıt), ada göre eşleştirmek
+    /// bunları tek satıra indirirdi.
+    /// </summary>
+    private async Task<(int, int)> ImportPersonnelAsync(IDbConnection connection, CancellationToken cancellationToken)
+    {
+        var rows = await connection.QueryAsync(
+            new CommandDefinition(
+                """
+                SELECT CAST(personelid AS VARCHAR(64)) AS personelid,
+                       LTRIM(RTRIM(ISNULL(ad, '') + ' ' + ISNULL(soyad, ''))) AS ad,
+                       CAST(ISNULL(surucu, 0) AS INT) AS surucu
+                FROM sbr_personel
+                """,
+                cancellationToken: cancellationToken));
+
+        var existing = (await _db.Personnel.ToListAsync(cancellationToken))
+            .Where(x => !string.IsNullOrWhiteSpace(x.SiberId))
+            .GroupBy(x => x.SiberId!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        int created = 0, updated = 0;
+        foreach (var row in rows)
+        {
+            string? name = row.ad;
+            string siberId = row.personelid;
+            if (string.IsNullOrWhiteSpace(name)) continue;
+
+            var isDriver = row.surucu == 1;
+
+            if (existing.TryGetValue(siberId, out var person))
+            {
+                person.Name = name;
+                person.IsDriver = isDriver;
+                person.UpdatedAt = DateTime.Now;
+                updated++;
+            }
+            else
+            {
+                var fresh = new Personnel
+                {
+                    SiberId = siberId, Name = name, IsDriver = isDriver,
+                    CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now,
+                };
+                _db.Personnel.Add(fresh);
+                existing[siberId] = fresh;
+                created++;
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return (created, updated);
+    }
 
     private async Task<(int, int)> ImportDistrictsAsync(IDbConnection connection, CancellationToken cancellationToken)
     {

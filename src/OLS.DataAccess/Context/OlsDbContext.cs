@@ -70,6 +70,9 @@ public partial class OlsDbContext : DbContext
 
     public virtual DbSet<ExpeditionType> ExpeditionTypes { get; set; }
 
+    /// <summary>Siber personeli; sefer sürücüsü buradan seçilir.</summary>
+    public virtual DbSet<Personnel> Personnel { get; set; }
+
     public virtual DbSet<FinanceInvoice> FinanceInvoices { get; set; }
 
     public virtual DbSet<FinanceInvoiceLine> FinanceInvoiceLines { get; set; }
@@ -701,6 +704,9 @@ public partial class OlsDbContext : DbContext
                 .HasColumnName("created_at");
             entity.Property(e => e.DepartmentId).HasColumnName("department_id");
             entity.Property(e => e.EndCityId).HasColumnName("end_city_id");
+            entity.Property(e => e.TractorId).HasColumnName("tractor_id");
+            entity.Property(e => e.DriverId).HasColumnName("driver_id");
+            entity.Property(e => e.RentedCompanyId).HasColumnName("rented_company_id");
             entity.Property(e => e.ExpeditionId)
                 .HasMaxLength(191)
                 .HasColumnName("expedition_id");
@@ -862,6 +868,28 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.Rowguid)
                 .HasMaxLength(191)
                 .HasColumnName("rowguid");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("updated_at");
+        });
+
+        modelBuilder.Entity<Personnel>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("personnel_pkey");
+
+            entity.ToTable("personnel");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.SiberId)
+                .HasMaxLength(191)
+                .HasColumnName("siber_id");
+            entity.Property(e => e.Name)
+                .HasMaxLength(191)
+                .HasColumnName("name");
+            entity.Property(e => e.IsDriver).HasColumnName("is_driver");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("created_at");
             entity.Property(e => e.UpdatedAt)
                 .HasColumnType("timestamp(0) without time zone")
                 .HasColumnName("updated_at");

@@ -49,6 +49,15 @@ public sealed class ExpeditionWriteModel
     public Guid? LoadCityId { get; init; }
     public Guid? EndCityId { get; init; }
 
+    /// <summary>Çekici plakası (cars). Siber: skn_pozisyon.cekiciid.</summary>
+    public long? TractorId { get; init; }
+
+    /// <summary>Sürücü (personnel). Siber: skn_pozisyon.surucuid.</summary>
+    public long? DriverId { get; init; }
+
+    /// <summary>Aracın kiralandığı firma (accounts). Siber: kiralananfirmaid.</summary>
+    public long? RentedCompanyId { get; init; }
+
     public long? CurrentUserId { get; init; }
 }
 
@@ -129,9 +138,17 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         var cityMap = await _cities.ResolveAsync(
             [model.StartCityId, model.LoadCityId, model.EndCityId], cancellationToken);
 
+        // ÇEKİCİ / SÜRÜCÜ / KİRALANAN FİRMA — üçü de Siber'de FK'li.
+        var tractorSiberId = await CarSiberIdAsync(model.TractorId, cancellationToken);
+        var driverSiberId = await DriverSiberIdAsync(model.DriverId, cancellationToken);
+        var rentedCompanySiberId = await AccountSiberIdAsync(model.RentedCompanyId, cancellationToken);
+
         var referenceFailure = await _references.ValidateAsync(
             [
                 new("Araç", SiberReferenceTable.Arac, car.SiberId),
+                new("Çekici", SiberReferenceTable.Arac, tractorSiberId),
+                new("Sürücü", SiberReferenceTable.Personel, driverSiberId),
+                new("Kiralanan firma", SiberReferenceTable.Firma, rentedCompanySiberId),
                 new("Departman", SiberReferenceTable.Departman, department.SiberId),
                 new("Başlangıç şehri", SiberReferenceTable.Sehir, SiberCity(cityMap, model.StartCityId)),
                 new("Yükleme şehri", SiberReferenceTable.Sehir, SiberCity(cityMap, model.LoadCityId)),
@@ -246,6 +263,9 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
             DonusTarih = ToDateTime(model.ReturnDate),
             YuklemeTarih = ToDateTime(model.LoadingDate),
             AracCikisTarih = ToDateTime(model.CarExitDate),
+            CekiciId = tractorSiberId,
+            SurucuId = driverSiberId,
+            KiralananFirmaId = rentedCompanySiberId,
         }, cancellationToken);
 
         // Sefer numarasını Siber üretiyor; geri okuyup yerel kayda yazıyoruz.
@@ -275,6 +295,9 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
             StartCityId = model.StartCityId,
             LoadCityId = model.LoadCityId,
             EndCityId = model.EndCityId,
+            TractorId = (int?)model.TractorId,
+            DriverId = model.DriverId,
+            RentedCompanyId = (int?)model.RentedCompanyId,
             CreatedAt = now,
             UpdatedAt = now,
         };
@@ -331,6 +354,9 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         expedition.StartCityId = model.StartCityId;
         expedition.LoadCityId = model.LoadCityId;
         expedition.EndCityId = model.EndCityId;
+        expedition.TractorId = (int?)model.TractorId;
+        expedition.DriverId = model.DriverId;
+        expedition.RentedCompanyId = (int?)model.RentedCompanyId;
         expedition.UpdatedAt = _clock.Now;
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -355,11 +381,29 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
                 DonusTarih = ToDateTime(model.ReturnDate),
                 YuklemeTarih = ToDateTime(model.LoadingDate),
                 AracCikisTarih = ToDateTime(model.CarExitDate),
+                CekiciId = await CarSiberIdAsync(model.TractorId, cancellationToken),
+                SurucuId = await DriverSiberIdAsync(model.DriverId, cancellationToken),
+                KiralananFirmaId = await AccountSiberIdAsync(model.RentedCompanyId, cancellationToken),
             }, cancellationToken);
         }
 
         return ExpeditionWriteResult.Ok(expedition.Id);
     }
+
+    private async Task<string?> CarSiberIdAsync(long? carId, CancellationToken cancellationToken) =>
+        carId is null ? null : await _db.Cars.AsNoTracking()
+            .Where(c => c.Id == carId).Select(c => c.SiberId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    private async Task<string?> DriverSiberIdAsync(long? driverId, CancellationToken cancellationToken) =>
+        driverId is null ? null : await _db.Personnel.AsNoTracking()
+            .Where(p => p.Id == driverId).Select(p => p.SiberId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+    private async Task<string?> AccountSiberIdAsync(long? accountId, CancellationToken cancellationToken) =>
+        accountId is null ? null : await _db.Accounts.AsNoTracking()
+            .Where(a => a.Id == accountId).Select(a => a.SiberId)
+            .FirstOrDefaultAsync(cancellationToken);
 
     /// <summary>Yerel şehir kimliğinin Siber karşılığı; seçilmemişse null.</summary>
     private static string? SiberCity(IReadOnlyDictionary<string, string> map, Guid? cityId) =>

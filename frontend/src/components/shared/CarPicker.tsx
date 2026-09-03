@@ -31,12 +31,18 @@ function displayPlate(c: CarOption): string {
  * satırda gösterilir: canlıda 21 plaka birden fazla araç kaydında tekrarlıyor,
  * aynı plakadan iki sonuç çıktığında kullanıcının doğru olanı ayırt etmesi gerekir.
  */
-export function CarPicker({ label, value, onChange, required, error }: {
+export function CarPicker({ label, value, onChange, required, error, carTypeId }: {
   label: string;
   value: CarOption | null;
   onChange: (v: CarOption | null) => void;
   required?: boolean;
   error?: string;
+  /**
+   * Verilirse arama yalnızca bu araç tipinde yapılır (car_types.id). Sefer
+   * formunda çekici alanı bunu kullanıyor: 4.249 aracın 3.891'i römork,
+   * yalnızca 111'i çekici — süzmeden çekici bulmak neredeyse imkânsızdı.
+   */
+  carTypeId?: number;
 }) {
   const [query, setQuery] = useState(value ? displayPlate(value) : "");
   const [open, setOpen] = useState(false);
@@ -59,6 +65,7 @@ export function CarPicker({ label, value, onChange, required, error }: {
     api
       .get<DataMessage<Paginated<CarOption>>>("/api/v1/car", {
         search: debouncedQuery || undefined,
+        car_type_id: carTypeId,
         per_page: PAGE_SIZE,
         page: 1,
       })
@@ -73,7 +80,7 @@ export function CarPicker({ label, value, onChange, required, error }: {
         setHasMore(false);
       })
       .finally(() => setLoading(false));
-  }, [open, debouncedQuery]);
+  }, [open, debouncedQuery, carTypeId]);
 
   function loadMore() {
     if (loading || loadingMore || !hasMore) return;
@@ -82,6 +89,7 @@ export function CarPicker({ label, value, onChange, required, error }: {
     api
       .get<DataMessage<Paginated<CarOption>>>("/api/v1/car", {
         search: debouncedQuery || undefined,
+        car_type_id: carTypeId,
         per_page: PAGE_SIZE,
         page: nextPage,
       })
