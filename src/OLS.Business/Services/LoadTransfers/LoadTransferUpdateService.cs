@@ -368,6 +368,7 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             BosaltmaUlke = refs.TargetCountry?.Name,
             YuklemeKita = refs.DepartureCountry?.Continent,
             BosaltmaKita = refs.TargetCountry?.Continent,
+            YukTurKod = refs.LoadTransferTypeCode,
             CalismaSekli = transfer.WayOfWorking,
             TeslimSekil = refs.DeliveryMethodEdikod,
             OnTasimaTarafimizdanYapilir = transfer.FrontTransportationByUs,
@@ -504,6 +505,7 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         string? SenderSiberId, string? ReceiverSiberId, string? PaymentTypeSiberId,
         string? InstructionCode, string? RomorkTypeCode, string? DepartmentSiberId,
         string? DeliveryMethodEdikod, SiberCountry? DepartureCountry, SiberCountry? TargetCountry,
+        string? LoadTransferTypeCode,
         IReadOnlyDictionary<int, string?> CaseTypeCodes,
         IReadOnlyDictionary<int, string?> ProductTypeCodes,
         IReadOnlyDictionary<int, string?> FinancialItemCodes,
@@ -543,6 +545,9 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
                 .Select(d => d.Edikod).FirstOrDefaultAsync(cancellationToken),
             await CountryAsync(transfer.DepartureCountryId, cancellationToken),
             await CountryAsync(transfer.TargetCountryId, cancellationToken),
+            await _db.LoadTransferTypes.AsNoTracking()
+                .Where(t => t.Id == transfer.LoadTransferTypeId)
+                .Select(t => t.Code).FirstOrDefaultAsync(cancellationToken),
             await _db.CaseTypes.AsNoTracking()
                 .ToDictionaryAsync(c => (int)c.Id, c => c.SiberId, cancellationToken),
             await _db.ProductTypes.AsNoTracking()

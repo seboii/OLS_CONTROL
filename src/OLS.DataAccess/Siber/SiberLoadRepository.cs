@@ -607,6 +607,12 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                 _bosaltmaulke      = ISNULL(@BosaltmaUlke, _bosaltmaulke),
                 _yuklemekita       = ISNULL(@YuklemeKita, _yuklemekita),
                 _bosaltmakita      = ISNULL(@BosaltmaKita, _bosaltmakita),
+                -- YÜK TÜRÜ yalnızca INSERT'te yazılıyordu: mevcut bir yükün
+                -- türü ekranda değiştirilebiliyor, yerelde değişiyor ama
+                -- Siber'de eski değeriyle kalıyordu. Ülke/kıta ile aynı ISNULL
+                -- koruması: yerelde seçim boşsa (8.012 yükün 7'si) Siber'deki
+                -- değer silinmez.
+                yukturkod          = ISNULL(@YukTurKod, yukturkod),
                 calismasekli       = @CalismaSekli,
                 aracyuksekligi     = @CarHeight,
                 teslimsekil                  = @TeslimSekil,
@@ -625,7 +631,7 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             yuk.ToplamAgirlik, yuk.ToplamHacim, yuk.ToplamLademetre, yuk.UcretAgirlik,
             yuk.ToplamKap, yuk.MusteriTemsilcisiAd, yuk.DepartmanId,
             yuk.TalimatGelisTarihi, yuk.YuklemeUlke, yuk.BosaltmaUlke,
-            yuk.YuklemeKita, yuk.BosaltmaKita, yuk.CalismaSekli,
+            yuk.YuklemeKita, yuk.BosaltmaKita, yuk.YukTurKod, yuk.CalismaSekli,
             CarHeight = DefaultCarHeight,
             yuk.TeslimSekil, yuk.OnTasimaTarafimizdanYapilir, yuk.SonTasimaTarafimizdanYapilir,
             yuk.IstenenVarisTarihi, yuk.HazirOlmaTarih, yuk.MusteridenAlinisTarih,
