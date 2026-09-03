@@ -55,6 +55,9 @@ public sealed record AccountSaveResult(AccountDetailDto? Account, string? Duplic
 /// <summary>Controller'dan gelen yazma verisi (form-data).</summary>
 public sealed class AccountWriteModel
 {
+    /// <summary>Kaydın açılacağı şirket; yalnızca süper adminde seçilebilir.</summary>
+    public string? SiberCompanyId { get; init; }
+
     public long? Id { get; init; }
     public string? Name { get; init; }
     public string? TaxNumber { get; init; }
@@ -111,11 +114,8 @@ public sealed class AccountService : IAccountService
     /// bölünmüş (6.577 OLS / 865 AVRORA); sabit yazmak Avrora carisini
     /// OLS'e düşürüyordu.
     /// </summary>
-    private async Task<string> CompanyIdAsync(CancellationToken cancellationToken)
-    {
-        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
-        return visibility.OnlyCompanyId ?? SiberAccountRepository.SirketId;
-    }
+    private async Task<string> CompanyIdAsync(string? requested, CancellationToken cancellationToken) =>
+        await _companyScope.ResolveWriteCompanyAsync(_currentUser.Id, requested, cancellationToken);
 
     /// <summary>
     /// olsold'da bu kontrol <c>UserPermission::where(...)->first()->read</c> şeklindeydi
@@ -552,7 +552,7 @@ public sealed class AccountService : IAccountService
         var firma = new SiberFirma
         {
             FirmaId = account.SiberId,
-            SirketId = await CompanyIdAsync(cancellationToken),
+            SirketId = await CompanyIdAsync(model.SiberCompanyId, cancellationToken),
             Ad = account.Name,
             // olsold adres alanını 50 karaktere kırpıyordu (Siber sütun sınırı)
             Adres1 = account.Address?[..Math.Min(account.Address.Length, 50)],

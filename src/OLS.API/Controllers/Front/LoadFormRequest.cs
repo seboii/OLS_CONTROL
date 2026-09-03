@@ -196,8 +196,12 @@ public sealed class DirectLoadRequest
     [JsonPropertyName("packages")] public List<DirectLoadPackageRequest> Packages { get; set; } = [];
     [JsonPropertyName("financial_items")] public List<DirectLoadFinancialItemRequest> FinancialItems { get; set; } = [];
 
+    /// <summary>Kaydın açılacağı şirket; yalnızca süper adminde dikkate alınır.</summary>
+    [JsonPropertyName("siber_company_id")] public string? SiberCompanyId { get; set; }
+
     public DirectLoadModel ToModel() => new()
     {
+        SiberCompanyId = SiberCompanyId,
         WorkTypeId = WorkTypeId,
         LoadingTypeId = LoadingTypeId,
         LoadTransferTypeId = LoadTransferTypeId,

@@ -12,6 +12,7 @@ import { Drawer } from "@/components/ui/Overlay";
 import { Btn, FormField, TextInput, SelectInput, Tabs } from "@/components/ui/primitives";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
+import { CompanyPicker } from "@/components/shared/CompanyPicker";
 
 interface NamedRef {
   id: string;
@@ -199,6 +200,7 @@ export function CustomersPage() {
   const [errors, setErrors] = useState<Record<string, string[]>>({});
 
   const [form, setForm] = useState({
+    siber_company_id: "",
     name: "",
     tax_number: "",
     tax_office_id: "",
@@ -266,6 +268,7 @@ export function CustomersPage() {
 
   function resetForm() {
     setForm({
+      siber_company_id: "",
       name: "",
       tax_number: "",
       tax_office_id: "",
@@ -306,6 +309,7 @@ export function CustomersPage() {
       const d = res.data;
       setDetail(d);
       setForm({
+        siber_company_id: "",
         name: d.name ?? "",
         tax_number: d.tax_number ?? "",
         tax_office_id: d.tax_office?.id ? String(d.tax_office.id) : "",
@@ -384,6 +388,7 @@ export function CustomersPage() {
     try {
       const fd = new FormData();
       if (editingId) fd.append("id", String(editingId));
+      if (form.siber_company_id) fd.append("siber_company_id", form.siber_company_id);
       fd.append("name", form.name);
       fd.append("tax_number", form.tax_number);
       fd.append("tax_office", form.tax_office_id);
@@ -593,6 +598,12 @@ export function CustomersPage() {
                   </div>
                 </FormField>
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <CompanyPicker
+                      value={form.siber_company_id}
+                      onChange={(v) => setForm((f) => ({ ...f, siber_company_id: v }))}
+                    />
+                  </div>
                   <div className="col-span-2">
                     <FormField label="Hesap Adı" required error={errors.name?.[0]}>
                       <TextInput value={form.name} onChange={(v) => setForm((f) => ({ ...f, name: v }))} placeholder="Şirket adı" error={!!errors.name} />

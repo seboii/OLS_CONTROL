@@ -77,6 +77,8 @@ public sealed class CarController : ApiControllerBase
         [JsonPropertyName("id")] public long? Id { get; set; }
         [JsonPropertyName("plate_number")] public string? PlateNumber { get; set; }
         [JsonPropertyName("car_type")] public int? CarType { get; set; }
+        /// <summary>Kaydın açılacağı şirket; yalnızca süper adminde dikkate alınır.</summary>
+        [JsonPropertyName("siber_company_id")] public string? SiberCompanyId { get; set; }
         [JsonPropertyName("romork_type")] public int? RomorkType { get; set; }
         [JsonPropertyName("vehicle_owner")] public int? VehicleOwner { get; set; }
         [JsonPropertyName("vehicle_status")] public int? VehicleStatus { get; set; }
@@ -197,6 +199,7 @@ public sealed class CarController : ApiControllerBase
 
         return new CarWriteModel
         {
+            SiberCompanyId = request.SiberCompanyId,
             Id = request.Id,
             PlateNumber = request.PlateNumber,
             CarType = request.CarType,

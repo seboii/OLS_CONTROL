@@ -16,6 +16,7 @@ import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 import { FinancialItemManagerModal } from "@/components/shared/FinancialItemManagerModal";
 import { FinancialItemPicker, type FinancialItemOption } from "@/components/shared/FinancialItemPicker";
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
+import { CompanyPicker } from "@/components/shared/CompanyPicker";
 import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
@@ -513,6 +514,7 @@ export function LoadsPage() {
   const [directOpen, setDirectOpen] = useState(false);
   const [directSaving, setDirectSaving] = useState(false);
   const [directForm, setDirectForm] = useState({
+    siber_company_id: "",
     work_type_id: "", loading_type_id: "", load_transfer_type_id: "",
     instruction_id: "", romork_type_id: "", payment_type_id: "", department_id: "",
     delivery_method_id: "", payer_company: "",
@@ -645,6 +647,7 @@ export function LoadsPage() {
    */
   function resetDirectForm() {
     setDirectForm({
+      siber_company_id: "",
       work_type_id: "", loading_type_id: "", load_transfer_type_id: "",
       instruction_id: "", romork_type_id: "", payment_type_id: "", department_id: "",
       delivery_method_id: "", payer_company: "",
@@ -674,6 +677,7 @@ export function LoadsPage() {
     try {
       const res = await api.post<{ data: { yuk_no: string; id: number | null }; message: string }>(
         "/api/v1/load_transfer/direct", {
+          siber_company_id: directForm.siber_company_id || null,
           work_type_id: int(directForm.work_type_id),
           loading_type_id: int(directForm.loading_type_id),
           load_transfer_type_id: int(directForm.load_transfer_type_id),
@@ -1534,6 +1538,10 @@ export function LoadsPage() {
           <section>
             <SectionTitle>Genel Bilgiler</SectionTitle>
             <div className="grid grid-cols-3 gap-x-6 gap-y-6">
+              <CompanyPicker
+                value={directForm.siber_company_id}
+                onChange={(v) => setDirectForm((f) => ({ ...f, siber_company_id: v }))}
+              />
               <FormField label="İş Türü" required>
                 <SelectInput value={directForm.work_type_id} onChange={(v) => setDirectForm((f) => ({ ...f, work_type_id: v }))} options={opts(workTypes)} />
               </FormField>

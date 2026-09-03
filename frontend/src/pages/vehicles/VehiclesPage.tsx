@@ -12,6 +12,7 @@ import { Drawer } from "@/components/ui/Overlay";
 import { Badge, Btn, FormField, TextInput, SelectInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerModal";
+import { CompanyPicker } from "@/components/shared/CompanyPicker";
 
 interface NamedRef {
   id: number;
@@ -133,6 +134,7 @@ export function VehiclesPage() {
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [form, setForm] = useState({
+    siber_company_id: "",
     plate_number: "",
     car_type: "",
     romork_type: "",
@@ -182,7 +184,7 @@ export function VehiclesPage() {
   }, [debouncedSearch, page, fCarType, fRomorkType, fVehicleOwner, fVehicleStatus, fCustomer]);
 
   function resetForm() {
-    setForm({ plate_number: "", car_type: "", romork_type: "", vehicle_owner: "", vehicle_status: "", km: "", width: "", length: "", height: "", capacity: "" });
+    setForm({ siber_company_id: "", plate_number: "", car_type: "", romork_type: "", vehicle_owner: "", vehicle_status: "", km: "", width: "", length: "", height: "", capacity: "" });
     setCustomer(null);
     setErrors({});
   }
@@ -200,6 +202,8 @@ export function VehiclesPage() {
       const res = await api.get<DataMessage<CarItem>>(`/api/v1/car/${id}`);
       const c = res.data;
       setForm({
+        // Mevcut kayıtta şirket değiştirilmiyor; seçici boş kalır.
+        siber_company_id: "",
         plate_number: c.plate_number ?? "",
         car_type: c.car_type?.id ? String(c.car_type.id) : "",
         romork_type: c.romork_type?.id ? String(c.romork_type.id) : "",
@@ -228,6 +232,7 @@ export function VehiclesPage() {
     const num = (v: string) => (v === "" ? null : Number(v));
     const body = {
       id: editingId ?? undefined,
+      siber_company_id: form.siber_company_id || null,
       plate_number: form.plate_number,
       car_type: num(form.car_type),
       romork_type: num(form.romork_type),
@@ -380,6 +385,10 @@ export function VehiclesPage() {
       >
         <div className="p-6 grid grid-cols-2 gap-4">
           <div className="col-span-2">
+            <CompanyPicker
+              value={form.siber_company_id}
+              onChange={(v) => setForm((f) => ({ ...f, siber_company_id: v }))}
+            />
             <FormField label="Plaka" required error={errors.plate_number?.[0]}>
               <TextInput value={form.plate_number} onChange={(v) => setForm((f) => ({ ...f, plate_number: v }))} placeholder="34 TRK 0000" error={!!errors.plate_number} />
             </FormField>

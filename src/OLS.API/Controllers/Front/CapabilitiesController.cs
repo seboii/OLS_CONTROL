@@ -36,11 +36,19 @@ public sealed class CapabilitiesController : ApiControllerBase
         var capabilities = await _scope.ResolveCapabilitiesAsync(
             _currentUser.Id, cancellationToken);
 
+        // Seçilebilir şirketler: tek şirkete bağlı kullanıcıda tek öge döner ve
+        // arayüz seçiciyi hiç göstermez. Yalnızca iki şirketi de gören kullanıcı
+        // (süper admin) kaydın hangi şirkete açılacağını seçebilir.
+        var companies = await _scope.ListWritableCompaniesAsync(
+            _currentUser.Id, cancellationToken);
+
         return base.Ok(ApiResponse.Success(
             new
             {
                 uses_offers = capabilities.UsesOffers,
                 can_create_direct_load = capabilities.CanCreateDirectLoad,
+                can_choose_company = companies.Count > 1,
+                companies = companies.Select(c => new { id = c.Id, name = c.Name }),
             },
             "Kayıtlar"));
     }

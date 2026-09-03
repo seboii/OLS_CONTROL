@@ -60,6 +60,9 @@ public sealed class CarWriteModel
 
     /// <summary>Siber'e "kayıt giren" olarak yazılır (Auth::user()->siber_code karşılığı).</summary>
     public string? CurrentUserSiberCode { get; init; }
+
+    /// <summary>Kaydın açılacağı şirket; yalnızca süper adminde seçilebilir.</summary>
+    public string? SiberCompanyId { get; init; }
 }
 
 /// <summary>
@@ -114,11 +117,8 @@ public sealed class CarService : ICarService
     /// Kaydı AÇAN kullanıcının şirketi; süper adminde ve kapsamsız
     /// kullanıcıda OLS. Aynı kural yük ve seferde de geçerli.
     /// </summary>
-    private async Task<string> CompanyIdAsync(CancellationToken cancellationToken)
-    {
-        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
-        return visibility.OnlyCompanyId ?? SiberLoadRepository.DefaultSirketId;
-    }
+    private async Task<string> CompanyIdAsync(string? requested, CancellationToken cancellationToken) =>
+        await _companyScope.ResolveWriteCompanyAsync(_currentUser.Id, requested, cancellationToken);
 
     public async Task<object> ListAsync(
         CarListQuery query, CancellationToken cancellationToken = default)
@@ -185,7 +185,7 @@ public sealed class CarService : ICarService
         _db.Cars.Add(car);
         await _db.SaveChangesAsync(cancellationToken);
 
-        await SyncToSiberAsync(car, model.CurrentUserSiberCode, isNew: true, cancellationToken);
+        await SyncToSiberAsync(car, model.CurrentUserSiberCode, model.SiberCompanyId, isNew: true, cancellationToken);
 
         return CarSaveResult.Ok((await SingleAsync(car.Id, cancellationToken))!);
     }
@@ -219,7 +219,7 @@ public sealed class CarService : ICarService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        await SyncToSiberAsync(car, model.CurrentUserSiberCode, isNew: false, cancellationToken);
+        await SyncToSiberAsync(car, model.CurrentUserSiberCode, model.SiberCompanyId, isNew: false, cancellationToken);
 
         return CarSaveResult.Ok((await SingleAsync(car.Id, cancellationToken))!);
     }
@@ -238,7 +238,8 @@ public sealed class CarService : ICarService
     }
 
     private async Task SyncToSiberAsync(
-        Car car, string? userSiberCode, bool isNew, CancellationToken cancellationToken)
+        Car car, string? userSiberCode, string? requestedCompanyId, bool isNew,
+        CancellationToken cancellationToken)
     {
         if (!_siber.IsConfigured || car.SiberId is null)
             return;
@@ -255,7 +256,7 @@ public sealed class CarService : ICarService
 
         var arac = new SiberArac
         {
-            SirketId = await CompanyIdAsync(cancellationToken),
+            SirketId = await CompanyIdAsync(requestedCompanyId, cancellationToken),
             AracId = car.SiberId,
             PlakaNo = car.PlateNumber,
             AracTip = carTypeCode,

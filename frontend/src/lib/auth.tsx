@@ -50,9 +50,21 @@ export type PermissionAction = "read" | "create" | "update" | "delete";
  * sayfasını (load_management) paylaşıyor — Teklifler'i yetkiyle gizlemek
  * Yükler'i de gizlerdi.
  */
+export interface CompanyOption {
+  id: string;
+  name: string;
+}
+
 export interface Capabilities {
   uses_offers: boolean;
   can_create_direct_load: boolean;
+  /**
+   * Kullanıcı kaydın hangi şirkete açılacağını seçebilir mi. Yalnızca iki
+   * şirketi de gören kullanıcıda (süper admin) true; tek şirkete bağlı
+   * kullanıcıda seçici hiç gösterilmez, kayıt daima kendi şirketine gider.
+   */
+  can_choose_company: boolean;
+  companies: CompanyOption[];
 }
 
 interface AuthContextValue {
@@ -74,6 +86,10 @@ interface AuthContextValue {
 const DEFAULT_CAPABILITIES: Capabilities = {
   uses_offers: true,
   can_create_direct_load: false,
+  // Seçici, yetenekler gelene kadar GİZLİ kalır: yanlışlıkla görünüp
+  // kapanmasındansa bir kare geç gelmesi iyidir.
+  can_choose_company: false,
+  companies: [],
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);

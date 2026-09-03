@@ -58,6 +58,13 @@ public sealed class ExpeditionWriteModel
     /// <summary>Aracın kiralandığı firma (accounts). Siber: kiralananfirmaid.</summary>
     public long? RentedCompanyId { get; init; }
 
+    /// <summary>
+    /// Kaydın açılacağı şirket. YALNIZCA iki şirketi de gören kullanıcı için
+    /// anlamlı; kapsamı olan kullanıcıda yok sayılır (bkz.
+    /// <see cref="ICompanyScope.ResolveWriteCompanyAsync"/>).
+    /// </summary>
+    public string? SiberCompanyId { get; init; }
+
     public long? CurrentUserId { get; init; }
 }
 
@@ -178,8 +185,8 @@ public sealed class ExpeditionWriteService : IExpeditionWriteService
         // depoda sabitti (hep OLS): Avrora kullanıcısının açtığı sefer OLS'e
         // düşüyor ve görünürlük kuralı gereği KENDİ listesinde hiç
         // görünmüyordu. Yük akışı bunu zaten böyle yapıyor.
-        var visibility = await _companyScope.ResolveAsync(model.CurrentUserId, cancellationToken);
-        var companyId = visibility.OnlyCompanyId ?? SiberLoadRepository.DefaultSirketId;
+        var companyId = await _companyScope.ResolveWriteCompanyAsync(
+            model.CurrentUserId, model.SiberCompanyId, cancellationToken);
 
         var now = _clock.Now;
         var fullYear = now.ToString("yyyy");

@@ -37,7 +37,33 @@ public interface ICompanyScope
     /// </summary>
     Task<CompanyCapabilities> ResolveCapabilitiesAsync(
         long? userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// YENİ KAYIT HANGİ ŞİRKETE YAZILACAK.
+    ///
+    /// Tek kaynak: yük, sefer, araç ve cari açma akışlarının hepsi buradan
+    /// geçer. Kural sırayla:
+    ///
+    ///   1. Kullanıcı tek şirkete bağlıysa (Avrora ekibi) DAİMA o şirket —
+    ///      istenen değer yok sayılır. Aksi hâlde kullanıcı, kendi
+    ///      listesinde göremeyeceği bir kayıt açabilirdi.
+    ///   2. İki şirketi de gören kullanıcı (süper admin) <paramref name="requested"/>
+    ///      ile seçebilir; tanımsız/bilinmeyen değer OLS'e düşer.
+    ///   3. Diğer herkes OLS.
+    /// </summary>
+    Task<string> ResolveWriteCompanyAsync(
+        long? userId, string? requested, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Kullanıcının seçebileceği şirketler. Tek şirkete bağlı kullanıcıda tek
+    /// öge döner; arayüz bir taneyse seçici göstermez.
+    /// </summary>
+    Task<IReadOnlyList<CompanyOption>> ListWritableCompaniesAsync(
+        long? userId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Şirket seçicisinin bir seçeneği.</summary>
+public sealed record CompanyOption(string Id, string Name);
 
 /// <summary>
 /// Şirkete göre AÇIK/KAPALI iş akışları.
@@ -75,6 +101,21 @@ public sealed class CompanyScope : ICompanyScope
 {
     /// <summary>sbr_sirket: AVRORA ULUSLARARASI TASIMACILIK LIMITED SIRKETI.</summary>
     public const string AvroraCompanyId = "46258A01-8D77-4F87-AAF5-6B331DEDD8A7";
+
+    /// <summary>sbr_sirket: OLS LOJISTIK — varsayılan şirket.</summary>
+    public const string OlsCompanyId = "BA4888B1-A2B0-4142-B273-92481D932EAD";
+
+    /// <summary>
+    /// Seçilebilir şirketler. <c>sbr_sirket</c> tablosunda TAM OLARAK iki satır
+    /// var; liste oradan çekilmiyor çünkü kimlikler zaten kod genelinde sabit
+    /// (şube eşlemesi, yetenek kuralı, görünürlük filtresi hepsi bu ikisine
+    /// dayanıyor) ve Siber'e bağlanamadığında da seçicinin çalışması gerekiyor.
+    /// </summary>
+    public static readonly IReadOnlyList<CompanyOption> Companies =
+    [
+        new(OlsCompanyId, "OLS"),
+        new(AvroraCompanyId, "AVRORA"),
+    ];
 
     /// <summary>Avrora ekibinin e-posta alan adı — otomatik kapsam ataması için.</summary>
     public const string AvroraEmailDomain = "@avroralog.com";
@@ -137,5 +178,34 @@ public sealed class CompanyScope : ICompanyScope
 
         // Tam olarak birbirinin tersi: Avrora teklifsiz açar, OLS teklifle.
         return new CompanyCapabilities(UsesOffers: !isAvrora, CanCreateDirectLoad: isAvrora);
+    }
+
+    public async Task<string> ResolveWriteCompanyAsync(
+        long? userId, string? requested, CancellationToken cancellationToken = default)
+    {
+        var visibility = await ResolveAsync(userId, cancellationToken);
+
+        // Kapsamı olan kullanıcı seçemez: göremeyeceği bir kayıt açmasın.
+        if (visibility.OnlyCompanyId is { } scoped)
+            return scoped;
+
+        if (!visibility.SeesEverything)
+            return OlsCompanyId;
+
+        return Companies.Any(c => string.Equals(c.Id, requested, StringComparison.OrdinalIgnoreCase))
+            ? requested!
+            : OlsCompanyId;
+    }
+
+    public async Task<IReadOnlyList<CompanyOption>> ListWritableCompaniesAsync(
+        long? userId, CancellationToken cancellationToken = default)
+    {
+        var visibility = await ResolveAsync(userId, cancellationToken);
+
+        if (visibility.SeesEverything)
+            return Companies;
+
+        var only = visibility.OnlyCompanyId ?? OlsCompanyId;
+        return Companies.Where(c => string.Equals(c.Id, only, StringComparison.OrdinalIgnoreCase)).ToList();
     }
 }

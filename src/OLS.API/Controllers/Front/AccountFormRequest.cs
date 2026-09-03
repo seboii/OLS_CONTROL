@@ -13,6 +13,8 @@ namespace OLS.API.Controllers.Front;
 public sealed class AccountFormRequest
 {
     [FromForm(Name = "id")] public long? Id { get; set; }
+    /// <summary>Kaydın açılacağı şirket; yalnızca süper adminde dikkate alınır.</summary>
+    [FromForm(Name = "siber_company_id")] public string? SiberCompanyId { get; set; }
     [FromForm(Name = "name")] public string? Name { get; set; }
     [FromForm(Name = "tax_number")] public string? TaxNumber { get; set; }
     [FromForm(Name = "tax_office")] public string? TaxOffice { get; set; }
@@ -45,6 +47,7 @@ public sealed class AccountFormRequest
 
     public AccountWriteModel ToWriteModel(string? avatarFileName) => new()
     {
+        SiberCompanyId = SiberCompanyId,
         Id = Id,
         Name = Name,
         TaxNumber = TaxNumber,

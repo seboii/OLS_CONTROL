@@ -14,6 +14,7 @@ import { Badge, Btn, FormField, SearchInput, SelectInput, Tabs, TextareaInput, T
 import { DepartmentManagerModal } from "@/components/shared/DepartmentManagerModal";
 import { CarPicker } from "@/components/shared/CarPicker";
 import { AccountPicker } from "@/components/shared/AccountPicker";
+import { CompanyPicker } from "@/components/shared/CompanyPicker";
 import { listDrafts, saveDraft, removeDraft, newDraftId, formatDraftTime, type Draft } from "@/lib/autodraft";
 import { BusyLabel } from "@/components/ui/Busy";
 import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
@@ -45,6 +46,8 @@ type TripForm = {
   // pozisyon üzerinde ayrı alanlar.
   tractor_id: string; tractor_plate: string;
   driver_id: string; rented_company_id: string; rented_company_name: string;
+  // Yalnızca süper adminde doldurulur; diğer kullanıcıda sunucu yok sayar.
+  siber_company_id: string;
 };
 
 /**
@@ -61,6 +64,7 @@ const EMPTY_TRIP_FORM: TripForm = {
   release_date: "", entry_date: "", loading_date: "", return_date: "",
   car_exit_date: "", start_city_id: "", load_city_id: "", end_city_id: "",
   tractor_id: "", tractor_plate: "", driver_id: "", rented_company_id: "", rented_company_name: "",
+  siber_company_id: "",
 };
 
 /** Boş formu taslak diye kaydetmeyelim — en az bir alan dolu olmalı. */
@@ -477,6 +481,7 @@ export function TripsPage() {
       start_city_id: form.start_city_id || null,
       load_city_id: form.load_city_id || null,
       end_city_id: form.end_city_id || null,
+      siber_company_id: form.siber_company_id || null,
       tractor_id: form.tractor_id ? Number(form.tractor_id) : null,
       driver_id: form.driver_id ? Number(form.driver_id) : null,
       rented_company_id: form.rented_company_id ? Number(form.rented_company_id) : null,
@@ -1071,6 +1076,10 @@ export function TripsPage() {
         }
       >
         <div className="p-8 grid grid-cols-2 gap-x-6 gap-y-6">
+          <CompanyPicker
+            value={form.siber_company_id}
+            onChange={(v) => setForm((f) => ({ ...f, siber_company_id: v }))}
+          />
           <CarPicker
             label="Araç (Plaka)"
             required

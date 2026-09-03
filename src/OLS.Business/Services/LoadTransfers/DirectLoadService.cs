@@ -75,6 +75,9 @@ public sealed class DirectLoadModel
     /// teklifsiz yüklerde farklı davranmasın.
     /// </summary>
     public IReadOnlyList<DirectLoadFinancialItem> FinancialItems { get; init; } = [];
+
+    /// <summary>Kaydın açılacağı şirket; yalnızca süper adminde seçilebilir.</summary>
+    public string? SiberCompanyId { get; init; }
 }
 
 public sealed record DirectLoadFinancialItem(
@@ -245,8 +248,8 @@ public sealed class DirectLoadService : IDirectLoadService
             .Where(u => u.Id == currentUserId).Select(u => u.SiberCode)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var visibility = await _companyScope.ResolveAsync(currentUserId, cancellationToken);
-        var companyId = visibility.OnlyCompanyId ?? SiberLoadRepository.DefaultSirketId;
+        var companyId = await _companyScope.ResolveWriteCompanyAsync(
+            currentUserId, model.SiberCompanyId, cancellationToken);
 
         var now = _clock.Now;
         var year = now.ToString("yy");

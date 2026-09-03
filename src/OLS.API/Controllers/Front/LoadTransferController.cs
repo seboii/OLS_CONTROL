@@ -609,6 +609,8 @@ public sealed class ExpeditionController : ApiControllerBase
         [JsonPropertyName("tractor_id")] public long? TractorId { get; set; }
         [JsonPropertyName("driver_id")] public long? DriverId { get; set; }
         [JsonPropertyName("rented_company_id")] public long? RentedCompanyId { get; set; }
+        /// <summary>Kaydın açılacağı şirket; yalnızca süper adminde dikkate alınır.</summary>
+        [JsonPropertyName("siber_company_id")] public string? SiberCompanyId { get; set; }
 
         public ExpeditionWriteModel ToModel(long? currentUserId) => new()
         {
@@ -630,6 +632,7 @@ public sealed class ExpeditionController : ApiControllerBase
             TractorId = TractorId,
             DriverId = DriverId,
             RentedCompanyId = RentedCompanyId,
+            SiberCompanyId = SiberCompanyId,
             CurrentUserId = currentUserId,
         };
     }
