@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 using OLS.DataAccess.Siber;
@@ -91,11 +92,29 @@ public sealed class AccountService : IAccountService
     private readonly ISiberAccountRepository _siber;
     private readonly IClock _clock;
 
-    public AccountService(OlsDbContext db, ISiberAccountRepository siber, IClock clock)
+    private readonly ICompanyScope _companyScope;
+    private readonly ICurrentUser _currentUser;
+
+    public AccountService(
+        OlsDbContext db, ISiberAccountRepository siber, IClock clock,
+        ICompanyScope companyScope, ICurrentUser currentUser)
     {
         _db = db;
         _siber = siber;
         _clock = clock;
+        _companyScope = companyScope;
+        _currentUser = currentUser;
+    }
+
+    /// <summary>
+    /// Cariyi AÇAN kullanıcının şirketi. Siber'de cariler iki şirkete
+    /// bölünmüş (6.577 OLS / 865 AVRORA); sabit yazmak Avrora carisini
+    /// OLS'e düşürüyordu.
+    /// </summary>
+    private async Task<string> CompanyIdAsync(CancellationToken cancellationToken)
+    {
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+        return visibility.OnlyCompanyId ?? SiberAccountRepository.SirketId;
     }
 
     /// <summary>
@@ -533,7 +552,7 @@ public sealed class AccountService : IAccountService
         var firma = new SiberFirma
         {
             FirmaId = account.SiberId,
-            SirketId = SiberAccountRepository.SirketId,
+            SirketId = await CompanyIdAsync(cancellationToken),
             Ad = account.Name,
             // olsold adres alanını 50 karaktere kırpıyordu (Siber sütun sınırı)
             Adres1 = account.Address?[..Math.Min(account.Address.Length, 50)],

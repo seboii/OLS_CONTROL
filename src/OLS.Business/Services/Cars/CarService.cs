@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Loads;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
@@ -95,11 +96,28 @@ public sealed class CarService : ICarService
     private readonly ISiberCarRepository _siber;
     private readonly IClock _clock;
 
-    public CarService(OlsDbContext db, ISiberCarRepository siber, IClock clock)
+    private readonly ICompanyScope _companyScope;
+    private readonly ICurrentUser _currentUser;
+
+    public CarService(
+        OlsDbContext db, ISiberCarRepository siber, IClock clock,
+        ICompanyScope companyScope, ICurrentUser currentUser)
     {
         _db = db;
         _siber = siber;
         _clock = clock;
+        _companyScope = companyScope;
+        _currentUser = currentUser;
+    }
+
+    /// <summary>
+    /// Kaydı AÇAN kullanıcının şirketi; süper adminde ve kapsamsız
+    /// kullanıcıda OLS. Aynı kural yük ve seferde de geçerli.
+    /// </summary>
+    private async Task<string> CompanyIdAsync(CancellationToken cancellationToken)
+    {
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+        return visibility.OnlyCompanyId ?? SiberLoadRepository.DefaultSirketId;
     }
 
     public async Task<object> ListAsync(
@@ -237,6 +255,7 @@ public sealed class CarService : ICarService
 
         var arac = new SiberArac
         {
+            SirketId = await CompanyIdAsync(cancellationToken),
             AracId = car.SiberId,
             PlakaNo = car.PlateNumber,
             AracTip = carTypeCode,

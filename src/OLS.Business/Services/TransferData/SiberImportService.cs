@@ -310,6 +310,7 @@ public sealed class SiberImportService : ISiberImportService
             errors.Add($"City not: {cityNote}");
         await RunAsync("District", () => ImportDistrictsAsync(connection, cancellationToken));
         await RunAsync("Personnel", () => ImportPersonnelAsync(connection, cancellationToken));
+        await RunAsync("UserCompanyScope", () => ApplyUserCompanyScopeAsync(connection, cancellationToken));
         await RunAsync("Currency", () => ImportCurrenciesAsync(connection, cancellationToken));
         await RunAsync("User", () => ImportUsersAsync(connection, cancellationToken));
 
@@ -893,6 +894,91 @@ public sealed class SiberImportService : ISiberImportService
 
     /// <summary>Son şehir içe aktarımında bulunan öksüz satır uyarısı.</summary>
     private string? _cityWarnings;
+
+    /// <summary>
+    /// KULLANICININ ŞİRKET KAPSAMINI SİBER'DEKİ İŞİNDEN TÜRETİR.
+    ///
+    /// BULUNAN GERÇEK HATA: Avrora ekibinin kapsamı yalnızca e-posta alan
+    /// adından (<c>@avroralog.com</c>) ya da elle atamadan geliyordu. Oysa
+    /// Avrora'da çalışan personelin çoğunun e-postası <c>@olslog.com</c>:
+    /// canlıda son 12 ayda BEYTULLAHE 319 kaydın 319'unu, ORCUNO 82'nin
+    /// 82'sini, HALILY 73'ün 67'sini, OZGEE 14'ün 14'ünü Avrora'ya açmış —
+    /// dördünün de yerelde kapsamı YOKTU. Sonuç: açtıkları sefer ve yük OLS'e
+    /// düşüyor ve kendi listelerinde görünmüyordu.
+    ///
+    /// Siber'in kendisinde kullanıcı→şirket eşlemesi YOK: <c>sky_kullanici</c>'de
+    /// şirket sütunu yok, <c>sky_kullanici_sirketdefaults</c> boş,
+    /// <c>sky_kullanicisube</c> yalnızca 9 satır ve yanıltıcı (OZGEE orada OLS
+    /// şubesinde görünüyor ama tüm işi Avrora). Tek güvenilir sinyal kullanıcının
+    /// GERÇEKTEN açtığı kayıtlar.
+    ///
+    /// KURAL: son 12 ayda en az 5 kaydı olan ve bunların %90'ından fazlasını tek
+    /// şirkete açmış kullanıcı o şirkete atanır. Karışık çalışanlara (ASLIY
+    /// 16/597, İLKNURY 2/641) DOKUNULMAZ — onlar OLS varsayılanında kalır.
+    ///
+    /// KAPSAMI ZATEN DOLU OLAN KULLANICIYA DOKUNULMAZ: Kullanıcılar ekranından
+    /// yapılan elle atama (bkz. POST /api/v1/roles/company-scope) daima üstündür.
+    /// </summary>
+    /// <summary>AVRORA şirketi — bkz. CompanyScope.AvroraCompanyId.</summary>
+    private const string AvroraCompanyId = "46258A01-8D77-4F87-AAF5-6B331DEDD8A7";
+
+    private async Task<(int, int)> ApplyUserCompanyScopeAsync(
+        IDbConnection connection, CancellationToken cancellationToken)
+    {
+        var rows = await connection.QueryAsync(
+            new CommandDefinition(
+                """
+                SELECT k.kayitgiren AS kod,
+                       SUM(CASE WHEN CAST(k.sirketid AS VARCHAR(64)) = @Avrora THEN 1 ELSE 0 END) AS avrora,
+                       COUNT(*) AS toplam
+                FROM (SELECT kayitgiren, sirketid FROM skn_yuk
+                      WHERE kayitgiristarih >= DATEADD(month, -12, GETDATE())
+                      UNION ALL
+                      SELECT kayitgiren, sirketid FROM skn_pozisyon
+                      WHERE kayitgiristarih >= DATEADD(month, -12, GETDATE())) k
+                WHERE k.kayitgiren IS NOT NULL AND LTRIM(RTRIM(k.kayitgiren)) <> ''
+                GROUP BY k.kayitgiren
+                HAVING COUNT(*) >= 5
+                """,
+                new { Avrora = AvroraCompanyId },
+                cancellationToken: cancellationToken));
+
+        var users = await _db.Users
+            .Where(u => u.DeletedAt == null && u.SiberCode != null && u.SiberCode != ""
+                        && (u.SiberCompanyId == null || u.SiberCompanyId == ""))
+            .ToListAsync(cancellationToken);
+
+        var byCode = users
+            .GroupBy(u => QueryableExtensions.NormalizeTurkish(u.SiberCode!.Trim()))
+            .ToDictionary(g => g.Key, g => g.ToList());
+
+        var updated = 0;
+        foreach (var row in rows)
+        {
+            string kod = row.kod;
+            int avrora = row.avrora;
+            int toplam = row.toplam;
+
+            // Yalnızca AÇIK ÇOĞUNLUK atanır; OLS zaten varsayılan olduğu için
+            // (kapsamı boş kullanıcı Avrora DIŞINDAKİ her şeyi görür) yalnızca
+            // Avrora tarafı yazılır.
+            if (avrora * 10 < toplam * 9)
+                continue;
+
+            if (!byCode.TryGetValue(QueryableExtensions.NormalizeTurkish(kod.Trim()), out var matches))
+                continue;
+
+            foreach (var user in matches)
+            {
+                user.SiberCompanyId = AvroraCompanyId;
+                user.UpdatedAt = DateTime.Now;
+                updated++;
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return (0, updated);
+    }
 
     /// <summary>
     /// <c>sbr_personel</c> → yerel <c>personnel</c>. Sefer sürücüsü buradan

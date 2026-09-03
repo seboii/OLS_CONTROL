@@ -72,6 +72,11 @@ public sealed class SiberAccountRepository : ISiberAccountRepository
     /// olsold'da sabit kodluydu (FrontAccountController). Siber'in şirket ve
     /// firma-durum kayıtlarına işaret eden magic GUID'ler.
     /// </summary>
+    /// <summary>
+    /// Varsayılan şirket. Siber'in kendi verisinde cariler iki şirkete
+    /// bölünmüş (6.577 OLS / 865 AVRORA), bu yüzden çağıran kendi şirketini
+    /// <see cref="SiberFirma.SirketId"/> ile geçirmeli.
+    /// </summary>
     public const string SirketId = "BA4888B1-A2B0-4142-B273-92481D932EAD";
     public const string FirmaDurumId = "9B3980D3-6D2C-4524-923B-81231B0FBE1A";
 

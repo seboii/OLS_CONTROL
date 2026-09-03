@@ -20,6 +20,13 @@ public interface ISiberCarRepository
 /// <summary>skn_arac satırı. Alan adları Siber sütun adlarıdır.</summary>
 public sealed class SiberArac
 {
+    /// <summary>
+    /// Aracı açan kullanıcının şirketi. Siber'in kendi verisinde araçlar iki
+    /// şirkete bölünmüş (4.190 OLS / 58 AVRORA); sabit yazmak Avrora aracını
+    /// OLS'e düşürüyordu. Boş bırakılırsa OLS.
+    /// </summary>
+    public string? SirketId { get; init; }
+
     public string AracId { get; init; } = string.Empty;
     public string? PlakaNo { get; init; }
 
@@ -41,8 +48,8 @@ public sealed class SiberArac
 
 public sealed class SiberCarRepository : ISiberCarRepository
 {
-    /// <summary>olsold'da sabit kodluydu (CarController::save).</summary>
-    private const string SirketId = "BA4888B1-A2B0-4142-B273-92481D932EAD";
+    /// <summary>olsold'da sabit kodluydu (CarController::save); artık varsayılan.</summary>
+    private const string DefaultSirketId = "BA4888B1-A2B0-4142-B273-92481D932EAD";
     private const string GrupSirketId = "7C62AB49-B7EC-435E-81DF-9BE2E57C59E4";
 
     private readonly ISiberConnectionFactory _factory;
@@ -86,7 +93,9 @@ public sealed class SiberCarRepository : ISiberCarRepository
 
         await connection.ExecuteAsync(sql, new
         {
-            arac.AracId, SirketId, GrupSirketId, arac.PlakaNo, arac.AracTip, arac.RomorkCins,
+            arac.AracId,
+            SirketId = string.IsNullOrWhiteSpace(arac.SirketId) ? DefaultSirketId : arac.SirketId,
+            GrupSirketId, arac.PlakaNo, arac.AracTip, arac.RomorkCins,
             arac.AracSahip, arac.AracDurum, arac.BagliFirmaId, arac.Km, arac.En, arac.Boy,
             arac.Yukseklik, arac.Kapasite, arac.KayitGirisTarih, arac.KayitGiren,
         });
