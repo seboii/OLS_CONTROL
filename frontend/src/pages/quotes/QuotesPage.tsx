@@ -454,9 +454,10 @@ function QuoteCard({
           <div className="min-w-0">
             {/* Rezervasyon numarasını SİBER üretir (MAX(rezervasyonno)+1, kilit altında —
                 bkz. SiberReservationRepository.InsertRezervasyonWithLockedNumberAsync) ve
-                yalnızca "Siber'e Aktar" adımında atanır. Burada eskiden yerel id'den
-                türetilen sahte bir "T{id}" gösteriliyordu; gerçek numarayla (2615566)
-                karıştırıldığı için kaldırıldı — numara yoksa açıkça öyle yazıyor. */}
+                artık KAYDETME anında atanır; ayrı bir "Siber'e Aktar" adımı beklenmez.
+                Burada eskiden yerel id'den türetilen sahte bir "T{id}" gösteriliyordu;
+                gerçek numarayla (2615566) karıştırıldığı için kaldırıldı — numara yoksa
+                (Siber'e ulaşılamadıysa) açıkça öyle yazıyor. */}
             {row.reservation_number ? (
               <p className="font-mono text-xs font-semibold text-blue-600 truncate">{row.reservation_number}</p>
             ) : (
@@ -525,7 +526,12 @@ function QuoteCard({
  * olduğu anlaşılmıyordu. Artık her kart, o an NEREDE olduğunu yazıyla gösterir
  * ve YALNIZCA sıradaki tek adımı tam etiketli bir düğme olarak sunar.
  *
- * Sıra: Teklif → (Olumlu/Olumsuz) → Siber'e Aktar → Yük Oluştur.
+ * Sıra: Kaydet (Siber'e açılır, numara atanır) → Olumlu → Yük Oluştur.
+ *
+ * "Siber'e Aktar" ARTIK BİR ADIM DEĞİL: teklif kaydedilir kaydedilmez Siber'e
+ * açılıyor ve numarasını oradan alıyor (bkz. LoadController.PushToSiberAsync).
+ * Düğme yalnızca o aktarım BAŞARISIZ olduğunda — Siber'e ulaşılamadıysa —
+ * yeniden deneme yolu olarak görünür; durumun Olumlu olması gerekmez.
  */
 function QuoteStageBar({ row, canCreate, onTransferToSiber, onConvertToLoad }: {
   row: LoadItem; canCreate: boolean;
@@ -544,6 +550,34 @@ function QuoteStageBar({ row, canCreate, onTransferToSiber, onConvertToLoad }: {
     );
   }
 
+  // Siber'e ulaşılamamış → numara yok. Durumdan BAĞIMSIZ olarak yeniden deneme
+  // sunulur: numarasız teklif eksik kayıttır, Olumlu olmasını beklemenin anlamı
+  // yok (kullanıcı isteği: "illaki olumlu olumsuz olmak zorunda değil").
+  if (!row.siber_id) {
+    if (!canCreate) {
+      return (
+        <div className="flex items-center gap-2 pt-3 border-t border-gray-100 text-amber-600">
+          <span className="text-xs font-medium">Siber'e aktarılamadı — numara atanmadı</span>
+        </div>
+      );
+    }
+    return (
+      <div className="pt-3 border-t border-gray-100">
+        <button
+          type="button"
+          onClick={stop(onTransferToSiber)}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-amber-500 text-white text-xs font-semibold hover:bg-amber-600 transition-colors"
+        >
+          <Package size={14} />
+          Siber'e Aktar (yeniden dene)
+        </button>
+        <p className="text-[10px] text-gray-400 text-center mt-1.5">
+          Kayıt sırasında Siber'e ulaşılamadı; numara bu adımda atanır
+        </p>
+      </div>
+    );
+  }
+
   if (row.status_type_id === NEGATIVE_STATUS_ID) {
     return (
       <div className="flex items-center gap-2 pt-3 border-t border-gray-100 text-red-600">
@@ -553,12 +587,12 @@ function QuoteStageBar({ row, canCreate, onTransferToSiber, onConvertToLoad }: {
     );
   }
 
-  // Olumlu değilse bir sonraki adım kullanıcının karar vermesi: kartı açıp
-  // Durum'u Olumlu/Olumsuz yapması gerekiyor.
+  // Siber'de açık ve numarası var; yüke dönüşüm için durumun Olumlu olması
+  // gerekiyor (bkz. LoadTransferWriteService: "Yük durumu Olumlu değil").
   if (row.status_type_id !== POSITIVE_STATUS_ID) {
     return (
       <div className="flex items-center gap-2 pt-3 border-t border-gray-100 text-gray-400">
-        <span className="text-xs">Sıradaki adım:</span>
+        <span className="text-xs">Teklif açıldı. Sıradaki adım:</span>
         <span className="text-xs font-medium text-gray-600">Olumlu / Olumsuz belirle</span>
       </div>
     );
@@ -566,28 +600,6 @@ function QuoteStageBar({ row, canCreate, onTransferToSiber, onConvertToLoad }: {
 
   if (!canCreate) return null;
 
-  // Olumlu ve henüz Siber'e gitmemiş → 1. adım.
-  if (!row.siber_id) {
-    return (
-      <div className="pt-3 border-t border-gray-100">
-        <button
-          type="button"
-          onClick={stop(onTransferToSiber)}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors"
-        >
-          <Package size={14} />
-          1. Adım — Siber'e Aktar
-        </button>
-        {!row.reservation_number && (
-          <p className="text-[10px] text-gray-400 text-center mt-1.5">
-            Teklif numarası bu adımda Siber tarafından atanır
-          </p>
-        )}
-      </div>
-    );
-  }
-
-  // Siber'de var, yük yok → 2. adım.
   return (
     <div className="pt-3 border-t border-gray-100">
       <button
@@ -596,7 +608,7 @@ function QuoteStageBar({ row, canCreate, onTransferToSiber, onConvertToLoad }: {
         className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors"
       >
         <Truck size={14} />
-        2. Adım — Yük Oluştur
+        Yük Oluştur
       </button>
     </div>
   );
@@ -1625,24 +1637,28 @@ export function QuotesPage() {
                     <X size={14} />Olumsuz — akış durdu
                   </span>
                 )}
-                {editingId && !detailMeta.loadNumber && !isNegativeStatus && !isPositiveStatus && (
-                  <span className="text-xs text-gray-500">
-                    Sıradaki adım: <span className="font-medium text-gray-700">Olumlu / Olumsuz belirle</span>
-                  </span>
-                )}
-                {editingId && !detailMeta.loadNumber && isPositiveStatus && !detailMeta.siberId && canUpdate && (
+                {/* Numara kayıt anında Siber'den geliyor; siberId yoksa aktarım
+                    başarısız olmuş demektir. Yeniden deneme durumdan BAĞIMSIZ
+                    sunulur — Olumlu olmasını beklemek numarasız teklifi
+                    numarasız bırakırdı. */}
+                {editingId && !detailMeta.loadNumber && !detailMeta.siberId && canUpdate && (
                   <Btn onClick={() => handleTransferToSiber(editingId)} disabled={saving || detailLoading || busyLabel !== null}>
                     <BusyLabel busy={busyLabel !== null} busyText="Aktarılıyor...">
                       <Package size={14} />
-                      1. Adım — Siber'e Aktar
+                      Siber'e Aktar (yeniden dene)
                     </BusyLabel>
                   </Btn>
+                )}
+                {editingId && !detailMeta.loadNumber && detailMeta.siberId && !isNegativeStatus && !isPositiveStatus && (
+                  <span className="text-xs text-gray-500">
+                    Teklif açıldı. Sıradaki adım: <span className="font-medium text-gray-700">Olumlu / Olumsuz belirle</span>
+                  </span>
                 )}
                 {editingId && !detailMeta.loadNumber && isPositiveStatus && detailMeta.siberId && canCreate && (
                   <Btn onClick={() => handleConvertToLoad(detailMeta.siberId!)} disabled={saving || detailLoading || busyLabel !== null}>
                     <BusyLabel busy={busyLabel !== null} busyText="Oluşturuluyor...">
                       <Truck size={14} />
-                      2. Adım — Yük Oluştur
+                      Yük Oluştur
                     </BusyLabel>
                   </Btn>
                 )}

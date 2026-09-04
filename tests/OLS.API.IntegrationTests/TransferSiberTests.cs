@@ -99,36 +99,35 @@ public sealed class TransferSiberTests
     }
 
     /// <summary>
-    /// ValidateRequired'ın olsold'daki tam 21 kontrollük listesinde (bkz.
-    /// TransferSiberService.cs) "Ödeme şekli boş olamaz" 9. sırada — bu yüzden
-    /// öncesindeki 8 alan (talimat/römork/iş türü/yükleme tipi/yüktür/üç tarih)
-    /// burada bilinçli olarak DOLU verilir; yalnızca ödeme tipi eksik bırakılır.
+    /// Seçilmiş ama Siber karşılığı olmayan alan SESSİZCE null yazılamaz.
+    ///
+    /// ValidateRequired artık "ödeme şekli boş olamaz" demiyor (Siber'in kendi
+    /// verisinde 19.482 rezervasyonun 1.993'ünde odemesekliid boş), ama
+    /// kullanıcı ödeme şeklini SEÇTİĞİ hâlde yerel satırın siber_id'si yoksa
+    /// rezervasyon ödeme şeklisiz açılırdı — bu, sessiz veri kaybıdır.
     /// </summary>
     [Fact]
-    public async Task TransferOfferAsync_WithoutPaymentType_ReturnsPaymentTypeRequiredError()
+    public async Task TransferOfferAsync_WhenSelectedPaymentTypeHasNoSiberId_ReturnsClearError()
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
         var clock = scope.ServiceProvider.GetRequiredService<OLS.Business.Common.IClock>();
 
-        var instruction = new Instruction { Name = "E-posta", Code = "1" };
-        var romorkType = new RomorkType { Name = "Tenteli", Code = "1" };
         var workType = new WorkType { Name = "İhracat", Code = "IHR", GroupCode = "ISTURU", AdditionalCode = "IHR" };
         var loadingType = new LoadingType { Name = "Komple", Code = "1" };
-        var loadTransferType = new LoadTransferType { Name = "Parsiyel", Code = "1" };
-        db.AddRange(instruction, romorkType, workType, loadingType, loadTransferType);
+        var statusType = new StatusType { Name = "Teklif", SiberId = Guid.NewGuid().ToString() };
+        // siber_id YOK — seçilebilir ama Siber'de karşılığı çözülemez.
+        var paymentType = new PaymentType { Name = "Peşin", SiberId = null };
+        db.AddRange(workType, loadingType, statusType, paymentType);
         await db.SaveChangesAsync();
 
         var load = new Load
         {
             TransferToSiber = 0,
-            PaymentTypeId = null,
-            InstructionId = (int)instruction.Id,
-            RomorkTypeId = (int)romorkType.Id,
             WorkTypeId = (int)workType.Id,
             LoadingTypeId = (int)loadingType.Id,
-            LoadTransferTypeId = (int)loadTransferType.Id,
-            MarketingNotificationDate = DateOnly.FromDateTime(DateTime.Now),
+            StatusTypeId = (int)statusType.Id,
+            PaymentTypeId = (int)paymentType.Id,
             OfferDate = DateOnly.FromDateTime(DateTime.Now),
             OfferValidityDate = DateOnly.FromDateTime(DateTime.Now.AddDays(30)),
             CreatedAt = DateTime.Now,
@@ -142,44 +141,87 @@ public sealed class TransferSiberTests
         var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
 
         result.IsSuccess.Should().BeFalse();
-        result.ErrorMessage.Should().Be("Ödeme şekli boş olamaz");
+        result.ErrorMessage.Should().Be("Ödeme şeklinin Siber karşılığı yok");
     }
 
     /// <summary>
-    /// Gönderici (sender) kontrolü daha önce ValidateRequired'da hiç yoktu —
-    /// eksik göndericili bir teklif sessizce Siber'e aktarılabiliyordu. Ödeme
-    /// tipinden SONRA gelen bu kontrole ulaşmak için öncesindeki tüm alanlar
-    /// (müşteri dahil) doldurulur.
+    /// BULUNAN GERÇEK HATA — teklif numarası hiç oluşmuyordu.
+    ///
+    /// Durumu varsayılan "Teklif" olan, göndericisi/alıcısı/yük içeriği/mali
+    /// kalemi OLMAYAN bir teklif kaydedildiğinde aktarım olsold'dan devralınan
+    /// 21 maddelik listeye takılıyor ve <c>reservation_number</c> boş kalıyordu.
+    /// Oysa Siber bu alanların hiçbirini zorunlu tutmuyor: 19.482 rezervasyonda
+    /// alıcı %83, gönderici %62, yük içeriği %54, mali kalem %79 boş.
+    ///
+    /// Bu test kuralı kilitler: asgari geçerli teklif KAYDEDİLİR KAYDEDİLMEZ
+    /// numarasını alır. Yüke dönüşümün sıkı listesi ayrı yerde duruyor
+    /// (bkz. ConvertOfferAsync testleri).
     /// </summary>
     [Fact]
-    public async Task TransferOfferAsync_WithoutSender_ReturnsSenderRequiredError()
+    public async Task TransferOfferAsync_WithMinimalOffer_AssignsReservationNumber()
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
         var clock = scope.ServiceProvider.GetRequiredService<OLS.Business.Common.IClock>();
 
-        var instruction = new Instruction { Name = "E-posta", Code = "1" };
-        var romorkType = new RomorkType { Name = "Tenteli", Code = "1" };
         var workType = new WorkType { Name = "İhracat", Code = "IHR", GroupCode = "ISTURU", AdditionalCode = "IHR" };
         var loadingType = new LoadingType { Name = "Komple", Code = "1" };
-        var loadTransferType = new LoadTransferType { Name = "Parsiyel", Code = "1" };
-        var paymentType = new PaymentType { Name = "Peşin", SiberId = Guid.NewGuid().ToString() };
-        var customer = new Account { Name = "Test Müşteri", SiberId = Guid.NewGuid().ToString() };
-        db.AddRange(instruction, romorkType, workType, loadingType, loadTransferType, paymentType, customer);
+        var statusType = new StatusType { Name = "Teklif", SiberId = Guid.NewGuid().ToString() };
+        db.AddRange(workType, loadingType, statusType);
         await db.SaveChangesAsync();
 
         var load = new Load
         {
             TransferToSiber = 0,
-            InstructionId = (int)instruction.Id,
-            RomorkTypeId = (int)romorkType.Id,
             WorkTypeId = (int)workType.Id,
             LoadingTypeId = (int)loadingType.Id,
-            LoadTransferTypeId = (int)loadTransferType.Id,
-            PaymentTypeId = (int)paymentType.Id,
-            CustomerId = (int)customer.Id,
+            StatusTypeId = (int)statusType.Id,
+            OfferDate = DateOnly.FromDateTime(DateTime.Now),
+            OfferValidityDate = DateOnly.FromDateTime(DateTime.Now.AddDays(30)),
+            // Bilinçli olarak BOŞ: gönderici, alıcı, ülkeler, talimat geliş
+            // şekli, römork cinsi, yüktür kodu, temsilciler, içerik, kalem.
             SenderId = null,
-            MarketingNotificationDate = DateOnly.FromDateTime(DateTime.Now),
+            ReceiverId = null,
+            MarketingNotificationDate = null,
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now,
+        };
+        db.Loads.Add(load);
+        await db.SaveChangesAsync();
+
+        var siber = new FakeSiberReservationRepository(isConfigured: true, assignedNumber: 2600189);
+        var service = new TransferSiberService(db, siber, clock, new PassThroughReferenceValidator(), new FakeSiberCountryResolver(db));
+
+        var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
+
+        result.IsSuccess.Should().BeTrue(result.ErrorMessage);
+        result.ReservationNumber.Should().Be(2600189);
+
+        var saved = await db.Loads.AsNoTracking().FirstAsync(l => l.Id == load.Id);
+        saved.ReservationNumber.Should().Be("2600189");
+        saved.SiberId.Should().NotBeNullOrWhiteSpace();
+        saved.TransferToSiber.Should().Be(1);
+    }
+
+    /// <summary>Durum, Siber'de 19.482 kaydın tamamında dolu — tek kalan zorunluluk.</summary>
+    [Fact]
+    public async Task TransferOfferAsync_WithoutStatus_ReturnsStatusRequiredError()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+        var clock = scope.ServiceProvider.GetRequiredService<OLS.Business.Common.IClock>();
+
+        var workType = new WorkType { Name = "İhracat", Code = "IHR", GroupCode = "ISTURU", AdditionalCode = "IHR" };
+        var loadingType = new LoadingType { Name = "Komple", Code = "1" };
+        db.AddRange(workType, loadingType);
+        await db.SaveChangesAsync();
+
+        var load = new Load
+        {
+            TransferToSiber = 0,
+            WorkTypeId = (int)workType.Id,
+            LoadingTypeId = (int)loadingType.Id,
+            StatusTypeId = null,
             OfferDate = DateOnly.FromDateTime(DateTime.Now),
             OfferValidityDate = DateOnly.FromDateTime(DateTime.Now.AddDays(30)),
             CreatedAt = DateTime.Now,
@@ -193,7 +235,7 @@ public sealed class TransferSiberTests
         var result = await service.TransferOfferAsync(load.Id, currentUserId: 1);
 
         result.IsSuccess.Should().BeFalse();
-        result.ErrorMessage.Should().Be("Gönderici boş olamaz");
+        result.ErrorMessage.Should().Be("Durum boş olamaz");
     }
 
     [Fact]
@@ -458,18 +500,30 @@ internal sealed class FakeSiberLoadRepository : ISiberLoadRepository
 
 internal sealed class FakeSiberReservationRepository : ISiberReservationRepository
 {
-    public FakeSiberReservationRepository(bool isConfigured) => IsConfigured = isConfigured;
+    private readonly int? _assignedNumber;
+
+    /// <param name="assignedNumber">
+    /// Verilirse INSERT yolu da desteklenir ve Siber'in atadığı numara olarak bu
+    /// değer döner (mutlu yol testi). Verilmezse yazma metotları
+    /// <c>NotSupportedException</c> fırlatmaya devam eder — böylece yalnızca
+    /// doğrulamayı sınayan testler yanlışlıkla Siber'e "yazmış" gibi geçmez.
+    /// </param>
+    public FakeSiberReservationRepository(bool isConfigured, int? assignedNumber = null)
+    {
+        IsConfigured = isConfigured;
+        _assignedNumber = assignedNumber;
+    }
 
     public bool IsConfigured { get; }
 
     public Task<Guid> GenerateRezervasyonIdAsync(CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
+        _assignedNumber is null ? throw new NotSupportedException() : Task.FromResult(Guid.NewGuid());
     public Task<Guid> GenerateYukKoliIdAsync(CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
     public Task<Guid> GenerateTarifeIdAsync(CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
     public Task<int> InsertRezervasyonWithLockedNumberAsync(SiberRezervasyonYaz rezervasyon, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
+        _assignedNumber is { } no ? Task.FromResult(no) : throw new NotSupportedException();
     public Task UpdateRezervasyonAsync(SiberRezervasyonYaz rezervasyon, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
     public Task DeleteRezervasyonAsync(string rezervasyonId, CancellationToken cancellationToken = default) =>

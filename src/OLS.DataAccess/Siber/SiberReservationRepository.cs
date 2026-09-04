@@ -292,21 +292,44 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
+        // ISNULL(@x, kolon) — YEREL BOŞLUK SİBER'DEKİ DOLU DEĞERİ EZMEZ.
+        //
+        // Yükte birebir aynı kusur yaşanmıştı: güncelleme null gönderince Siber'in
+        // ülkesi siliniyordu (bkz. SiberLoadRepository, ISNULL düzeltmesi). Teklifte
+        // aynı risk, aktarım doğrulaması Siber'in kendi doluluk oranlarına göre
+        // gevşetilince açığa çıktı: Siber'den senkronlanmış ESKİ tekliflerde görevli
+        // ataması (load_charge_people) hiç yok, dolayısıyla musteritemsilcisi ve
+        // satistemsilcisikod yerelde null — böyle bir teklifi kaydetmek Siber'deki
+        // temsilci bilgisini silerdi. Aynısı talimat geliş şekli, römork cinsi,
+        // yüktür kodu, ülkeler ve navlun firması için de geçerli.
+        //
+        // Doğrudan yazılanlar, yerelde HER ZAMAN bilinen ya da kullanıcının bilerek
+        // boşaltabildiği alanlardır: iş türü, yükleme tipi, tarihler, durum, taşıma
+        // bayrakları, açıklama, yıl.
         const string sql = """
             UPDATE skn_rezervasyon SET
-                talimatgelissekli = @TalimatGelisSekli, istenenromorkcins = @IstenenRomorkCins,
-                isturu = @IsTuru, yuklemetip = @YuklemeTip, yukturkod = @YukTurKod,
-                pazarlamabildirimtarih = @PazarlamaBildirimTarih,
+                talimatgelissekli = ISNULL(@TalimatGelisSekli, talimatgelissekli),
+                istenenromorkcins = ISNULL(@IstenenRomorkCins, istenenromorkcins),
+                isturu = @IsTuru, yuklemetip = @YuklemeTip,
+                yukturkod = ISNULL(@YukTurKod, yukturkod),
+                pazarlamabildirimtarih = ISNULL(@PazarlamaBildirimTarih, pazarlamabildirimtarih),
                 talimatgelistarih = @TalimatGelisTarih, gecerliliktarih = @GecerlilikTarih,
-                odemesekliid = @OdemeSekliId,
+                odemesekliid = ISNULL(@OdemeSekliId, odemesekliid),
                 ontasimatarafimizdanyapilir = @OnTasimaTarafimizdanYapilir,
                 sontasimatarafimizdanyapilir = @SonTasimaTarafimizdanYapilir,
-                musteriid = @MusteriId, navlunfirmaid = @NavlunFirmaId,
-                gondericiid = @GondericiId, aliciid = @AliciId, durumid = @DurumId,
-                musteritemsilcisi = @MusteriTemsilcisi, satistemsilcisikod = @SatisTemsilcisiKod,
-                departmanid = @DepartmanId, aciklama = @Aciklama, yil = @Yil,
-                yuklemeulkeid = @YuklemeUlkeId, bosaltmaulkeid = @BosaltmaUlkeId,
-                calismasekli = @CalismaSekli, onaytarih = @OnayTarih
+                musteriid = ISNULL(@MusteriId, musteriid),
+                navlunfirmaid = ISNULL(@NavlunFirmaId, navlunfirmaid),
+                gondericiid = ISNULL(@GondericiId, gondericiid),
+                aliciid = ISNULL(@AliciId, aliciid),
+                durumid = @DurumId,
+                musteritemsilcisi = ISNULL(@MusteriTemsilcisi, musteritemsilcisi),
+                satistemsilcisikod = ISNULL(@SatisTemsilcisiKod, satistemsilcisikod),
+                departmanid = ISNULL(@DepartmanId, departmanid),
+                aciklama = @Aciklama, yil = @Yil,
+                yuklemeulkeid = ISNULL(@YuklemeUlkeId, yuklemeulkeid),
+                bosaltmaulkeid = ISNULL(@BosaltmaUlkeId, bosaltmaulkeid),
+                calismasekli = ISNULL(@CalismaSekli, calismasekli),
+                onaytarih = ISNULL(@OnayTarih, onaytarih)
             WHERE rezervasyonid = @RezervasyonId
             """;
 

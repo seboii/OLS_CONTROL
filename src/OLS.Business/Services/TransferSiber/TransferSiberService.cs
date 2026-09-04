@@ -76,10 +76,7 @@ public sealed class TransferSiberService : ITransferSiberService
 
         var refs = await LoadReferencesAsync(load, currentUserId, cancellationToken);
 
-        var hasContents = await _db.LoadContents.AnyAsync(c => c.LoadId == load.Id, cancellationToken);
-        var hasFinancialItems = await _db.LoadFinancialItems.AnyAsync(f => f.LoadId == load.Id, cancellationToken);
-
-        if (ValidateRequired(load, refs, hasContents, hasFinancialItems) is { } missing)
+        if (ValidateRequired(load, refs) is { } missing)
             return TransferSiberResult.Fail(missing);
 
         if (await ValidateSiberReferencesAsync(load, refs, cancellationToken) is { } invalidRef)
@@ -461,30 +458,59 @@ public sealed class TransferSiberService : ITransferSiberService
         return null;
     }
 
-    private static string? ValidateRequired(
-        DataAccess.Entities.Load load, OfferRefs r, bool hasContents, bool hasFinancialItems)
+    /// <summary>
+    /// Teklif Siber'e yazılmadan önceki ZORUNLU ALAN kontrolü.
+    ///
+    /// BULUNAN GERÇEK HATA — teklif numarası hiç oluşmuyordu. Liste olsold'un 21
+    /// maddelik dizisiydi ve KAYNAK SİSTEMDEN ÇOK DAHA SIKIYDI. Siber'in kendi
+    /// 19.482 rezervasyonunda ölçülen boşluk oranları:
+    ///
+    ///   alıcı %83 · mali kalem %79 · gönderici %62 · yük içeriği %54
+    ///   pazarlama bildirim tarihi %57 · ülkeler %40 · yüktür kodu %15
+    ///   talimat geliş şekli %13 · temsilciler %10 · ödeme şekli %10
+    ///   departman %10 · römork cinsi %9 · müşteri %4
+    ///
+    /// Yani Siber bu alanların hiçbirini zorunlu tutmuyor. Yeni bir teklif
+    /// varsayılan "Teklif" durumuyla kaydedildiğinde form bunları istemiyor
+    /// (LoadController.Validate yalnızca durum "Olumlu" iken gönderici/alıcı/
+    /// ülke/talimat/römork/yüktür arıyor), aktarım burada düşüyor ve
+    /// <c>reservation_number</c> BOŞ kalıyordu. Kullanıcının gördüğü: "teklifi
+    /// kaydet dediğimde teklif numarası oluşturmuyor".
+    ///
+    /// Artık yalnızca Siber'in verisinde FİİLEN HER kayıtta dolu olan alanlar
+    /// aranır (iş türü 0/19.482 boş, talimat geliş tarihi 0, durum 0, yükleme
+    /// tipi 4, geçerlilik tarihi 10). Bunların hepsi zaten formda da zorunlu —
+    /// dolayısıyla geçerli her form kaydedildiği anda numarasını alır.
+    ///
+    /// TAM LİSTE KALDIRILMADI, YERİ DEĞİŞTİ: yüke dönüşümün kendi kontrolü
+    /// (<c>LoadTransferWriteService.ValidateRequired</c>) aynı 21 maddeyi
+    /// olduğu gibi uygular. Eksik alanlı teklif Siber'de numarasıyla açılır ama
+    /// yüke ÇEVRİLEMEZ — kural kaybolmadı, doğru adıma taşındı.
+    /// </summary>
+    private static string? ValidateRequired(DataAccess.Entities.Load load, OfferRefs r)
     {
-        if (r.InstructionCode is null) return "Talimat gelme şekli boş olamaz";
-        if (r.RomorkTypeCode is null) return "İstenen Romörk Cinsi boş olamaz";
         if (r.WorkTypeCode is null) return "İş Türü boş olamaz";
         if (r.LoadingTypeCode is null) return "Yükleme Tipi boş olamaz";
-        if (r.LoadTransferTypeCode is null) return "Yüktür kodu boş olamaz";
-        if (load.MarketingNotificationDate is null) return "Pazarlama bildirim tarihi boş olamaz";
         if (load.OfferDate is null) return "Talimat gelis tarihi boş olamaz";
         if (load.OfferValidityDate is null) return "Geçerlilik tarihi boş olamaz";
-        if (r.PaymentTypeSiberId is null) return "Ödeme şekli boş olamaz";
-        if (r.CustomerSiberId is null) return "Müşteri boş olamaz";
-        if (r.SenderSiberId is null) return "Gönderici boş olamaz";
-        if (r.ReceiverSiberId is null) return "Alıcı boş olamaz";
         if (r.StatusTypeSiberId is null) return "Durum boş olamaz";
-        if (r.CustomerRepName is null) return "Müşteri temsilcisi boş olamaz";
-        if (r.CustomerRepCode is null) return "Müşteri temsilcisi kodu boş olamaz";
-        if (r.SalesRepCode is null) return "Satış temsilcisi kodu boş olamaz";
-        if (r.DepartmentSiberId is null) return "Departman boş olamaz";
-        if (load.DepartureCountryId is null) return "Yükleme ülke boş olamaz";
-        if (load.TargetCountryId is null) return "Varış ülke boş olamaz";
-        if (!hasContents) return "Yük içerikleri boş olamaz";
-        if (!hasFinancialItems) return "Yük finansal kalemleri boş olamaz";
+
+        // SEÇİLMİŞ ama Siber karşılığı çözülemeyen alan sessizce null yazılamaz —
+        // aksi hâlde kullanıcı müşteriyi seçtiği hâlde rezervasyon müşterisiz
+        // açılırdı. (Değer var ama Siber'de YOK durumunu ayrıca
+        // ValidateSiberReferencesAsync yakalıyor.)
+        if (load.PaymentTypeId is not null && r.PaymentTypeSiberId is null)
+            return "Ödeme şeklinin Siber karşılığı yok";
+        if (load.CustomerId is not null && r.CustomerSiberId is null)
+            return "Müşterinin Siber karşılığı yok";
+        if (load.SenderId is not null && r.SenderSiberId is null)
+            return "Göndericinin Siber karşılığı yok";
+        if (load.ReceiverId is not null && r.ReceiverSiberId is null)
+            return "Alıcının Siber karşılığı yok";
+        if (load.CompanyPayFreightId is not null && r.CompanyPayFreightSiberId is null)
+            return "Navlun ödeyecek firmanın Siber karşılığı yok";
+        if (load.DepartmentId is not null && r.DepartmentSiberId is null)
+            return "Departmanın Siber karşılığı yok";
 
         return null;
     }
