@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
-import { FileText, Package, Plus, Trash2, Upload, File as FileIcon, X, User, CalendarDays, Filter, ChevronDown, ChevronUp, Truck } from "lucide-react";
+import { FileText, Package, Plus, Trash2, Upload, File as FileIcon, X, Filter, ChevronDown, Truck } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
@@ -11,7 +11,7 @@ import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { EmptyState, Pagination } from "@/components/ui/DataTable";
 import { Drawer, Modal } from "@/components/ui/Overlay";
-import { Badge, Btn, FormField, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
+import { Btn, FormField, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 import { FinancialItemManagerModal } from "@/components/shared/FinancialItemManagerModal";
@@ -19,7 +19,10 @@ import { FinancialItemPicker, type FinancialItemOption } from "@/components/shar
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
 import { CompanyPicker } from "@/components/shared/CompanyPicker";
 import { BusyLabel } from "@/components/ui/Busy";
-import { SiberAuditPanel, SiberDeletedBadge, type SiberAuditInfo } from "@/components/shared/SiberAudit";
+import { CollapsibleRow } from "@/components/ui/CollapsibleRow";
+import { LoadCard } from "./LoadCard";
+import type { LoadTransferItem, NamedRef } from "./types";
+import { SiberAuditPanel, type SiberAuditInfo } from "@/components/shared/SiberAudit";
 import { RecordHistoryTab } from "@/components/shared/RecordHistory";
 import {
   listDrafts, saveDraft, removeDraft, newDraftId, formatDraftTime, type Draft,
@@ -27,25 +30,6 @@ import {
 
 /** Teklifsiz yük taslakları — bkz. lib/autodraft.ts (çoklu). */
 const DIRECT_DRAFT_KEY = "ols.directLoad.drafts.v2";
-
-interface NamedRef {
-  id: number;
-  name: string | null;
-}
-
-interface LoadTransferItem {
-  siber_deleted_at?: string | null;
-  id: number;
-  load_number: string | null;
-  load_number_work_type: string | null;
-  created_at: string | null;
-  customer_id: NamedRef | null;
-  sender_id: NamedRef | null;
-  receiver_id: NamedRef | null;
-  load_status_id: NamedRef | null;
-  usercode_with_notification: NamedRef | null;
-  work_type: NamedRef | null;
-}
 
 interface PackageDetail {
   id: number;
@@ -259,124 +243,6 @@ const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler
 // bu yüzden sekmeler workTypes listesinden AD ile eşleştirilir, sabit id kullanılmaz.
 const WORK_TYPE_TABS = ["Tümü", "İhracat", "İthalat", "Transit", "Yurtiçi"];
 
-function LoadCard({ row, index, onClick }: { row: LoadTransferItem; index: number; onClick: () => void }) {
-  const loadNumber = row.load_number_work_type ?? row.load_number ?? `Y${row.id}`;
-  const date = row.created_at ? new Date(row.created_at).toLocaleDateString("tr-TR") : null;
-  const assigned = row.usercode_with_notification?.name?.trim();
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.03 }}
-      whileHover={{ y: -2 }}
-      onClick={onClick}
-      className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-shadow cursor-pointer p-4 flex flex-col gap-3"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-            <Package size={16} />
-          </div>
-          <div className="min-w-0">
-            <p className="font-mono text-xs font-semibold text-blue-600 truncate">{loadNumber}</p>
-            {row.siber_deleted_at && <div className="mt-1"><SiberDeletedBadge deletedAt={row.siber_deleted_at} /></div>}
-            {date && (
-              <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1">
-                <CalendarDays size={10} />
-                {date}
-              </p>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          {row.work_type?.name && (
-            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
-              {row.work_type.name}
-            </span>
-          )}
-          {row.load_status_id?.name && <Badge label={row.load_status_id.name} />}
-        </div>
-      </div>
-
-      <div className="pt-3 border-t border-gray-100">
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Müşteri</p>
-        <p className="text-sm font-semibold text-gray-900 truncate">{row.customer_id?.name ?? "—"}</p>
-      </div>
-
-      {(row.sender_id?.name || row.receiver_id?.name) && (
-        <div className="grid grid-cols-2 gap-3 pt-2.5 border-t border-gray-100">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Gönderici</p>
-            <p className="text-xs text-gray-700 truncate">{row.sender_id?.name ?? "—"}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Alıcı</p>
-            <p className="text-xs text-gray-700 truncate">{row.receiver_id?.name ?? "—"}</p>
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center gap-1.5 text-[11px] text-gray-500 pt-2.5 border-t border-gray-100 min-w-0">
-        <User size={12} className="text-gray-400 shrink-0" />
-        <span className="truncate">{assigned || "Görevli atanmadı"}</span>
-      </div>
-    </motion.div>
-  );
-}
-
-/**
- * Katlanabilir kayıt satırı. Yük kartındaki Paketler ve Finans sekmeleri onlarca
- * satır içerebiliyor ve her satır tam formuyla açık duruyordu — liste okunamaz
- * hale geliyordu. Artık kapalıyken yalnızca satırı TANIMLAYAN iki bilgi görünür
- * (finansta kalem + fiyat, pakette ürün + adet), tıklanınca form açılır.
- *
- * Silme düğmesi kapalıyken de erişilebilir kalır; başlığa tıklamayla karışmasın
- * diye kendi tıklamasını durdurur.
- */
-function CollapsibleRow({
-  title, summary, open, onToggle, onRemove, removeTitle, children,
-}: {
-  title: string;
-  summary: string;
-  open: boolean;
-  onToggle: () => void;
-  onRemove?: () => void;
-  removeTitle?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="border border-gray-200 rounded-lg mb-2 overflow-hidden">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={onToggle}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); }
-        }}
-        className={clsx(
-          "flex items-center gap-2 px-3 py-2 cursor-pointer select-none",
-          open ? "bg-gray-50 border-b border-gray-200" : "hover:bg-gray-50",
-        )}
-      >
-        {open ? <ChevronUp size={14} className="text-gray-400 shrink-0" /> : <ChevronDown size={14} className="text-gray-400 shrink-0" />}
-        <span className="text-xs font-medium text-gray-800 truncate">{title}</span>
-        <span className="ml-auto text-xs font-semibold text-gray-600 shrink-0 tabular-nums">{summary}</span>
-        {onRemove && (
-          <button
-            type="button"
-            title={removeTitle}
-            onClick={(e) => { e.stopPropagation(); onRemove(); }}
-            className="text-gray-300 hover:text-red-500 shrink-0"
-          >
-            <Trash2 size={13} />
-          </button>
-        )}
-      </div>
-      {open && <div className="p-4">{children}</div>}
-    </div>
-  );
-}
 
 export function LoadsPage() {
   const { can } = useAuth();

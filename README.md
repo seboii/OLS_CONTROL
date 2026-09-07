@@ -269,10 +269,11 @@ bilgisayardan hem Docker ağı içinden koşabiliyor.
 cd frontend && npm test
 ```
 
-53 test (Vitest + jsdom): Türkçe sayı ayrıştırma (`lib/number.ts` — sunucudaki
-`TurkishDecimal` ile aynı örnekler), otomatik taslaklar (`lib/autodraft.ts`), API
-katmanının oturum düşme ve hata ayıklama davranışı (`lib/api.ts`), menü görünürlüğü
-(`components/layout/navigation.ts`).
+70 test (Vitest + jsdom + Testing Library): Türkçe sayı ayrıştırma (`lib/number.ts`
+— sunucudaki `TurkishDecimal` ile aynı örnekler), otomatik taslaklar
+(`lib/autodraft.ts`), API katmanının oturum düşme ve hata ayıklama davranışı
+(`lib/api.ts`), menü görünürlüğü (`components/layout/navigation.ts`), katlanabilir
+satır ve yük kartı bileşenleri.
 
 Yapılandırma `vitest.config.ts` dosyasında ve `vite.config.ts`'ten **ayrı** tutuldu:
 aynı dosyada olsaydı üretim derlemesi (`vite build`, web imajının içinde koşuyor)

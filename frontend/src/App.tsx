@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-import { AuthProvider, useAuth } from "@/lib/auth";
-import { ToastProvider } from "@/components/ui/Toast";
+import { useAuth } from "@/lib/auth";
+import { AuthProvider } from "@/lib/AuthProvider";
+import { ToastProvider } from "@/components/ui/ToastProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/dashboard/DashboardPage";

@@ -1,21 +1,13 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { CheckCircle, Info, X, XCircle } from "lucide-react";
 import { clsx } from "clsx";
+import { ToastContext, type ToastData, type ToastType } from "./Toast";
 
-export type ToastType = "success" | "error" | "info";
-interface ToastData {
-  id: number;
-  message: string;
-  type: ToastType;
-}
-
-interface ToastContextValue {
-  addToast: (message: string, type?: ToastType) => void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
+/**
+ * Bildirim sağlayıcısı. Bağlam, tipler ve `useToast` kancası `Toast.tsx`'te —
+ * sebep için oraya bakın (hızlı yenileme / only-export-components).
+ */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastData[]>([]);
   const toastId = useRef(0);
@@ -64,10 +56,4 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </div>
     </ToastContext.Provider>
   );
-}
-
-export function useToast() {
-  const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error("useToast must be used within ToastProvider");
-  return ctx;
 }
