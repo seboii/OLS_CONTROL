@@ -44,7 +44,9 @@ public sealed record AccountListQuery(
     Guid? CountryId = null,
     long? TaxOfficeId = null,
     int? AssignedUserId = null,
-    string? IndividualPersonal = null);
+    string? IndividualPersonal = null,
+    bool IncludeDeleted = false,
+    bool OnlyDeleted = false);
 
 /// <summary>Kaydetme sonucu. Ad/e-posta çakışması olsold'da 500 + alan hatası dönüyordu.</summary>
 public sealed record AccountSaveResult(AccountDetailDto? Account, string? DuplicateField)
@@ -141,6 +143,19 @@ public sealed class AccountService : IAccountService
     public async Task<object> ListAsync(AccountListQuery query, CancellationToken cancellationToken = default)
     {
         var accounts = _db.Accounts.AsNoTracking().Where(a => a.IsActive);
+
+        // SİBER'DEN SİLİNMİŞ CARİLER GİZLENİR — teklif/yük/seferdeki kuralın aynısı.
+        //
+        // SiberSyncService.SyncAccountsAsync her turda sbr_firma'da olmayan carilere
+        // siber_deleted_at damgası basıyor (damga tam olarak bunun için eklendi:
+        // Siber ekranından silinmiş üç firma listede duruyor ve teklifsiz yük
+        // açarken FK hatası veriyordu). Damga basılıyordu ama listede süzülmüyordu.
+        //
+        // Kayıt SİLİNMEZ, yalnızca gizlenir; bağlı geçmiş ve finans satırları durur.
+        if (query.OnlyDeleted)
+            accounts = accounts.Where(a => a.SiberDeletedAt != null);
+        else if (!query.IncludeDeleted)
+            accounts = accounts.Where(a => a.SiberDeletedAt == null);
 
         // ATANMIŞ CARİ FİLTRESİ KALDIRILDI (bilinçli).
         //

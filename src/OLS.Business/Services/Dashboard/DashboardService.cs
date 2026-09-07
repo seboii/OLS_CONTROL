@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Seed;
+using OLS.Business.Services.Authorization;
 using OLS.DataAccess.Context;
+using OLS.DataAccess.Entities;
 
 namespace OLS.Business.Services.Dashboard;
 
@@ -60,26 +62,55 @@ public sealed class DashboardService : IDashboardService
 {
     private readonly OlsDbContext _db;
     private readonly IClock _clock;
+    private readonly ICompanyScope _companyScope;
+    private readonly ICurrentUser _currentUser;
 
-    public DashboardService(OlsDbContext db, IClock clock)
+    public DashboardService(
+        OlsDbContext db, IClock clock, ICompanyScope companyScope, ICurrentUser currentUser)
     {
         _db = db;
         _clock = clock;
+        _companyScope = companyScope;
+        _currentUser = currentUser;
     }
+
+    /// <summary>
+    /// Panelin saydigi kayit kumeleri.
+    ///
+    /// Panel eskiden <c>_db.Loads</c>/<c>_db.LoadTransfers</c>/<c>_db.Expeditions</c>
+    /// uzerinden HAM sayiyordu; iki kural birden atlanmisti:
+    ///   - SIRKET KAPSAMI: Avrora kullanicisi listede 762 yuk gorurken panelde
+    ///     butun sirketlerin toplamini goruyordu.
+    ///   - SILINMIS KAYIT: listeler <c>siber_deleted_at</c> damgali kayitlari
+    ///     gizliyor, panel sayiyordu; ayni ekranda iki farkli toplam cikiyordu.
+    ///
+    /// Kaynaklar tek yerde kurulup alt yapicilara gecirilir ki yeni bir kart
+    /// eklenirken filtre atlanmasin.
+    /// </summary>
+    private sealed record Sources(
+        IQueryable<Load> Loads,
+        IQueryable<LoadTransfer> LoadTransfers,
+        IQueryable<Expedition> Expeditions);
 
     public async Task<DashboardDto> GetAsync(CancellationToken cancellationToken = default)
     {
+        var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
+        var src = new Sources(
+            _db.Loads.VisibleTo(visibility).Live(),
+            _db.LoadTransfers.VisibleTo(visibility).Live(),
+            _db.Expeditions.VisibleTo(visibility).Live());
+
         var now = _clock.Now;
         var monthStart = new DateTime(now.Year, now.Month, 1);
         var prevMonthStart = monthStart.AddMonths(-1);
         var weekStart = now.Date.AddDays(-(int)now.DayOfWeek + (now.DayOfWeek == DayOfWeek.Sunday ? -6 : 1));
 
-        var metrics = await BuildMetricsAsync(now, monthStart, prevMonthStart, cancellationToken);
-        var monthlyShipments = await BuildMonthlyShipmentsAsync(monthStart, cancellationToken);
-        var workTypeDistribution = await BuildWorkTypeDistributionAsync(cancellationToken);
-        var weeklyCompleted = await BuildWeeklyCompletedAsync(weekStart, cancellationToken);
-        var recentActivity = await BuildRecentActivityAsync(cancellationToken);
-        var upcomingTrips = await BuildUpcomingTripsAsync(now, cancellationToken);
+        var metrics = await BuildMetricsAsync(src, now, monthStart, prevMonthStart, cancellationToken);
+        var monthlyShipments = await BuildMonthlyShipmentsAsync(src, monthStart, cancellationToken);
+        var workTypeDistribution = await BuildWorkTypeDistributionAsync(src, cancellationToken);
+        var weeklyCompleted = await BuildWeeklyCompletedAsync(src, weekStart, cancellationToken);
+        var recentActivity = await BuildRecentActivityAsync(src, cancellationToken);
+        var upcomingTrips = await BuildUpcomingTripsAsync(src, now, cancellationToken);
 
         return new DashboardDto
         {
@@ -98,7 +129,7 @@ public sealed class DashboardService : IDashboardService
     private const int UnloadedStatusCode = 14;
 
     private async Task<DashboardMetricsDto> BuildMetricsAsync(
-        DateTime now, DateTime monthStart, DateTime prevMonthStart, CancellationToken ct)
+        Sources src, DateTime now, DateTime monthStart, DateTime prevMonthStart, CancellationToken ct)
     {
         var unloadedStatusId = await _db.ExpeditionStatuses
             .Where(s => s.ExpeditionStatusId == UnloadedStatusCode)
@@ -110,17 +141,17 @@ public sealed class DashboardService : IDashboardService
         // "Boşaltıldı" durumu yerelde hiç tanımlı değilse (ör. Siber içe aktarımı hiç
         // yapılmamış taze bir ortam) eski dönüş-tarihi sinyaline düşülür.
         var activeExpeditions = unloadedStatusId is { } uid1
-            ? await _db.Expeditions.CountAsync(e => e.StatusId != uid1, ct)
-            : await _db.Expeditions.CountAsync(e => e.ReturnDate == null, ct);
+            ? await src.Expeditions.CountAsync(e => e.StatusId != uid1, ct)
+            : await src.Expeditions.CountAsync(e => e.ReturnDate == null, ct);
         var activeExpeditionsLastMonth = unloadedStatusId is { } uid2
-            ? await _db.Expeditions.CountAsync(
+            ? await src.Expeditions.CountAsync(
                 e => e.StatusId != uid2 && e.CreatedAt != null && e.CreatedAt < monthStart, ct)
-            : await _db.Expeditions.CountAsync(
+            : await src.Expeditions.CountAsync(
                 e => e.ReturnDate == null && e.CreatedAt != null && e.CreatedAt < monthStart, ct);
 
-        var loadTransfersThisMonth = await _db.LoadTransfers.CountAsync(
+        var loadTransfersThisMonth = await src.LoadTransfers.CountAsync(
             l => l.CreatedAt != null && l.CreatedAt >= monthStart, ct);
-        var loadTransfersLastMonth = await _db.LoadTransfers.CountAsync(
+        var loadTransfersLastMonth = await src.LoadTransfers.CountAsync(
             l => l.CreatedAt != null && l.CreatedAt >= prevMonthStart && l.CreatedAt < monthStart, ct);
 
         var revenueThisMonth = await _db.Invoices
@@ -136,13 +167,16 @@ public sealed class DashboardService : IDashboardService
             .FirstOrDefaultAsync(ct);
         var pendingQuotes = offerStatusId is null
             ? 0
-            : await _db.Loads.CountAsync(l => l.StatusTypeId == offerStatusId, ct);
+            : await src.Loads.CountAsync(l => l.StatusTypeId == offerStatusId, ct);
 
-        var activeCustomers = await _db.Accounts.CountAsync(ct);
+        // CARI VE FATURA SIRKETE GORE SUZULEMEZ: accounts ve invoices tablolarinda
+        // yerel sirket sutunu yok (sirket yalnizca Siber'e yazarken cozuluyor).
+        // Silinmis cariler yine de elenir - liste de eliyor.
+        var activeCustomers = await _db.Accounts.CountAsync(a => a.SiberDeletedAt == null, ct);
         var activeCustomersLastMonth = await _db.Accounts.CountAsync(
-            a => a.CreatedAt != null && a.CreatedAt < monthStart, ct);
+            a => a.SiberDeletedAt == null && a.CreatedAt != null && a.CreatedAt < monthStart, ct);
 
-        var expeditionsThisMonth = await _db.Expeditions
+        var expeditionsThisMonth = await src.Expeditions
             .Where(e => e.CreatedAt != null && e.CreatedAt >= monthStart)
             .Select(e => new { e.ReturnDate, e.StatusId })
             .ToListAsync(ct);
@@ -169,7 +203,7 @@ public sealed class DashboardService : IDashboardService
     }
 
     private async Task<IReadOnlyList<MonthlyPointDto>> BuildMonthlyShipmentsAsync(
-        DateTime monthStart, CancellationToken ct)
+        Sources src, DateTime monthStart, CancellationToken ct)
     {
         var points = new List<MonthlyPointDto>();
 
@@ -178,7 +212,7 @@ public sealed class DashboardService : IDashboardService
             var start = monthStart.AddMonths(-i);
             var end = start.AddMonths(1);
 
-            var count = await _db.LoadTransfers.CountAsync(
+            var count = await src.LoadTransfers.CountAsync(
                 l => l.CreatedAt != null && l.CreatedAt >= start && l.CreatedAt < end, ct);
             var revenue = await _db.Invoices
                 .Where(inv => inv.InvoiceCreateDate >= start && inv.InvoiceCreateDate < end)
@@ -190,14 +224,15 @@ public sealed class DashboardService : IDashboardService
         return points;
     }
 
-    private async Task<IReadOnlyList<DistributionSliceDto>> BuildWorkTypeDistributionAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<DistributionSliceDto>> BuildWorkTypeDistributionAsync(
+        Sources src, CancellationToken ct)
     {
-        var total = await _db.LoadTransfers.CountAsync(l => l.WorkType != null, ct);
+        var total = await src.LoadTransfers.CountAsync(l => l.WorkType != null, ct);
 
         if (total == 0)
             return [];
 
-        var grouped = await _db.LoadTransfers
+        var grouped = await src.LoadTransfers
             .Where(l => l.WorkType != null)
             .GroupBy(l => l.WorkType)
             .Select(g => new { WorkTypeId = g.Key, Count = g.Count() })
@@ -216,12 +251,13 @@ public sealed class DashboardService : IDashboardService
             .ToList();
     }
 
-    private async Task<IReadOnlyList<WeeklyPointDto>> BuildWeeklyCompletedAsync(DateTime weekStart, CancellationToken ct)
+    private async Task<IReadOnlyList<WeeklyPointDto>> BuildWeeklyCompletedAsync(
+        Sources src, DateTime weekStart, CancellationToken ct)
     {
         string[] dayLabels = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"];
         var weekStartDate = DateOnly.FromDateTime(weekStart);
 
-        var completedThisWeek = await _db.Expeditions
+        var completedThisWeek = await src.Expeditions
             .Where(e => e.ReturnDate != null && e.ReturnDate >= weekStartDate && e.ReturnDate < weekStartDate.AddDays(7))
             .Select(e => e.ReturnDate!.Value)
             .ToListAsync(ct);
@@ -236,11 +272,11 @@ public sealed class DashboardService : IDashboardService
         return points;
     }
 
-    private async Task<IReadOnlyList<ActivityItemDto>> BuildRecentActivityAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<ActivityItemDto>> BuildRecentActivityAsync(Sources src, CancellationToken ct)
     {
         var activities = new List<ActivityItemDto>();
 
-        var recentLoadTransfers = await _db.LoadTransfers
+        var recentLoadTransfers = await src.LoadTransfers
             .Where(l => l.CreatedAt != null)
             .OrderByDescending(l => l.CreatedAt)
             .Take(5)
@@ -249,7 +285,7 @@ public sealed class DashboardService : IDashboardService
         activities.AddRange(recentLoadTransfers.Select(l => new ActivityItemDto(
             "load_transfer", $"{l.LoadNumber ?? $"YUK-{l.Id}"} oluşturuldu", "Yük", l.CreatedAt!.Value)));
 
-        var recentExpeditions = await _db.Expeditions
+        var recentExpeditions = await src.Expeditions
             .Where(e => e.CreatedAt != null)
             .OrderByDescending(e => e.CreatedAt)
             .Take(5)
@@ -270,7 +306,7 @@ public sealed class DashboardService : IDashboardService
             i.PayableAmount is { } amt ? $"₺{amt:N0}" : "Fatura",
             i.CreatedAt!.Value)));
 
-        var recentQuotes = await _db.Loads
+        var recentQuotes = await src.Loads
             .Where(l => l.CreatedAt != null)
             .OrderByDescending(l => l.CreatedAt)
             .Take(5)
@@ -285,11 +321,12 @@ public sealed class DashboardService : IDashboardService
             .ToList();
     }
 
-    private async Task<IReadOnlyList<UpcomingTripDto>> BuildUpcomingTripsAsync(DateTime now, CancellationToken ct)
+    private async Task<IReadOnlyList<UpcomingTripDto>> BuildUpcomingTripsAsync(
+        Sources src, DateTime now, CancellationToken ct)
     {
         var today = DateOnly.FromDateTime(now);
 
-        var upcoming = await _db.Expeditions
+        var upcoming = await src.Expeditions
             .Where(e => e.CarExitDate != null && e.CarExitDate >= today)
             .OrderBy(e => e.CarExitDate)
             .Take(5)

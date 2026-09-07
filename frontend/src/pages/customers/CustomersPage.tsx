@@ -179,6 +179,9 @@ export function CustomersPage() {
   const [fAssignedUser, setFAssignedUser] = useState<UserOption | null>(null);
   const [fIndividualPersonal, setFIndividualPersonal] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Siber ekranindan silinmis cariler listeden gizlenir (teklif/yuk/seferdeki
+  // kuralin aynisi); "ne silinmis?" sorusu bu dugmeyle sorulur.
+  const [onlyDeleted, setOnlyDeleted] = useState(false);
   const hasActiveAdvancedFilters = !!(fCountryId || fTaxOfficeId || fAssignedUser || fIndividualPersonal);
   const hasActiveFilters = !!(search || hasActiveAdvancedFilters);
 
@@ -250,6 +253,7 @@ export function CustomersPage() {
         tax_office_id: fTaxOfficeId || undefined,
         assigned_user_id: fAssignedUser?.id || undefined,
         individual_personal: fIndividualPersonal || undefined,
+        only_deleted: onlyDeleted || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -264,7 +268,7 @@ export function CustomersPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, page, listTab, fCountryId, fTaxOfficeId, fAssignedUser, fIndividualPersonal]);
+  }, [debouncedSearch, page, listTab, fCountryId, fTaxOfficeId, fAssignedUser, fIndividualPersonal, onlyDeleted]);
 
   function resetForm() {
     setForm({
@@ -450,6 +454,20 @@ export function CustomersPage() {
             <div className="flex-1 max-w-md">
               <TextInput value={search} onChange={(v) => { setSearch(v); setPage(1); }} placeholder="Genel arama: ad, telefon, e-posta, ülke..." />
             </div>
+            <button
+              type="button"
+              onClick={() => { setOnlyDeleted((v) => !v); setPage(1); }}
+              className={clsx(
+                "flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border transition-colors shrink-0",
+                onlyDeleted
+                  ? "text-red-600 border-red-200 bg-red-50"
+                  : "text-gray-600 border-gray-200 hover:border-red-200 hover:text-red-600",
+              )}
+              title="Siber'de silinmiş kayıtları listeler"
+            >
+              <Trash2 size={13} />
+              Siberde silinenler
+            </button>
             <button
               type="button"
               onClick={() => setShowAdvanced((s) => !s)}

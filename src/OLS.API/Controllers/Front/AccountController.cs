@@ -59,6 +59,10 @@ public sealed class AccountController : ApiControllerBase
         [FromQuery(Name = "tax_office_id")] long? taxOfficeId = null,
         [FromQuery(Name = "assigned_user_id")] int? assignedUserId = null,
         [FromQuery(Name = "individual_personal")] string? individualPersonal = null,
+        /// <summary>Siber'den silinmiş carileri de listeler.</summary>
+        [FromQuery(Name = "include_deleted")] bool includeDeleted = false,
+        /// <summary>Yalnızca Siber'den silinmiş carileri listeler.</summary>
+        [FromQuery(Name = "only_deleted")] bool onlyDeleted = false,
         CancellationToken cancellationToken = default)
     {
         if (_currentUser.Id is not { } userId)
@@ -67,7 +71,8 @@ public sealed class AccountController : ApiControllerBase
         var result = await _accounts.ListAsync(
             new AccountListQuery(
                 userId, search, accountTypeId, perPage, page, CurrentPath,
-                countryId, taxOfficeId, assignedUserId, individualPersonal),
+                countryId, taxOfficeId, assignedUserId, individualPersonal,
+                includeDeleted, onlyDeleted),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");

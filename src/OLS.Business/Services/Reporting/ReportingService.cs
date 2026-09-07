@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.DataAccess.Context;
+using OLS.DataAccess.Entities;
 
 namespace OLS.Business.Services.Reporting;
 
@@ -94,30 +96,49 @@ public sealed class ReportingService : IReportingService
 {
     private readonly OlsDbContext _db;
     private readonly IClock _clock;
+    private readonly ICompanyScope _companyScope;
+    private readonly ICurrentUser _currentUser;
 
-    public ReportingService(OlsDbContext db, IClock clock)
+    public ReportingService(
+        OlsDbContext db, IClock clock, ICompanyScope companyScope, ICurrentUser currentUser)
     {
         _db = db;
         _clock = clock;
+        _companyScope = companyScope;
+        _currentUser = currentUser;
     }
+
+    /// <summary>
+    /// SIRKET KAPSAMI VE SILINMIS KAYIT SUZGECI.
+    ///
+    /// Rapor ekrani her iki kurali da atliyordu: teklif/yuk/sefer listeleri
+    /// sirkete gore suzulurken raporlar butun sirketleri sayiyor, listelerde
+    /// gizlenen <c>siber_deleted_at</c> damgali kayitlar KPI'lara giriyordu.
+    ///
+    /// Sefer hareketi dogrudan bir sirket sutunu tasimiyor; ustundeki seferin
+    /// gorunurlugunu devralir.
+    /// </summary>
+    private async Task<CompanyVisibility> VisibilityAsync(CancellationToken ct) =>
+        await _companyScope.ResolveAsync(_currentUser.Id, ct);
 
     public async Task<ReportingDto> GetAsync(
         DateOnly? dateFrom, DateOnly? dateTo, CancellationToken cancellationToken = default)
     {
         var today = DateOnly.FromDateTime(_clock.Now);
+        var visibility = await VisibilityAsync(cancellationToken);
 
         DateTime? rangeStart = dateFrom?.ToDateTime(TimeOnly.MinValue);
         DateTime? rangeEndExclusive = dateTo?.AddDays(1).ToDateTime(TimeOnly.MinValue);
 
-        var offersQuery = _db.Loads.AsQueryable();
+        var offersQuery = _db.Loads.VisibleTo(visibility).Live();
         if (rangeStart is { } os) offersQuery = offersQuery.Where(l => l.CreatedAt >= os);
         if (rangeEndExclusive is { } oe) offersQuery = offersQuery.Where(l => l.CreatedAt < oe);
 
-        var loadsQuery = _db.LoadTransfers.AsQueryable();
+        var loadsQuery = _db.LoadTransfers.VisibleTo(visibility).Live();
         if (rangeStart is { } ls) loadsQuery = loadsQuery.Where(t => t.CreatedAt >= ls);
         if (rangeEndExclusive is { } le) loadsQuery = loadsQuery.Where(t => t.CreatedAt < le);
 
-        var expeditionsQuery = _db.Expeditions.AsQueryable();
+        var expeditionsQuery = _db.Expeditions.VisibleTo(visibility).Live();
         if (rangeStart is { } es) expeditionsQuery = expeditionsQuery.Where(e => e.CreatedAt >= es);
         if (rangeEndExclusive is { } ee) expeditionsQuery = expeditionsQuery.Where(e => e.CreatedAt < ee);
 
@@ -125,7 +146,12 @@ public sealed class ReportingService : IReportingService
         if (rangeStart is { } isv) invoicesQuery = invoicesQuery.Where(i => i.InvoiceCreateDate >= isv);
         if (rangeEndExclusive is { } ie) invoicesQuery = invoicesQuery.Where(i => i.InvoiceCreateDate < ie);
 
-        var movementsQuery = _db.ExpeditionMovements.Where(m => m.DeletedAt == null);
+        var visibleExpeditionIds = _db.Expeditions.VisibleTo(visibility).Live().Select(e => e.Id);
+        var movementsQuery = _db.ExpeditionMovements
+            // Seferi olmayan hareket suzulemez, gorunur birakilir - yuk/teklifteki
+            // "sirketi bos kayit gorunur" kuralinin aynisi.
+            .Where(m => m.DeletedAt == null &&
+                        (m.ExpeditionId == null || visibleExpeditionIds.Contains(m.ExpeditionId.Value)));
         if (rangeStart is { } ms) movementsQuery = movementsQuery.Where(m => m.CreatedAt >= ms);
         if (rangeEndExclusive is { } me) movementsQuery = movementsQuery.Where(m => m.CreatedAt < me);
 
@@ -139,7 +165,9 @@ public sealed class ReportingService : IReportingService
         var totalLoads = await loadsQuery.CountAsync(cancellationToken);
         var totalExpeditions = await expeditionsQuery.CountAsync(cancellationToken);
         var totalInvoiceAmount = await invoicesQuery.SumAsync(i => (decimal?)i.PayableAmount, cancellationToken) ?? 0m;
-        var totalAccounts = await _db.Accounts.CountAsync(cancellationToken);
+        // CARI VE FATURA SIRKETE GORE SUZULEMEZ: accounts/invoices tablolarinda
+        // yerel sirket sutunu yok. Silinmis cari yine de sayilmaz.
+        var totalAccounts = await _db.Accounts.CountAsync(a => a.SiberDeletedAt == null, cancellationToken);
         var expectedIncome = await financeQuery.SumAsync(f => (decimal?)f.ExpectedIncomeTry, cancellationToken) ?? 0m;
         var expectedExpense = await financeQuery.SumAsync(f => (decimal?)f.ExpectedExpenseTry, cancellationToken) ?? 0m;
         var realizedIncome = await financeQuery.SumAsync(f => (decimal?)f.RealizedIncomeTry, cancellationToken) ?? 0m;
@@ -199,7 +227,8 @@ public sealed class ReportingService : IReportingService
             AccountCount = accountDict.GetValueOrDefault(u.Id),
         }).ToList();
 
-        var (granularity, trend) = await BuildTrendAsync(dateFrom, dateTo, today, cancellationToken);
+        var (granularity, trend) = await BuildTrendAsync(
+            visibility, dateFrom, dateTo, today, cancellationToken);
 
         return new ReportingDto
         {
@@ -232,18 +261,23 @@ public sealed class ReportingService : IReportingService
         if (user is null)
             return null;
 
+        var visibility = await VisibilityAsync(cancellationToken);
+
         DateTime? rangeStart = dateFrom?.ToDateTime(TimeOnly.MinValue);
         DateTime? rangeEndExclusive = dateTo?.AddDays(1).ToDateTime(TimeOnly.MinValue);
 
-        var offersQuery = _db.Loads.AsQueryable();
+        var offersQuery = _db.Loads.VisibleTo(visibility).Live();
         if (rangeStart is { } os) offersQuery = offersQuery.Where(l => l.CreatedAt >= os);
         if (rangeEndExclusive is { } oe) offersQuery = offersQuery.Where(l => l.CreatedAt < oe);
 
-        var loadsQuery = _db.LoadTransfers.AsQueryable();
+        var loadsQuery = _db.LoadTransfers.VisibleTo(visibility).Live();
         if (rangeStart is { } ls) loadsQuery = loadsQuery.Where(t => t.CreatedAt >= ls);
         if (rangeEndExclusive is { } le) loadsQuery = loadsQuery.Where(t => t.CreatedAt < le);
 
-        var movementsQuery = _db.ExpeditionMovements.Where(m => m.DeletedAt == null && m.UserId == userId);
+        var visibleExpeditionIds = _db.Expeditions.VisibleTo(visibility).Live().Select(e => e.Id);
+        var movementsQuery = _db.ExpeditionMovements
+            .Where(m => m.DeletedAt == null && m.UserId == userId &&
+                        (m.ExpeditionId == null || visibleExpeditionIds.Contains(m.ExpeditionId.Value)));
         if (rangeStart is { } ms) movementsQuery = movementsQuery.Where(m => m.CreatedAt >= ms);
         if (rangeEndExclusive is { } me) movementsQuery = movementsQuery.Where(m => m.CreatedAt < me);
 
@@ -329,6 +363,7 @@ public sealed class ReportingService : IReportingService
     }
 
     private async Task<(string Granularity, IReadOnlyList<TrendPointDto> Points)> BuildTrendAsync(
+        CompanyVisibility visibility,
         DateOnly? dateFrom, DateOnly? dateTo, DateOnly today, CancellationToken cancellationToken)
     {
         DateOnly from;
@@ -391,16 +426,64 @@ public sealed class ReportingService : IReportingService
             }
         }
 
-        var points = new List<TrendPointDto>(buckets.Count);
-        foreach (var (start, endExclusive) in buckets)
-        {
-            var startDt = start.ToDateTime(TimeOnly.MinValue);
-            var endDt = endExclusive.ToDateTime(TimeOnly.MinValue);
-            var offerCount = await _db.Loads.CountAsync(l => l.CreatedAt >= startDt && l.CreatedAt < endDt, cancellationToken);
-            var loadCount = await _db.LoadTransfers.CountAsync(t => t.CreatedAt >= startDt && t.CreatedAt < endDt, cancellationToken);
-            points.Add(new TrendPointDto(start, offerCount, loadCount));
-        }
+        // KOVA BAŞINA SORGU ATILMAZ.
+        //
+        // Eskiden döngü her kova için AYRI iki COUNT çalıştırıyordu: varsayılan
+        // "Tüm Zamanlar" görünümü 12 aylık kova × 2 = 24 gidiş-dönüş, günlük
+        // kırılımda 31 günlük aralık 62, aylık kırılımda birkaç yıllık aralık
+        // 160'ı aşıyordu — hepsi de aynı iki tabloyu baştan tarayarak.
+        //
+        // Artık tablo başına TEK sorgu: gün gün gruplanır (aralık en fazla bir
+        // yıl olduğu için sonuç ≤366 satır), kovalar bellekte toplanır. Kova
+        // sınırları haftada "from"dan itibaren 7'şer gün ilerlediği için — ISO
+        // haftası değil — gruplamayı doğrudan SQL'de kova bazında yapmak
+        // mümkün değil; gün ortak paydası üçünü de karşılıyor.
+        var rangeStart = from.ToDateTime(TimeOnly.MinValue);
+        var rangeEnd = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
+
+        var offersByDay = await CountByDayAsync(
+            _db.Loads.VisibleTo(visibility).Live()
+                .Where(l => l.CreatedAt >= rangeStart && l.CreatedAt < rangeEnd)
+                .GroupBy(l => l.CreatedAt!.Value.Date)
+                .Select(g => new DayCount(g.Key, g.Count())),
+            cancellationToken);
+
+        var loadsByDay = await CountByDayAsync(
+            _db.LoadTransfers.VisibleTo(visibility).Live()
+                .Where(t => t.CreatedAt >= rangeStart && t.CreatedAt < rangeEnd)
+                .GroupBy(t => t.CreatedAt!.Value.Date)
+                .Select(g => new DayCount(g.Key, g.Count())),
+            cancellationToken);
+
+        var points = buckets
+            .Select(b => new TrendPointDto(
+                b.Start,
+                Sum(offersByDay, b.Start, b.EndExclusive),
+                Sum(loadsByDay, b.Start, b.EndExclusive)))
+            .ToList();
 
         return (granularity, points);
+    }
+
+    /// <summary>Gruplu sayımın satırı — anonim tip yerine adlandırılmış tip, EF projeksiyonu okunur kalsın.</summary>
+    private sealed record DayCount(DateTime Day, int Count);
+
+    private static async Task<IReadOnlyList<(DateOnly Day, int Count)>> CountByDayAsync(
+        IQueryable<DayCount> query, CancellationToken cancellationToken) =>
+        (await query.ToListAsync(cancellationToken))
+            .Select(r => (DateOnly.FromDateTime(r.Day), r.Count))
+            .ToList();
+
+    private static int Sum(
+        IReadOnlyList<(DateOnly Day, int Count)> days, DateOnly start, DateOnly endExclusive)
+    {
+        var total = 0;
+        foreach (var (day, count) in days)
+        {
+            if (day >= start && day < endExclusive)
+                total += count;
+        }
+
+        return total;
     }
 }

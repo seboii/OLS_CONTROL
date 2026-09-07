@@ -155,4 +155,65 @@ public sealed class SiberDeletionMarkTests
 
         audit.ValueKind.Should().Be(JsonValueKind.Null);
     }
+
+    /// <summary>
+    /// CARİ DE AYNI KURALA UYAR.
+    ///
+    /// SyncAccountsAsync sbr_firma'da olmayan carilere damga basıyordu ama
+    /// AccountService bu sütuna hiç bakmıyordu: Siber ekranından silinmiş üç
+    /// firma listede duruyor ve teklifsiz yük açarken FK hatası veriyordu —
+    /// damganın eklenme sebebi tam olarak buydu.
+    ///
+    /// Aynı uç, formdaki cari seçicisini de besliyor (AccountPicker), yani
+    /// filtre listeyle birlikte seçiciyi de temizler.
+    /// </summary>
+    private async Task<string> SeedDeletedAccountAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+
+        var name = $"SilinmisCari{Guid.NewGuid():N}"[..24];
+
+        db.Accounts.Add(new Account
+        {
+            Name = name,
+            SiberId = Guid.NewGuid().ToString(),
+            IsActive = true,
+            SiberDeletedAt = new DateTime(2026, 9, 1, 8, 34, 0),
+            SiberDeletedBy = "SERKANK",
+            SiberDeletedOn = new DateTime(2026, 8, 19, 14, 42, 59),
+        });
+
+        await db.SaveChangesAsync();
+
+        return name;
+    }
+
+    private static async Task<int> AccountTotalAsync(HttpClient client, string query)
+    {
+        var response = await client.GetAsync($"/api/v1/account?per_page=25&{query}");
+        response.EnsureSuccessStatusCode();
+
+        return (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("total").GetInt32();
+    }
+
+    [Fact]
+    public async Task SilinmisCari_VarsayilanListedeGorunmez()
+    {
+        var name = await SeedDeletedAccountAsync();
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        (await AccountTotalAsync(admin, $"search={name}")).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SilinmisCari_IstenirseListelenir()
+    {
+        var name = await SeedDeletedAccountAsync();
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        (await AccountTotalAsync(admin, $"search={name}&include_deleted=true")).Should().Be(1);
+        (await AccountTotalAsync(admin, $"search={name}&only_deleted=true")).Should().Be(1);
+    }
 }
