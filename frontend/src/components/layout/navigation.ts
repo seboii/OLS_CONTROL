@@ -8,7 +8,7 @@ import { LayoutDashboard, Users, FileText, Package, Truck, Receipt, Car, Shield,
  * hızlı yenilemesi (HMR) o dosyayı tazeleyemiyor, düzenleme sırasında
  * bileşenin durumu sıfırlanıyor.
  */
-interface NavItem {
+export interface NavItem {
   path: string;
   label: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
@@ -42,3 +42,27 @@ export const NAV_ITEMS: NavItem[] = [
 export const MODULE_LABELS: Record<string, string> = Object.fromEntries(
   NAV_ITEMS.map((n) => [n.path, n.label]),
 );
+
+/**
+ * Menüde GÖRÜNECEK ögeler. İki farklı kural birden uygulanır ve ikisi
+ * karıştırılmamalı:
+ *
+ *   • YETKİ — "bu kullanıcının bu sayfada hakkı var mı".
+ *   • YETENEK — "bu şirket bu iş akışını kullanıyor mu". Teklifler ve Yükler
+ *     AYNI yetki sayfasını (load_management) paylaşıyor, dolayısıyla
+ *     Teklifler'i yetkiyle gizlemek Yükler'i de gizlerdi.
+ *
+ * Bileşenden ayrı bir işlev: menü görünürlüğü üç katmanın ilki (menü → rota →
+ * uç) ve testi bileşen kurmadan yapılabilsin diye saf tutuldu. GİZLİ MENÜ
+ * YETKİ DEĞİLDİR — gerçek karar her durumda sunucuda verilir.
+ */
+export function visibleNavItems(
+  can: (slug: string, action: "read") => boolean,
+  usesOffers: boolean,
+): NavItem[] {
+  return NAV_ITEMS.filter(
+    (item) =>
+      (!item.permissionSlug || can(item.permissionSlug, "read")) &&
+      (!item.requiresOfferModule || usesOffers),
+  );
+}

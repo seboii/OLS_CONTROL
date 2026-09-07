@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import { ChevronLeft, ChevronRight, Settings, LogOut } from "lucide-react";
 import { clsx } from "clsx";
 import { useAuth } from "@/lib/auth";
-import { NAV_ITEMS } from "./navigation";
+import { visibleNavItems } from "./navigation";
 
 
 export function Sidebar({
@@ -23,11 +23,7 @@ export function Sidebar({
   // (bkz. lib/auth.tsx can()) — bu yüzden hiç yetki satırı olmayan bir admin
   // hesabı hiçbir modülü göremez; seed admin kullanıcısı tüm sayfalarda tam
   // yetkiyle geldiği için bu satırlar normal kullanımda tüm menüyü gösterir.
-  const visibleItems = NAV_ITEMS.filter(
-    (item) =>
-      (!item.permissionSlug || can(item.permissionSlug, "read")) &&
-      (!item.requiresOfferModule || capabilities.uses_offers),
-  );
+  const visibleItems = visibleNavItems(can, capabilities.uses_offers);
 
   const content = (
     <div className="flex flex-col h-full" style={{ backgroundColor: "#0D1B2E" }}>

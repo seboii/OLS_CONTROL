@@ -250,13 +250,33 @@ Ana bilgisayardan (dev override'ı açık olmalı, `localhost:5443` gerekir):
 dotnet test
 ```
 
-155 test: `tests/OLS.Business.Tests` altında 37 birim testi (veritabanı gerekmez),
-`tests/OLS.API.IntegrationTests` altında 118 entegrasyon testi (Postgres gerekir).
+246 test:
+
+| Proje | Test | Veritabanı |
+|---|---|---|
+| `tests/OLS.Business.Tests` | 53 birim testi | gerekmez |
+| `tests/OLS.DataAccess.Tests` | 8 birim testi | gerekmez |
+| `tests/OLS.API.IntegrationTests` | 185 entegrasyon testi | Postgres gerekir |
 
 Entegrasyon testleri her çalıştırmada rastgele adlı izole bir veritabanı (`ols_scoped_inttest_*`)
 oluşturup siler; geliştirme veritabanını etkilemez. Bağlantı bilgisi `TEST_DB_HOST`/`TEST_DB_PORT`
 ortam değişkenlerinden okunur (varsayılan `localhost:5443`), böylece aynı testler hem ana
 bilgisayardan hem Docker ağı içinden koşabiliyor.
+
+### Arayüz testleri
+
+```bash
+cd frontend && npm test
+```
+
+29 test (Vitest + jsdom): otomatik taslaklar (`lib/autodraft.ts`), API katmanının
+oturum düşme ve hata ayıklama davranışı (`lib/api.ts`), menü görünürlüğü
+(`components/layout/navigation.ts`).
+
+Yapılandırma `vitest.config.ts` dosyasında ve `vite.config.ts`'ten **ayrı** tutuldu:
+aynı dosyada olsaydı üretim derlemesi (`vite build`, web imajının içinde koşuyor)
+vitest'i çözmek zorunda kalırdı. Test dosyaları `src` altında olduğu için
+`npm run build` sırasında tip denetiminden geçer ama pakete girmez.
 
 ## Mimari
 
