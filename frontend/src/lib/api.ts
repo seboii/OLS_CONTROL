@@ -8,11 +8,53 @@ export function getToken(): string | undefined {
 
 export function setToken(token: string) {
   // olsold: Cookies.set("token", token, { expires: 7 }) — birebir.
-  Cookies.set(TOKEN_COOKIE, token, { expires: 7, sameSite: "lax" });
+  //
+  // secure: uygulama Cloudflare tuneliyle HTTPS uzerinden sunuluyor; bayrak
+  // olmadan cerez duz HTTP istegine de gonderilebiliyordu. Sadece HTTPS'te
+  // isaretlenir, aksi halde `npm run dev` (http://localhost:5173) uzerinde
+  // cerez hic yazilmaz ve giris calismaz.
+  Cookies.set(TOKEN_COOKIE, token, {
+    expires: 7,
+    sameSite: "lax",
+    secure: window.location.protocol === "https:",
+  });
 }
 
 export function clearToken() {
   Cookies.remove(TOKEN_COOKIE);
+}
+
+/**
+ * OTURUM DUSTUGUNDE UYGULAMAYI HABERDAR ET.
+ *
+ * Eskiden 401 yaniti yalnizca jetonu siliyordu; React durumu dokunulmadigi
+ * icin ekran oturum acikmis gibi durmaya devam ediyor, kullanici jeton
+ * doldugunda her tikladiginda "Istek basarisiz (401)" hatasi aliyordu.
+ * AuthProvider buraya baglanip kullaniciyi sifirlar, AppLayout da girise
+ * yonlendirir.
+ */
+type UnauthorizedHandler = () => void;
+
+let unauthorizedHandler: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  unauthorizedHandler = handler;
+}
+
+/** Giris ucunun kendisi haric: yanlis sifir 401 doner, o bir oturum dusmesi degil. */
+const LOGIN_PATH = "/api/v1/login";
+
+function handleUnauthorized(path: string) {
+  if (path.startsWith(LOGIN_PATH)) return;
+
+  clearToken();
+  // Girise atildiktan sonra sebebi gorunsun; LoginPage okuyup temizler.
+  try {
+    sessionStorage.setItem("session_expired", "1");
+  } catch {
+    // Ozel sekmede/depolama kapaliyken sessizce gec — yonlendirme yine calisir.
+  }
+  unauthorizedHandler?.();
 }
 
 export class ApiError extends Error {
@@ -82,7 +124,10 @@ export async function downloadFile(path: string): Promise<{ blob: Blob; fileName
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const res = await fetch(path, { headers });
-  if (!res.ok) throw new ApiError(res.status, null, "Dosya alınamadı");
+  if (!res.ok) {
+    if (res.status === 401) handleUnauthorized(path);
+    throw new ApiError(res.status, null, "Dosya alınamadı");
+  }
 
   // Sunucu dosya adını Content-Disposition ile bildiriyor.
   const disposition = res.headers.get("Content-Disposition") ?? "";
@@ -123,7 +168,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   if (!res.ok) {
     if (res.status === 401) {
-      clearToken();
+      handleUnauthorized(path);
     }
     throw new ApiError(res.status, payload, extractMessage(payload, `İstek başarısız (${res.status})`));
   }

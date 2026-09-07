@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using OLS.API.Filters;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Finance;
 using OLS.Business.Services.TransferData;
 
@@ -13,7 +16,13 @@ namespace OLS.API.Controllers.Front;
 /// Sıralama önemli: fişler carilere, faturalar hem cariye hem yüke bağlanıyor,
 /// bu yüzden cari/yük senkronunun önce koşmuş olması gerekir.
 /// </summary>
+/// <remarks>
+/// YALNIZCA SUPER ADMIN — bkz. TransferDataController. Buradaki cekimler de
+/// tek istekte on binlerce satir tasiyor (<c>vouchers?full=true</c> 214.954).
+/// </remarks>
 [Authorize]
+[RequiresPermission(PermissionAction.Read, "super_admin")]
+[EnableRateLimiting("siber-sync")]
 [Route("api/v1/finance_sync")]
 public sealed class FinanceSyncController : ApiControllerBase
 {

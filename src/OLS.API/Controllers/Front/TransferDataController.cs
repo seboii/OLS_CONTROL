@@ -1,5 +1,8 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using OLS.API.Filters;
+using OLS.Business.Services.Authorization;
 using OLS.Business.Services.TransferData;
 
 namespace OLS.API.Controllers.Front;
@@ -14,7 +17,21 @@ namespace OLS.API.Controllers.Front;
 /// Geçmiş işlem verisi taşıma (pullLoad, pull_expdition, ...) ve Uyumsoft/
 /// Reports uçları BİLİNÇLİ OLARAK yok — bkz. SiberImportService.cs sınıf yorumu.
 /// </summary>
+/// <remarks>
+/// YALNIZCA SUPER ADMIN.
+///
+/// Uclar arayuzden hic cagrilmiyor (frontend'de tek bir referansi yok) —
+/// kurulum/onarim icin elle calistirilan operator araclari. Onceki halinde
+/// yalnizca [Authorize] vardi: oturum acmis HERHANGI bir kullanici
+/// <c>change_logs?full=true</c> ile 797.855 satirlik bir cekimi
+/// tetikleyebiliyordu.
+///
+/// "super_admin" slug'i zaten tohumlanmis durumda (PermissionPages.All) ve
+/// AccountService.IsSuperAdminAsync ile ayni kontrol — canlida iki kisi.
+/// </remarks>
 [Authorize]
+[RequiresPermission(PermissionAction.Read, "super_admin")]
+[EnableRateLimiting("siber-sync")]
 [Route("api/v1/transfer_data")]
 public sealed class TransferDataController : ApiControllerBase
 {

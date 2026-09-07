@@ -172,6 +172,25 @@ builder.Services.AddRateLimiter(options =>
             QueueLimit = 0,
         }));
 
+    // SIBER SENKRON UCLARI AYNI ANDA BIR KEZ CALISIR.
+    //
+    // Bunlar tek istekte cok buyuk cekimler yapiyor: change_logs?full=true
+    // 797.855 satir, vouchers?full=true 214.954 satir. Ikinci es zamanli cekim
+    // hem Siber'in MSSQL'ini hem yerel Postgres'i gereksiz yere zorlar ve
+    // ayni satirlari iki kez upsert eder.
+    //
+    // Sabit pencereli sayac DEGIL es zamanlilik sinirlayicisi kullaniliyor:
+    // kurulum sirasinda ~12 ucun ard arda cagrilmasi mesru, ayni anda
+    // cagrilmasi degil. Kuyruk tutulmaz (QueueLimit 0) — ikinci istek uzun
+    // bir cekimin arkasinda beklemek yerine hemen 429 alir.
+    options.AddPolicy("siber-sync", _ => RateLimitPartition.GetConcurrencyLimiter(
+        partitionKey: "siber-sync",
+        factory: _ => new ConcurrencyLimiterOptions
+        {
+            PermitLimit = 1,
+            QueueLimit = 0,
+        }));
+
     options.AddPolicy("public-form", httpContext => RateLimitPartition.GetFixedWindowLimiter(
         partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         factory: _ => new FixedWindowRateLimiterOptions

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { clsx } from "clsx";
@@ -23,6 +23,20 @@ export function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [focused, setFocused] = useState<string | null>(null);
   const [generalError, setGeneralError] = useState("");
+  // Oturum dustugu icin buraya atildiysak sebebini soyle; aksi halde kullanici
+  // formu neden yeniden gordugunu bilmiyor.
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem("session_expired") === "1") {
+        sessionStorage.removeItem("session_expired");
+        setSessionExpired(true);
+      }
+    } catch {
+      // depolama kapali — bilgi notu gosterilmez, giris yine calisir
+    }
+  }, []);
   const [submitting, setSubmitting] = useState(false);
 
   if (!loading && user) {
@@ -149,6 +163,13 @@ export function LoginPage() {
             <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Giriş Yap</h2>
             <p className="text-sm text-gray-500 mt-1">Giriş bilgilerinizi eksiksiz doldurunuz.</p>
           </div>
+
+          {sessionExpired && !generalError && (
+            <div className="flex items-center gap-2 p-3 mb-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800">
+              <AlertCircle size={14} className="shrink-0" />
+              Oturumunuz sona erdi, lütfen yeniden giriş yapın.
+            </div>
+          )}
 
           {generalError && (
             <div className="flex items-center gap-2 p-3 mb-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700">

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, ApiError, clearToken, getToken, setToken } from "./api";
+import { api, ApiError, clearToken, getToken, setToken, setUnauthorizedHandler } from "./api";
 
 export interface AuthUser {
   id: number;
@@ -151,6 +151,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sunucu 401 dondugunde yerel oturumu da dusur. Bu olmadan jeton silinip
+  // ekran acik kaliyordu: kullanici calisiyormus gibi gorunen bir arayuzde
+  // her istekte hata aliyordu.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setUser(null);
+      setPermissions({});
+      setCapabilities(DEFAULT_CAPABILITIES);
+    });
+
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   const login = useCallback(
