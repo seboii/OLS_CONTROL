@@ -93,7 +93,23 @@ public sealed class LengthAwarePaginator<T>
     /// <summary>
     /// Laravel'in "&laquo; Previous" / sayfa numaraları / "Next &raquo;" bağlantı dizisi.
     /// Frontend şu an kullanmıyor ama zarfın birebir aynı kalması için üretiliyor.
+    ///
+    /// PENCERELENİR — eskiden HER sayfa için bir nesne üretiliyordu ve üst sınır
+    /// yoktu: 19.528 teklif / 10 = yanıt başına 1.955 bağlantı nesnesi, yaklaşık
+    /// 150 KB. Yani zarfın kullanılmayan bir alanı, asıl veriden (10 satır) kat
+    /// kat büyüktü.
+    ///
+    /// Laravel'in kendisi de bu listeyi pencereler (<c>UrlWindow</c>,
+    /// <c>onEachSide = 3</c>) ve araya "..." ayıracı koyar; yani "birebir aynı
+    /// zarf" hedefine sınırsız liste zaten UYMUYORDU. Buradaki kural aynı:
+    /// az sayıda sayfa varsa hepsi, çoksa ilk/son sayfa + geçerli sayfanın
+    /// çevresi.
     /// </summary>
+    private const int OnEachSide = 3;
+
+    /// <summary>Bunun altında pencereleme yapılmaz, tüm sayfalar listelenir (Laravel ile aynı eşik).</summary>
+    private const int SmallSliderLimit = (OnEachSide * 2) + 8;
+
     private static List<PaginatorLink> BuildLinks(int currentPage, int lastPage, Func<int, string> pageUrl)
     {
         var links = new List<PaginatorLink>
@@ -106,14 +122,17 @@ public sealed class LengthAwarePaginator<T>
             },
         };
 
-        for (var page = 1; page <= lastPage; page++)
+        foreach (var page in PageWindow(currentPage, lastPage))
         {
-            links.Add(new PaginatorLink
-            {
-                Url = pageUrl(page),
-                Label = page.ToString(),
-                Active = page == currentPage,
-            });
+            links.Add(page is null
+                // Laravel'in ayıracı: url'siz, "..." etiketli satır.
+                ? new PaginatorLink { Url = null, Label = "...", Active = false }
+                : new PaginatorLink
+                {
+                    Url = pageUrl(page.Value),
+                    Label = page.Value.ToString(),
+                    Active = page.Value == currentPage,
+                });
         }
 
         links.Add(new PaginatorLink
@@ -124,6 +143,40 @@ public sealed class LengthAwarePaginator<T>
         });
 
         return links;
+    }
+
+    /// <summary>Gösterilecek sayfa numaraları; <c>null</c> ögesi "..." ayıracıdır.</summary>
+    private static IEnumerable<int?> PageWindow(int currentPage, int lastPage)
+    {
+        if (lastPage < SmallSliderLimit)
+        {
+            for (var page = 1; page <= lastPage; page++)
+                yield return page;
+
+            yield break;
+        }
+
+        var windowStart = Math.Max(1, currentPage - OnEachSide);
+        var windowEnd = Math.Min(lastPage, currentPage + OnEachSide);
+
+        // Baş: ilk sayfalar. Pencere zaten başa değiyorsa ayıraç konmaz.
+        var headEnd = Math.Min(OnEachSide, windowStart - 1);
+        for (var page = 1; page <= headEnd; page++)
+            yield return page;
+
+        if (windowStart > headEnd + 1)
+            yield return null;
+
+        for (var page = windowStart; page <= windowEnd; page++)
+            yield return page;
+
+        var tailStart = Math.Max(windowEnd + 1, lastPage - OnEachSide + 1);
+
+        if (tailStart > windowEnd + 1)
+            yield return null;
+
+        for (var page = tailStart; page <= lastPage; page++)
+            yield return page;
     }
 }
 
