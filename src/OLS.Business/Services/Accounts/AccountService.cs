@@ -433,10 +433,17 @@ public sealed class AccountService : IAccountService
     public async Task<AccountRepresentativesDto> RepresentativesAsync(
         long accountId, CancellationToken cancellationToken = default)
     {
+        // YALNIZCA AKTİF KULLANICI. Bağların 3.209 carisinden 1.651'inde
+        // yetkili ayrılmış personel; ekranda göstermek de göreve yazmak da
+        // yanlış olurdu. Sunucu tarafı da (LoadWriteService) aynı süzgeci
+        // uyguluyor — ikisi ayrışırsa arayüz kaydedilemeyecek bir kişi gösterir.
         var reps = await _db.AccountRepresentatives.AsNoTracking()
             .Where(r => r.AccountId == (int)accountId)
-            .Join(_db.Users.AsNoTracking(), r => (long)r.UserId, u => u.Id, (r, u) => new { r.UserType, User = u })
-            .OrderBy(x => x.User.Name)
+            .Join(_db.Users.AsNoTracking().Where(u => u.DeletedAt == null && u.Status),
+                  r => (long)r.UserId, u => u.Id, (r, u) => new { r.UserType, User = u })
+            // 243 carinin birden çok operasyon yetkilisi var; sıralama olmadan
+            // hangisinin ilk geldiği çağrıdan çağrıya değişebilirdi.
+            .OrderBy(x => x.User.Id)
             .ToListAsync(cancellationToken);
 
         static MappedUserDto Map(dynamic x) => new()

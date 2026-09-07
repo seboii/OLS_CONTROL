@@ -179,6 +179,8 @@ type LocalDraft = {
   companyPayFreight: AccountOption | null;
   route: { departure_country_id: string; transit_country_id: string; target_country_id: string };
   operationOfficer: UserOption | null;
+  /** Yetkili müşteriden mi geldi (alan kilitli mi) — taslaktan devam ederken korunur. */
+  officerFromCustomer?: boolean;
   salesReps: UserOption[];
   content: ContentRow[];
   financialItems: FinancialItemRow[];
@@ -643,7 +645,7 @@ function ReadOnlyPerson({
 }
 
 export function QuotesPage() {
-  const { can, user: currentUser } = useAuth();
+  const { can } = useAuth();
   const navigate = useNavigate();
   const { addToast } = useToast();
   // OLUŞTURMA HERKESE AÇIK: müşteri / araç / teklif / yük / sefer kaydı
@@ -756,15 +758,17 @@ export function QuotesPage() {
   const [agent, setAgent] = useState<AccountOption | null>(null);
   const [companyPayFreight, setCompanyPayFreight] = useState<AccountOption | null>(null);
   const [route, setRoute] = useState({ departure_country_id: "", transit_country_id: "", target_country_id: "" });
-  // GÖREVLİLER ARTIK ELLE SEÇİLMİYOR — ikisi de türetilir ve salt-okunur gösterilir:
-  //   • Operasyon Yetkilisi = o an giriş yapmış kullanıcı. Kullanıcının Siber
-  //     karşılığı yoksa (kurulum admini: siber_code NULL) müşteriye tanımlı
-  //     operasyon yetkilisine düşülür — aksi hâlde Siber'e boş alan giderdi.
-  //   • Satış Temsilcisi   = müşteriye tanımlı satış temsilcileri.
-  // Aynı kural sunucuda da uygulanıyor (LoadWriteService.WriteChargePersonsAsync);
-  // burası yalnızca kullanıcıya ne kaydedileceğini GÖSTERİR. Bu yüzden form
-  // artık load_charge_person alanlarını göndermiyor.
+  // GÖREVLİLER:
+  //   • Operasyon Yetkilisi = MÜŞTERİYE tanımlı yetkili varsa O (değiştirilemez);
+  //     yoksa kullanıcı elle seçer, boş bırakılırsa sunucu kaydedeni yazar.
+  //   • Satış Temsilcisi   = müşteriye tanımlı satış temsilcileri (salt-okunur).
+  // Aynı kural sunucuda da uygulanıyor (LoadWriteService.WriteChargePersonsAsync)
+  // ve tek doğruluk noktası orası: bu ekran yalnızca ne kaydedileceğini gösterir,
+  // elle seçim de yalnızca müşterinin yetkilisi YOKKEN dikkate alınır.
   const [operationOfficer, setOperationOfficer] = useState<UserOption | null>(null);
+  // MÜŞTERİYE TANIMLI YETKİLİ Mİ? Tanımlıysa alan salt-okunur kalır
+  // ("varsa değişmesin"); tanımlı değilse kullanıcı elle seçer.
+  const [officerFromCustomer, setOfficerFromCustomer] = useState(false);
   const [salesReps, setSalesReps] = useState<UserOption[]>([]);
 
   const [content, setContent] = useState<ContentRow[]>([{ ...EMPTY_CONTENT_ROW }]);
@@ -989,13 +993,10 @@ export function QuotesPage() {
   }
 
   async function applyCustomerRepresentatives(account: AccountOption | null) {
-    const selfAsOfficer: UserOption | null =
-      currentUser && currentUser.siber_code
-        ? { id: currentUser.id, name: currentUser.name, surname: currentUser.surname }
-        : null;
-
+    // Müşteri seçilmeden yetkili bilinemez; alan elle seçime açık kalır.
     if (!account) {
-      setOperationOfficer(selfAsOfficer);
+      setOperationOfficer(null);
+      setOfficerFromCustomer(false);
       setSalesReps([]);
       return;
     }
@@ -1008,12 +1009,16 @@ export function QuotesPage() {
 
       const { operation_officer: officer, sales_reps: reps } = res.data;
 
-      setOperationOfficer(selfAsOfficer ?? officer ?? null);
+      // MÜŞTERİNİNKİ VARSA DEĞİŞMEZ; yoksa alan elle seçime açılır. Uç yalnızca
+      // AKTİF kullanıcıyı döndürüyor — ayrılmış personel "tanımlı" sayılmaz.
+      setOperationOfficer(officer ?? null);
+      setOfficerFromCustomer(officer != null);
       setSalesReps(reps ?? []);
     } catch {
-      // Bağ okunamazsa en azından giriş yapan kullanıcı gösterilir; sunucu
+      // Bağ okunamazsa alanı kilitlemeyiz: kullanıcı elle seçebilsin, sunucu
       // kaydederken kuralı yine kendisi uygular.
-      setOperationOfficer(selfAsOfficer);
+      setOperationOfficer(null);
+      setOfficerFromCustomer(false);
       setSalesReps([]);
     }
   }
@@ -1037,7 +1042,8 @@ export function QuotesPage() {
 
     const snapshot = {
       form, customer, sender, receiver, agent, companyPayFreight, route,
-      operationOfficer, salesReps, content, financialItems, emailTo, emailCc,
+      operationOfficer, officerFromCustomer, salesReps, content, financialItems,
+      emailTo, emailCc,
     };
     if (!draftHasContent(snapshot)) return;
 
@@ -1049,7 +1055,8 @@ export function QuotesPage() {
     return () => clearTimeout(timer);
   }, [
     drawerOpen, editingId, form, customer, sender, receiver, agent, companyPayFreight,
-    route, operationOfficer, salesReps, content, financialItems, emailTo, emailCc,
+    route, operationOfficer, officerFromCustomer, salesReps, content, financialItems,
+    emailTo, emailCc,
   ]);
 
   /** Otomatik taslağı forma geri yükler ve çekmeceyi açar. */
@@ -1070,6 +1077,7 @@ export function QuotesPage() {
     setCompanyPayFreight(d.companyPayFreight);
     setRoute(d.route);
     setOperationOfficer(d.operationOfficer);
+    setOfficerFromCustomer(d.officerFromCustomer ?? false);
     setSalesReps(d.salesReps?.length ? d.salesReps : [{ id: 0, name: null, surname: null }]);
     setContent(d.content?.length ? d.content : [{ ...EMPTY_CONTENT_ROW }]);
     setFinancialItems(d.financialItems ?? []);
@@ -1279,9 +1287,14 @@ export function QuotesPage() {
       fd.append(`load_financial_item[${i}][quantity]`, item.quantity);
     });
 
-    // GÖREVLİ GÖNDERİLMİYOR: sunucu Operasyon Yetkilisi'ni giriş yapan
-    // kullanıcıdan, Satış Temsilcisi'ni müşteriden türetiyor ve istekten geleni
-    // bilinçli olarak yok sayıyor (bkz. LoadWriteService.WriteChargePersonsAsync).
+    // OPERASYON YETKİLİSİ yalnızca MÜŞTERİYE TANIMLI DEĞİLKEN gönderilir.
+    // Tanımlıysa sunucu istekten geleni zaten yok sayıyor ("varsa değişmesin");
+    // göndermemek isteği de gereksiz yere şişirmez. Satış Temsilcisi hiçbir
+    // durumda gönderilmez, müşteriden türetiliyor.
+    if (!officerFromCustomer && operationOfficer?.id) {
+      fd.append("load_charge_person[0][user_id]", String(operationOfficer.id));
+      fd.append("load_charge_person[0][user_type]", "1");
+    }
 
     emailTo.forEach((email) => fd.append("email_to[]", email));
     emailCc.forEach((email) => fd.append("email_cc[]", email));
@@ -2013,17 +2026,25 @@ export function QuotesPage() {
               <SectionTitle>Görevliler</SectionTitle>
               <div className="space-y-5 max-w-xl">
                 <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-900">
-                  Görevliler otomatik belirlenir ve elle değiştirilemez: <b>Operasyon
-                  Yetkilisi</b> kaydı açan kullanıcı, <b>Satış Temsilcisi</b> müşteriye
-                  tanımlı temsilcidir.
+                  <b>Operasyon Yetkilisi</b> müşteriye tanımlıysa değiştirilemez;
+                  tanımlı değilse elle seçebilirsiniz, boş bırakırsanız kaydı açan
+                  kullanıcı yazılır. <b>Satış Temsilcisi</b> müşteriye tanımlı
+                  temsilcidir.
                 </div>
 
-                <ReadOnlyPerson
-                  label="Operasyon Yetkilisi"
-                  person={operationOfficer}
-                  hint="Kaydı açan kullanıcı"
-                  empty="Giriş yapan kullanıcının Siber karşılığı yok ve müşteriye operasyon yetkilisi tanımlı değil."
-                />
+                {officerFromCustomer ? (
+                  <ReadOnlyPerson
+                    label="Operasyon Yetkilisi"
+                    person={operationOfficer}
+                    hint="Müşteriye tanımlı"
+                  />
+                ) : (
+                  <UserPicker
+                    label="Operasyon Yetkilisi"
+                    value={operationOfficer}
+                    onChange={setOperationOfficer}
+                  />
+                )}
 
                 <div>
                   <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">

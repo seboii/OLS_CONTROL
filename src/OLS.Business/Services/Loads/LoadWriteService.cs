@@ -366,19 +366,36 @@ public sealed class LoadWriteService : ILoadWriteService
     }
 
     /// <summary>
-    /// Görevliler ARTIK ELLE SEÇİLMİYOR — ikisi de türetiliyor:
+    /// Görevlileri yazar.
     ///
-    ///   • Operasyon Yetkilisi (user_type=1) = kaydı açan/kaydeden kullanıcı.
-    ///   • Satış Temsilcisi   (user_type=2) = MÜŞTERİYE tanımlı satış temsilcileri
-    ///     (<c>account_representatives</c>, Siber'den senkronlanan bağ).
+    /// OPERASYON YETKİLİSİ (user_type=1) — MÜŞTERİNİNKİ VARSA DEĞİŞMEZ:
     ///
-    /// Kural arayüzde değil BURADA uygulanıyor: alanlar salt-okunur gösterilse bile
-    /// istek elle çağrılabilir, tek doğruluk noktası sunucu tarafı olmalı. Bu yüzden
-    /// <c>model.ChargePersons</c> bilinçli olarak YOK SAYILIYOR.
+    ///   1. Müşteriye tanımlı operasyon yetkilisi varsa O yazılır ve istekten
+    ///      gelen değer YOK SAYILIR ("varsa değişmesin").
+    ///   2. Yoksa formdan elle seçilen kişi yazılır ("yoksa manuel girilebilsin").
+    ///   3. O da yoksa kaydeden kullanıcıya düşülür — Siber aktarımı boş
+    ///      <c>musteritemsilcisi</c>/<c>insuser</c> kabul etmiyor.
     ///
-    /// Müşteriye hiç satış temsilcisi tanımlı değilse mevcut kullanıcı yazılır:
-    /// Siber aktarımı <c>satistemsilcisikod</c> boş gelirse doğrulamada takılıyor,
-    /// alanı boş bırakmak teklifi aktarılamaz hâle getirirdi.
+    /// Eskiden 1. adım YOKTU: daima kaydeden kullanıcı yazılıyor, müşteriye
+    /// tanımlı yetkili (canlıda 3.209 caride dolu) yalnızca kaydedenin Siber
+    /// karşılığı olmadığı durumda kullanılıyordu. Yeni kural o istisnayı da
+    /// kapsıyor, çünkü müşterinin yetkilisi artık her durumda önceliklidir.
+    ///
+    /// AYRILMIŞ PERSONEL "VAR" SAYILMAZ: bağların 3.209 carisinden 1.651'inde
+    /// yetkili pasif/silinmiş bir kullanıcı. Böyle bir kaydı göreve yazmak işi
+    /// şirkette olmayan birine atamak olurdu; bu yüzden yalnızca AKTİF kullanıcı
+    /// "tanımlı yetkili" sayılır, aksi hâlde elle seçime düşülür.
+    ///
+    /// 243 carinin birden çok yetkilisi var; sıralama olmadan hangisinin
+    /// seçildiği çağrıdan çağrıya değişebilirdi — kimliğe göre sıralanır.
+    ///
+    /// SATIŞ TEMSİLCİSİ (user_type=2) = müşteriye tanımlı temsilciler; hiç yoksa
+    /// operasyon yetkilisi yazılır. Siber aktarımı <c>satistemsilcisikod</c> boş
+    /// gelirse doğrulamada takılıyor, alanı boş bırakmak teklifi aktarılamaz
+    /// hâle getirirdi.
+    ///
+    /// Kural arayüzde değil BURADA uygulanıyor: alanlar salt-okunur gösterilse
+    /// bile istek elle çağrılabilir, tek doğruluk noktası sunucu tarafıdır.
     /// </summary>
     private async Task WriteChargePersonsAsync(
         Load load, LoadWriteModel model, DateTime now, CancellationToken cancellationToken)
@@ -393,26 +410,10 @@ public sealed class LoadWriteService : ILoadWriteService
                 UpdatedAt = now,
             });
 
-        // SİSTEM HESABI İSTİSNASI: giriş yapan kullanıcının Siber karşılığı yoksa
-        // (kurulumdaki admin hesabı gibi — canlıda siber_code'u NULL) Operasyon
-        // Yetkilisi olarak yazmak Siber'e boş musteritemsilcisi/insuser göndermek
-        // demek. Böyle bir durumda müşteriye tanımlı operasyon yetkilisine düşülür.
-        var currentUserHasSiberAccount = await _db.Users.AsNoTracking()
-            .AnyAsync(u => u.Id == model.CurrentUserId
-                        && u.SiberCode != null && u.SiberCode != "", cancellationToken);
-
-        var operationOfficerId = (int)model.CurrentUserId;
-
-        if (!currentUserHasSiberAccount && model.CustomerId is { } operationCustomerId)
-        {
-            var fromCustomer = await _db.AccountRepresentatives.AsNoTracking()
-                .Where(r => r.AccountId == operationCustomerId && r.UserType == OperationOfficerType)
-                .Select(r => (int?)r.UserId)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            if (fromCustomer is { } fallbackId)
-                operationOfficerId = fallbackId;
-        }
+        var operationOfficerId =
+            await CustomerOperationOfficerAsync(model.CustomerId, cancellationToken)
+            ?? await RequestedOperationOfficerAsync(model, cancellationToken)
+            ?? (int)model.CurrentUserId;
 
         Add(operationOfficerId, OperationOfficerType);
 
@@ -432,6 +433,46 @@ public sealed class LoadWriteService : ILoadWriteService
 
         foreach (var userId in salesReps)
             Add(userId, SalesRepType);
+    }
+
+    /// <summary>
+    /// Müşteriye tanımlı AKTİF operasyon yetkilisi. Bulunursa istekten gelen
+    /// değer yok sayılır — kural "varsa değişmesin".
+    /// </summary>
+    private async Task<int?> CustomerOperationOfficerAsync(
+        int? customerId, CancellationToken cancellationToken)
+    {
+        if (customerId is not { } id)
+            return null;
+
+        return await _db.AccountRepresentatives.AsNoTracking()
+            .Where(r => r.AccountId == id && r.UserType == OperationOfficerType)
+            .Join(_db.Users.AsNoTracking().Where(u => u.DeletedAt == null && u.Status),
+                  r => (long)r.UserId, u => u.Id, (r, u) => (int?)r.UserId)
+            .OrderBy(id2 => id2)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Formdan elle seçilen operasyon yetkilisi. Yalnızca müşterinin tanımlı
+    /// yetkilisi YOKKEN dikkate alınır ve kullanıcının gerçekten var/aktif
+    /// olduğu doğrulanır: var olmayan bir kimlik Siber'e boş kod gönderirdi.
+    /// </summary>
+    private async Task<int?> RequestedOperationOfficerAsync(
+        LoadWriteModel model, CancellationToken cancellationToken)
+    {
+        var requested = model.ChargePersons
+            .Where(p => p.UserType == OperationOfficerType && p.UserId > 0)
+            .Select(p => p.UserId)
+            .FirstOrDefault();
+
+        if (requested is not { } userId)
+            return null;
+
+        return await _db.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == userId && u.DeletedAt == null && u.Status, cancellationToken)
+            ? userId
+            : null;
     }
 
     private void AddEmail(Load load, string key, string email, DateTime now) =>
