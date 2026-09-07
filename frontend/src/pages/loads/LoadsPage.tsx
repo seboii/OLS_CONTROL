@@ -6,6 +6,7 @@ import { FileText, Package, Plus, Trash2, Upload, File as FileIcon, X, User, Cal
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
+import { computeLademeter, parseDecimalInput, parseIntegerInput } from "@/lib/number";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { EmptyState, Pagination } from "@/components/ui/DataTable";
@@ -251,13 +252,6 @@ const YES_NO_OPTIONS = [
   { value: "1", label: "Evet" },
   { value: "0", label: "Hayır" },
 ];
-
-// En/boy (cm) -> lademetre. Referans Laravel uygulamasıyla aynı formül: (en * boy) / 24000.
-function computeLademeter(widthCm: string, lengthCm: string): string {
-  const w = parseFloat(widthCm);
-  const l = parseFloat(lengthCm);
-  return Number.isFinite(w) && Number.isFinite(l) && w > 0 && l > 0 ? ((w * l) / 24000).toFixed(2) : "";
-}
 
 const PER_PAGE = 24;
 const TABS = ["Genel Bilgiler", "Paketler", "Finans", "Görevliler", "Hareketler", "Evrak Takibi", "Faturalar", "Dosya Arşivi", "İşlem Geçmişi"];
@@ -1227,8 +1221,12 @@ export function LoadsPage() {
     }
   }
 
-  const num = (v: string) => (v.trim() === "" ? null : Number(v.replace(",", ".")));
-  const int = (v: string) => (v.trim() === "" ? null : parseInt(v, 10));
+  // AYRIŞTIRMA lib/number.ts'te — sunucudaki TurkishDecimal ile aynı kural.
+  // Buradaki eski sürüm `Number(v.replace(",", "."))` idi ve binlik ayraçlı
+  // girişte fiyatı SESSİZCE düşürüyordu ("1.850,75" -> NaN -> JSON null),
+  // tek ayraçlı girişte ise bin kat sapıyordu ("1.250" -> 1.25).
+  const num = parseDecimalInput;
+  const int = parseIntegerInput;
 
   async function handleSave() {
     if (!editingId || saving) return;

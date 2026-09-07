@@ -269,8 +269,9 @@ bilgisayardan hem Docker ağı içinden koşabiliyor.
 cd frontend && npm test
 ```
 
-29 test (Vitest + jsdom): otomatik taslaklar (`lib/autodraft.ts`), API katmanının
-oturum düşme ve hata ayıklama davranışı (`lib/api.ts`), menü görünürlüğü
+53 test (Vitest + jsdom): Türkçe sayı ayrıştırma (`lib/number.ts` — sunucudaki
+`TurkishDecimal` ile aynı örnekler), otomatik taslaklar (`lib/autodraft.ts`), API
+katmanının oturum düşme ve hata ayıklama davranışı (`lib/api.ts`), menü görünürlüğü
 (`components/layout/navigation.ts`).
 
 Yapılandırma `vitest.config.ts` dosyasında ve `vite.config.ts`'ten **ayrı** tutuldu:

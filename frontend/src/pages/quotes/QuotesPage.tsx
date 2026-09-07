@@ -7,6 +7,7 @@ import type { LucideIcon } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
+import { computeLademeter } from "@/lib/number";
 import { useToast } from "@/components/ui/Toast";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { EmptyState, Pagination } from "@/components/ui/DataTable";
@@ -201,13 +202,6 @@ function draftHasContent(d: Omit<LocalDraft, "savedAt">): boolean {
     (c) => c.product_type_id || c.case_type_id || c.gross_weight || c.volume ||
       c.width || c.length || c.height || c.net_weight || c.lademeter,
   );
-}
-
-// En/boy (cm) -> lademetre. Referans Laravel uygulamasıyla aynı formül: (en * boy) / 24000.
-function computeLademeter(widthCm: string, lengthCm: string): string {
-  const w = parseFloat(widthCm);
-  const l = parseFloat(lengthCm);
-  return Number.isFinite(w) && Number.isFinite(l) && w > 0 && l > 0 ? ((w * l) / 24000).toFixed(2) : "";
 }
 
 const PER_PAGE = 24;

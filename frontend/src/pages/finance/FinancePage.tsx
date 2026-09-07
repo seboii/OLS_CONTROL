@@ -4,6 +4,7 @@ import { Wallet, Plus, Trash2, FileText, AlertTriangle } from "lucide-react";
 import { api, type DataMessage, type Paginated } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue } from "@/lib/hooks";
+import { parseDecimalInput } from "@/lib/number";
 import { ModulePage } from "@/components/ui/ModulePage";
 import { DataTable, EmptyState, Pagination, type Column } from "@/components/ui/DataTable";
 import { Drawer } from "@/components/ui/Overlay";
@@ -645,20 +646,25 @@ function InvoiceForm({
   }, [open]);
 
   // Toplamlar SUNUCUDA yeniden hesaplanıyor; buradaki değer yalnızca önizleme.
+  //
+  // AYRIŞTIRMA lib/number.ts'ten: düz `Number(...)` Türkçe girişi çözemiyordu.
+  // "1.850,75" NaN dönüyor ve `|| 0` onu SIFIRA çekiyordu — dahası satır
+  // `unit_price > 0` süzgecine takılıp faturadan tamamen düşüyordu. "1.250"
+  // ise 1,25'e iniyordu (bin kat sapma).
   const totals = useMemo(() => {
     let net = 0;
     let tax = 0;
     for (const l of lines) {
-      const amount = (Number(l.quantity) || 0) * (Number(l.unit_price) || 0);
+      const amount = (parseDecimalInput(l.quantity) ?? 0) * (parseDecimalInput(l.unit_price) ?? 0);
       net += amount;
-      tax += (amount * (Number(l.tax_rate) || 0)) / 100;
+      tax += (amount * (parseDecimalInput(l.tax_rate) ?? 0)) / 100;
     }
     return { net, tax, total: net + tax };
   }, [lines]);
 
   const valid =
     account !== null &&
-    lines.some((l) => l.item !== null && Number(l.unit_price) > 0) &&
+    lines.some((l) => l.item !== null && (parseDecimalInput(l.unit_price) ?? 0) > 0) &&
     (isIncome ? series.trim().length > 0 : invoiceNumber.trim().length > 0);
 
   function save() {
@@ -674,15 +680,16 @@ function InvoiceForm({
         invoice_date: invoiceDate,
         due_date: dueDate || null,
         currency_code: currency,
-        exchange_rate: Number(rate) || 1,
+        // 0 kur anlamsız; eski davranışta olduğu gibi 1'e çekilir.
+        exchange_rate: parseDecimalInput(rate) || 1,
         description: description || null,
         lines: lines
-          .filter((l) => l.item !== null && Number(l.unit_price) > 0)
+          .filter((l) => l.item !== null && (parseDecimalInput(l.unit_price) ?? 0) > 0)
           .map((l) => ({
             financial_item_id: l.item!.id,
-            quantity: Number(l.quantity) || 1,
-            unit_price: Number(l.unit_price) || 0,
-            tax_rate: Number(l.tax_rate) || 0,
+            quantity: parseDecimalInput(l.quantity) || 1,
+            unit_price: parseDecimalInput(l.unit_price) ?? 0,
+            tax_rate: parseDecimalInput(l.tax_rate) ?? 0,
             description: l.description || null,
           })),
       })
