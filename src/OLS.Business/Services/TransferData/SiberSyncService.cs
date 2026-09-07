@@ -592,9 +592,15 @@ public sealed class SiberSyncService : ISiberSyncService
     /// toplu yazma
     /// "invalid byte sequence for encoding UTF8: 0x00" ile düşüyor —
     /// tek bir satır yüzünden 86 bin satırlık aktarım iptal oluyordu.
+    ///
+    /// KAÇIŞ DİZİSİ KULLANILIR, HAM BAYT DEĞİL. Aşağıdaki dizge bir dönem
+    /// gerçek bir 0x00 baytı taşıyordu ve sonuç, grep/ripgrep'in DOSYANIN
+    /// TAMAMINI ikili sayıp içeriğini hiç taramamasıydı ("Binary file …
+    /// matches") — 2.466 satırlık senkron dosyasında kod aramanın çalışmaması
+    /// demekti. Davranış aynı: <c>"\0"</c> da tek karakterlik NUL dizgesidir.
     /// </summary>
     private static string? StripNul(string? value) =>
-        value is null ? null : value.Replace(" ", string.Empty);
+        value is null ? null : value.Replace("\0", string.Empty);
 
     private sealed class ChangeLogRow
     {
