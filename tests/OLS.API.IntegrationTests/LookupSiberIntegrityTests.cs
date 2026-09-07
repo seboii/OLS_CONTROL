@@ -88,7 +88,9 @@ public sealed class LookupSiberIntegrityTests
 
         var suspects = new List<string>();
 
-        void Check(string label, IEnumerable<(string Name, string? SiberId)> rows)
+        // Ad sutunu semada nullable; demet de oyle tanimlanmali, aksi halde
+        // her cagri CS8604 uretiyordu.
+        void Check(string label, IEnumerable<(string? Name, string? SiberId)> rows)
         {
             suspects.AddRange(rows
                 .Where(r => r.SiberId is not null
@@ -99,13 +101,13 @@ public sealed class LookupSiberIntegrityTests
         }
 
         Check("Departman", await db.Departments.AsNoTracking()
-            .Select(x => new ValueTuple<string, string?>(x.Name, x.SiberId)).ToListAsync());
+            .Select(x => new ValueTuple<string?, string?>(x.Name, x.SiberId)).ToListAsync());
         Check("Ödeme tipi", await db.PaymentTypes.AsNoTracking()
-            .Select(x => new ValueTuple<string, string?>(x.Name, x.SiberId)).ToListAsync());
+            .Select(x => new ValueTuple<string?, string?>(x.Name, x.SiberId)).ToListAsync());
         Check("Yükleme tipi", await db.LoadingTypes.AsNoTracking()
-            .Select(x => new ValueTuple<string, string?>(x.Name, x.SiberId)).ToListAsync());
+            .Select(x => new ValueTuple<string?, string?>(x.Name, x.SiberId)).ToListAsync());
         Check("İş türü", await db.WorkTypes.AsNoTracking()
-            .Select(x => new ValueTuple<string, string?>(x.Name, x.SiberId)).ToListAsync());
+            .Select(x => new ValueTuple<string?, string?>(x.Name, x.SiberId)).ToListAsync());
 
         suspects.Should().BeEmpty("taklit Siber verisi gerçek veritabanına bulaşmamalı");
     }

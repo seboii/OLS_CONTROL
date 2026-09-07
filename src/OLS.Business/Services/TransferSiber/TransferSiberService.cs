@@ -370,9 +370,15 @@ public sealed class TransferSiberService : ITransferSiberService
             Country(load.TargetCountryId));
     }
 
+    /// <summary>
+    /// AsNoTracking KALDIRILDI: cagri zaten skaler bir projeksiyon
+    /// (<c>Select(d =&gt; d.SiberId)</c>) ve EF skaler projeksiyonu hicbir
+    /// zaman izlemiyor — cagrinin etkisi yoktu, yalnizca CS8634 uretiyordu
+    /// (string? tipi AsNoTracking'in class kisitini karsilamiyor).
+    /// </summary>
     private static async Task<string?> CodeAsync(
         IQueryable<string?> query, CancellationToken cancellationToken) =>
-        await query.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        await query.FirstOrDefaultAsync(cancellationToken);
 
     /// <summary>
     /// olsold'daki zorunlu alan listesi ($fields dizisi, TransferSiberController::save);

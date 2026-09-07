@@ -876,7 +876,9 @@ export function QuotesPage() {
       })
       .catch(() => addToast("Taslaklar yüklenemedi", "error"))
       .finally(() => setDraftsLoading(false));
-  }, [draftsOpen]);
+    // addToast, ToastProvider'da useCallback([]) ile sabit — listeye eklemek
+    // etkiyi yeniden tetiklemez.
+  }, [draftsOpen, addToast]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {

@@ -40,8 +40,12 @@ export function UserPicker({ label, value, onChange, required, error }: {
   const [highlighted, setHighlighted] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Bagimlilik listesi BILEREK dar: displayName yalnizca bu uc alani okuyor.
+  // "value" nesnesinin kendisini eklemek, ust bilesen her render'da yeni bir
+  // nesne ureten yerlerde kullanicinin yazdigi metni silerdi.
   useEffect(() => {
     setQuery(value ? displayName(value) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value?.id, value?.name, value?.surname]);
 
   // Siber senkronundan sonra Kullanıcı tablosu yüzlerce satır içerebiliyor —

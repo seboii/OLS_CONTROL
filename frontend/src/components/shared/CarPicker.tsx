@@ -55,8 +55,10 @@ export function CarPicker({ label, value, onChange, required, error, carTypeId }
   const [highlighted, setHighlighted] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Bkz. UserPicker: liste bilerek dar, displayPlate yalnizca bu iki alani okuyor.
   useEffect(() => {
     setQuery(value ? displayPlate(value) : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value?.id, value?.plate_number]);
 
   useEffect(() => {

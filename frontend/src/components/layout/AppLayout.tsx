@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Outlet, useLocation, Navigate } from "react-router-dom";
 import { motion, AnimatePresence, MotionConfig } from "motion/react";
-import { Sidebar, MODULE_LABELS } from "./Sidebar";
+import { Sidebar } from "./Sidebar";
+import { MODULE_LABELS } from "./navigation";
 import { TopBar } from "./TopBar";
 import { useAuth } from "@/lib/auth";
 

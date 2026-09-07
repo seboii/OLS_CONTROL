@@ -199,9 +199,13 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
             .Select(m => m.LoadTransferId)
             .ToListAsync(cancellationToken);
 
+        // TryParse iki kez cagrilmiyor ve null'a karsi guvenli: sutun metin
+        // oldugu icin liste string? tasiyor, long.Parse metot grubu ise null
+        // kabul etmiyordu (CS8622).
         var excluded = mappedIds
-            .Where(id => long.TryParse(id, out _))
-            .Select(long.Parse)
+            .Select(id => long.TryParse(id, out var parsed) ? parsed : (long?)null)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
             .Distinct()
             .ToList();
 
