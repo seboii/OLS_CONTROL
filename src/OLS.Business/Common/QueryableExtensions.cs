@@ -74,6 +74,9 @@ public static class QueryableExtensions
     internal static string NormalizeTurkish(string input) =>
         input.Replace('İ', 'i').Replace('I', 'i').Replace('ı', 'i').ToLowerInvariant();
 
+    /// <summary>İstemcinin isteyebileceği en büyük sayfa boyutu.</summary>
+    public const int MaxPerPage = 200;
+
     /// <summary>
     /// per_page verilmişse Laravel paginator zarfı, verilmemişse düz liste döndürür.
     /// İki durumu da tek yerde tuttuk çünkü frontend ikisini farklı tüketiyor:
@@ -86,8 +89,16 @@ public static class QueryableExtensions
         string path,
         CancellationToken cancellationToken = default)
     {
+        // per_page HİÇ GELMEZSE tüm liste döner. Bu bilinçli ve korunuyor:
+        // açılır liste/seçici uçları (şehir, ülke, tanım tabloları) bu moda
+        // dayanıyor ve sayfalamaya çevirmek her seçiciyi bozardı.
         if (perPage is null or < 1)
             return await query.ToListAsync(cancellationToken);
+
+        // ÜST SINIR: gelen değer sınırsızdı. per_page=1000000 hem bir milyon
+        // satırlık liste hem de aynı boyda bir sayfa-bağlantısı dizisi kurmaya
+        // çalışıyordu. Arayüzün kullandığı en büyük sayfa 25; 200 fazlasıyla yeter.
+        if (perPage > MaxPerPage) perPage = MaxPerPage;
 
         if (page < 1) page = 1;
 

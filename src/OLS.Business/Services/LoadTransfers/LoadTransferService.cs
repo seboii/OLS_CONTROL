@@ -307,10 +307,7 @@ public sealed class LoadTransferService : ILoadTransferService
 
         if (!visibility.SeesEverything)
         {
-            transfers = visibility.OnlyCompanyId is { } only
-                ? transfers.Where(t => t.SiberCompanyId == only)
-                : transfers.Where(t => t.SiberCompanyId == null ||
-                                       t.SiberCompanyId != visibility.ExcludeCompanyId);
+            transfers = transfers.VisibleTo(visibility);
         }
 
         if (!string.IsNullOrWhiteSpace(query.Search))

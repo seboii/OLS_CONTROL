@@ -119,13 +119,9 @@ public sealed class LoadService : ILoadService
         // kalsaydı Avrora yükünün bilgisi teklif üzerinden sızardı.
         var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
 
-        if (!visibility.SeesEverything)
-        {
-            loads = visibility.OnlyCompanyId is { } only
-                ? loads.Where(l => l.SiberCompanyId == only)
-                : loads.Where(l => l.SiberCompanyId == null ||
-                                   l.SiberCompanyId != visibility.ExcludeCompanyId);
-        }
+        // Filtre CompanyVisibilityExtensions'a taşındı: harfe duyarsız
+        // karşılaştırma tek yerde dursun (bkz. o dosyanın açıklaması).
+        loads = loads.VisibleTo(visibility);
 
         // KİŞİSEL FİLTRE KALDIRILDI (bilinçli).
         //

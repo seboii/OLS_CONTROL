@@ -154,10 +154,7 @@ public sealed class ExpeditionService : IExpeditionService
 
         if (!visibility.SeesEverything)
         {
-            expeditions = visibility.OnlyCompanyId is { } only
-                ? expeditions.Where(e => e.SiberCompanyId == only)
-                : expeditions.Where(e => e.SiberCompanyId == null ||
-                                         e.SiberCompanyId != visibility.ExcludeCompanyId);
+            expeditions = expeditions.VisibleTo(visibility);
         }
 
         if (!string.IsNullOrWhiteSpace(query.Search))

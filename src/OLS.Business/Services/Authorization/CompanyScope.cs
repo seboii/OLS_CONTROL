@@ -167,7 +167,7 @@ public sealed class CompanyScope : ICompanyScope
 
         return string.IsNullOrWhiteSpace(scoped)
             ? new CompanyVisibility(false, null, AvroraCompanyId)
-            : new CompanyVisibility(false, scoped, null);
+            : new CompanyVisibility(false, Canonical(scoped), null);
     }
 
     public async Task<CompanyCapabilities> ResolveCapabilitiesAsync(
@@ -198,10 +198,27 @@ public sealed class CompanyScope : ICompanyScope
         if (!visibility.SeesEverything)
             return OlsCompanyId;
 
-        return Companies.Any(c => string.Equals(c.Id, requested, StringComparison.OrdinalIgnoreCase))
-            ? requested!
-            : OlsCompanyId;
+        // İSTEMCİDEN GELEN DİZGE OLDUĞU GİBİ SAKLANMAZ.
+        //
+        // Eskiden eşleşme harfe duyarsız kontrol edilip değer AYNEN dönüyordu;
+        // şirket seçicisinden küçük harfli bir GUID gelince kayıt küçük harfle
+        // yazılıyor, görünürlük süzgeci ise BÜYÜK harfli sabitle karşılaştırdığı
+        // için kayıt yanlış tarafa düşüyordu (canlıda iki sefer). Artık daima
+        // Companies listesindeki kanonik değer yazılır.
+        return Companies
+            .FirstOrDefault(c => string.Equals(c.Id, requested, StringComparison.OrdinalIgnoreCase))
+            ?.Id ?? OlsCompanyId;
     }
+
+    /// <summary>
+    /// Bilinen bir şirketse listedeki kanonik (BÜYÜK harfli) yazımı, değilse
+    /// değerin kendisi. Kapsam alanı elle de doldurulabildiği için
+    /// (<c>POST /api/v1/roles/company-scope</c>) yazımın normalleşmesi burada
+    /// da gerekiyor.
+    /// </summary>
+    private static string Canonical(string value) =>
+        Companies.FirstOrDefault(c => string.Equals(c.Id, value, StringComparison.OrdinalIgnoreCase))
+            ?.Id ?? value;
 
     public async Task<bool> CanChooseCompanyAsync(
         long? userId, CancellationToken cancellationToken = default) =>

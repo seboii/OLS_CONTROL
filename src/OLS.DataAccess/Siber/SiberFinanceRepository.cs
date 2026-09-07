@@ -177,7 +177,7 @@ public sealed class SiberFinanceRepository : ISiberFinanceRepository
         // Hesap planı 3.938 satır ve tarih sütunu yok — her turda tamamı çekilir.
         const string sql = """
             SELECT LOWER(CAST(hesapplanid AS VARCHAR(64))) AS HesapPlanId,
-                   LOWER(CAST(sirketid    AS VARCHAR(64))) AS SirketId,
+                   CAST(sirketid          AS VARCHAR(64))  AS SirketId,
                    LTRIM(RTRIM(hesapkod))                  AS HesapKod,
                    ad AS Ad, ad2 AS Ad2, seviye AS Seviye, pasif AS Pasif
             FROM sfy_hesapplan
@@ -192,7 +192,7 @@ public sealed class SiberFinanceRepository : ISiberFinanceRepository
     {
         const string sql = """
             SELECT LOWER(CAST(g.gelirgiderid AS VARCHAR(64))) AS GelirGiderId,
-                   LOWER(CAST(g.sirketid     AS VARCHAR(64))) AS SirketId,
+                   CAST(g.sirketid           AS VARCHAR(64))  AS SirketId,
                    LTRIM(RTRIM(g.gc))            AS Gc,
                    g.faturaserino                AS FaturaSeriNo,
                    g.faturano                    AS FaturaNo,
@@ -259,7 +259,7 @@ public sealed class SiberFinanceRepository : ISiberFinanceRepository
         // ceksenetno/cekbanka taşınmıyor: 29.007 kaydın hiçbirinde dolu değil.
         const string sql = """
             SELECT LOWER(CAST(t.tahsilatodemeid AS VARCHAR(64))) AS TahsilatOdemeId,
-                   LOWER(CAST(t.sirketid        AS VARCHAR(64))) AS SirketId,
+                   CAST(t.sirketid              AS VARCHAR(64))  AS SirketId,
                    t.makbuzno    AS MakbuzNo,
                    t.makbuztarih AS MakbuzTarih,
                    t.vadetarih   AS VadeTarih,
@@ -291,7 +291,7 @@ public sealed class SiberFinanceRepository : ISiberFinanceRepository
     {
         const string sql = """
             SELECT LOWER(CAST(f.fisid    AS VARCHAR(64))) AS FisId,
-                   LOWER(CAST(f.sirketid AS VARCHAR(64))) AS SirketId,
+                   CAST(f.sirketid       AS VARCHAR(64))  AS SirketId,
                    f.fistur     AS FisTur,
                    f.fistarih   AS FisTarih,
                    f.fisno      AS FisNo,
@@ -318,7 +318,7 @@ public sealed class SiberFinanceRepository : ISiberFinanceRepository
         const string sql = """
             SELECT LOWER(CAST(d.fisdetayid AS VARCHAR(64))) AS FisDetayId,
                    LOWER(CAST(d.fisid      AS VARCHAR(64))) AS FisId,
-                   LOWER(CAST(d.sirketid   AS VARCHAR(64))) AS SirketId,
+                   CAST(d.sirketid         AS VARCHAR(64))  AS SirketId,
                    LTRIM(RTRIM(d.hesapkod)) AS HesapKod,
                    d.borc        AS Borc,
                    d.alacak      AS Alacak,

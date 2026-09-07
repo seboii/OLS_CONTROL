@@ -335,6 +335,12 @@ public sealed class LedgerService : ILedgerService
         if (query.PerPage is not { } perPage || perPage < 1)
             return rows;
 
+        // Üst sınır ToPagedOrListAsync ile aynı: mizan kendi sayfalamasını
+        // bellekte yapıyor, sınırsız per_page tek yanıtta binlerce satır
+        // döndürürdü.
+        if (perPage > QueryableExtensions.MaxPerPage)
+            perPage = QueryableExtensions.MaxPerPage;
+
         var page = query.Page < 1 ? 1 : query.Page;
 
         return LengthAwarePaginator<TrialBalanceRow>.Create(
@@ -380,12 +386,7 @@ public sealed class LedgerService : ILedgerService
         var lines = _db.FinanceVoucherLines.AsNoTracking();
 
         var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
-        if (visibility.SeesEverything)
-            return lines;
 
-        return visibility.OnlyCompanyId is { } only
-            ? lines.Where(l => l.SiberCompanyId == only)
-            : lines.Where(l => l.SiberCompanyId == null ||
-                               l.SiberCompanyId != visibility.ExcludeCompanyId);
+        return lines.VisibleTo(visibility, l => l.SiberCompanyId);
     }
 }

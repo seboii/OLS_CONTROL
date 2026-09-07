@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.Business.Services.Authorization;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 
@@ -202,7 +203,15 @@ public sealed class RoleService : IRoleService
         if (user is null)
             return false;
 
-        user.SiberCompanyId = string.IsNullOrWhiteSpace(companyId) ? null : companyId.Trim();
+        // Kanonik yazımla saklanır: görünürlük süzgeci bu değeri doğrudan
+        // karşılaştırıyor, küçük harfli bir GUID kullanıcıyı kendi kayıtlarından
+        // koparırdı (bkz. CompanyVisibilityExtensions).
+        var trimmed = companyId?.Trim();
+        user.SiberCompanyId = string.IsNullOrWhiteSpace(trimmed)
+            ? null
+            : CompanyScope.Companies
+                  .FirstOrDefault(c => string.Equals(c.Id, trimmed, StringComparison.OrdinalIgnoreCase))
+                  ?.Id ?? trimmed;
         user.UpdatedAt = _clock.Now;
 
         await _db.SaveChangesAsync(cancellationToken);

@@ -492,36 +492,20 @@ public sealed class FinanceDocumentService : IFinanceDocumentService
     }
 
     /// <summary>Şirket görünürlüğünü herhangi bir finans tablosuna uygular.</summary>
+    /// <summary>
+    /// Şirket süzgeci. İfade ağacını kendi kurmak yerine
+    /// <see cref="CompanyVisibilityExtensions.VisibleTo{T}"/> çağrılıyor:
+    /// aynı mantığın iki kopyası vardı ve buradaki kopya harfe DUYARLI
+    /// karşılaştırma yapıyordu — finans tablolarının 343.059 satırının tamamı
+    /// küçük harfle yazıldığı için filtre iki yönde birden yanlış çalışıyordu.
+    /// </summary>
     private async Task<IQueryable<T>> ScopedAsync<T>(
         IQueryable<T> source,
         System.Linq.Expressions.Expression<Func<T, string?>> companySelector,
         CancellationToken cancellationToken)
     {
         var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);
-        if (visibility.SeesEverything)
-            return source;
 
-        var parameter = companySelector.Parameters[0];
-        var body = companySelector.Body;
-
-        System.Linq.Expressions.Expression predicate;
-
-        if (visibility.OnlyCompanyId is { } only)
-        {
-            predicate = System.Linq.Expressions.Expression.Equal(
-                body, System.Linq.Expressions.Expression.Constant(only, typeof(string)));
-        }
-        else
-        {
-            var isNull = System.Linq.Expressions.Expression.Equal(
-                body, System.Linq.Expressions.Expression.Constant(null, typeof(string)));
-            var notExcluded = System.Linq.Expressions.Expression.NotEqual(
-                body,
-                System.Linq.Expressions.Expression.Constant(visibility.ExcludeCompanyId, typeof(string)));
-            predicate = System.Linq.Expressions.Expression.OrElse(isNull, notExcluded);
-        }
-
-        return source.Where(
-            System.Linq.Expressions.Expression.Lambda<Func<T, bool>>(predicate, parameter));
+        return source.VisibleTo(visibility, companySelector);
     }
 }
