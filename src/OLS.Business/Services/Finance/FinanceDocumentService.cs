@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 
 namespace OLS.Business.Services.Finance;
@@ -242,9 +243,9 @@ public sealed class FinanceDocumentService : IFinanceDocumentService
         {
             var term = QueryableExtensions.NormalizeTurkish(query.Search);
             invoices = invoices.Where(i =>
-                (i.InvoiceNumber != null && i.InvoiceNumber.ToLower().Contains(term)) ||
-                (i.AccountName != null && i.AccountName.ToLower().Contains(term)) ||
-                (i.DocumentNumber != null && i.DocumentNumber.ToLower().Contains(term)));
+                (i.InvoiceNumber != null && TurkishFold.Fold(i.InvoiceNumber).Contains(term)) ||
+                (i.AccountName != null && TurkishFold.Fold(i.AccountName).Contains(term)) ||
+                (i.DocumentNumber != null && TurkishFold.Fold(i.DocumentNumber).Contains(term)));
         }
 
         var rows = invoices
@@ -351,9 +352,9 @@ public sealed class FinanceDocumentService : IFinanceDocumentService
         {
             var term = QueryableExtensions.NormalizeTurkish(query.Search);
             payments = payments.Where(p =>
-                (p.ReceiptNumber != null && p.ReceiptNumber.ToLower().Contains(term)) ||
-                (p.DebitName != null && p.DebitName.ToLower().Contains(term)) ||
-                (p.CreditName != null && p.CreditName.ToLower().Contains(term)));
+                (p.ReceiptNumber != null && TurkishFold.Fold(p.ReceiptNumber).Contains(term)) ||
+                (p.DebitName != null && TurkishFold.Fold(p.DebitName).Contains(term)) ||
+                (p.CreditName != null && TurkishFold.Fold(p.CreditName).Contains(term)));
         }
 
         var rows = payments
@@ -387,8 +388,8 @@ public sealed class FinanceDocumentService : IFinanceDocumentService
         {
             var term = QueryableExtensions.NormalizeTurkish(query.Search);
             vouchers = vouchers.Where(v =>
-                (v.Description != null && v.Description.ToLower().Contains(term)) ||
-                (v.DocumentNumber != null && v.DocumentNumber.ToLower().Contains(term)));
+                (v.Description != null && TurkishFold.Fold(v.Description).Contains(term)) ||
+                (v.DocumentNumber != null && TurkishFold.Fold(v.DocumentNumber).Contains(term)));
         }
 
         var rows = vouchers
@@ -480,8 +481,8 @@ public sealed class FinanceDocumentService : IFinanceDocumentService
         {
             var term = QueryableExtensions.NormalizeTurkish(query.Search);
             plans = plans.Where(p =>
-                p.Code.ToLower().Contains(term) ||
-                (p.Name != null && p.Name.ToLower().Contains(term)));
+                TurkishFold.Fold(p.Code).Contains(term) ||
+                (p.Name != null && TurkishFold.Fold(p.Name).Contains(term)));
         }
 
         var rows = plans

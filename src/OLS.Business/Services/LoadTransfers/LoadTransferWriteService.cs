@@ -60,6 +60,11 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
     /// <summary>olsold: teklif durumu 5 ("Olumlu") olmalı.</summary>
     private const int PositiveStatusTypeId = 5;
 
+    /// <summary>load_charge_people.user_type sözleşmesi (bkz. LoadChargePerson).</summary>
+    private const int OperationOfficerType = 1;
+    private const int SalesRepType = 2;
+    private const int PricingUserType = 3;
+
     private readonly OlsDbContext _db;
     private readonly ISiberLoadRepository _siber;
     private readonly ISiberReservationRepository _reservations;
@@ -170,10 +175,17 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             ToplamHacim = totalVolume,
             ToplamLademetre = totalLademeter,
             UcretAgirlik = totalLademeter * SiberLoadRepository.LademeterMultiplier,
-            MusteriTemsilcisiAd = context.CurrentUserSiberName,
+            MusteriTemsilcisiAd = context.ChargePersonSiberName,
+            MusteriTemsilcisi2Ad = context.SecondChargePersonSiberName,
+            FiyatlandiranKullaniciId = context.PricingUserSiberId,
+            // Teklifin satış temsilcisi yüke TAŞINIR. Boş kalırsa Siber INSERT'i
+            // eski davranışa (kaydı giren) düşüyor.
+            SatisTemsilcisiKod = context.SalesRepSiberCode,
+            TeslimSekil = context.DeliveryMethodEdikod,
+            DovizKod = context.CurrencyCode,
             DepartmanId = context.Department?.SiberId,
             ToplamKap = totalQuantity,
-            KayitGiren = context.CurrentUserSiberCode,
+            KayitGiren = context.ChargePersonSiberCode,
             TalimatGelisTarihi = load.OfferDate?.ToDateTime(TimeOnly.MinValue) ?? now,
             YukTurKod = context.LoadTransferType?.Code,
             // skn_yuk'ta ülke için kimlik sütunu yok: yalnızca çözülmüş AD ve
@@ -224,9 +236,21 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             TotalVolume = totalVolume,
             TotalLademeter = totalLademeter,
             WeightFee = totalLademeter * SiberLoadRepository.LademeterMultiplier,
-            CustomerRepresentativeName = (int)currentUserId,
-            SecondCustomerRepresentativeName = (int)currentUserId,
+            // YEREL AYNA SİBER'E YAZILANLA AYNI KİŞİ OLMALI. Eskiden buraya
+            // kaydı yapan kullanıcı yazılıyordu, Siber'e ise teklifin
+            // görevlisi — iki taraf farklı kişiyi gösteriyordu ve bir sonraki
+            // senkron zaten Siber'in adına göre üzerine yazıyordu.
+            CustomerRepresentativeName = context.OperationOfficerUserId ?? (int)currentUserId,
+            SecondCustomerRepresentativeName =
+                context.SecondOperationOfficerUserId ?? context.OperationOfficerUserId ?? (int)currentUserId,
+            PricingUserId = context.PricingUserId ?? context.OperationOfficerUserId,
             DepartmentId = load.DepartmentId,
+            // TEKLİFTE TOPLANAN, YÜKE TAŞINAN ALANLAR. Bu ikisi teklif
+            // aşamasında biliniyor ve yükün durumunu etkilemiyor; dönüşümde
+            // taşınmazsa kullanıcı yükü açtıktan sonra tek tek girmek zorunda
+            // kalıyordu.
+            DeliveryMethodId = load.DeliveryMethodId,
+            CurrencyId = load.CurrencyId,
             LoadNumberWorkType = loadNumberWorkType,
             ConnectedLoadNumberWorkType = loadNumberWorkType,
             TotalCap = totalQuantity,
@@ -240,7 +264,10 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             LoadingContinent = context.DepartureCountry?.Continent,
             UnloadingContinent = context.TargetCountry?.Continent,
             UsercodeWithNotification = (int)currentUserId,
-            SalesRepCode = (int)currentUserId,
+            // Yerel ayna Siber'e yazılanla aynı kişi olmalı: eskiden buraya
+            // kaydı yapan kullanıcı yazılıyordu, Siber'e ise teklifin satış
+            // temsilcisi gidiyordu.
+            SalesRepCode = context.SalesRepUserId ?? (int)currentUserId,
             WayOfWorking = load.WayOfWorking,
             FrontTransportationByUs = load.FrontTransportationByUs,
             FinalTransportationByUs = load.FinalTransportationByUs,
@@ -410,7 +437,7 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
                     Miktar = item.Quantity,
                     Tutar = total,
                     KayitGirisTarih = now,
-                    KayitGiren = context.CurrentUserSiberCode,
+                    KayitGiren = context.ChargePersonSiberCode,
                 }, cancellationToken);
             }
         }
@@ -646,9 +673,18 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
         WorkType? WorkType, LoadingType? LoadingType, Account? Customer, Account? Sender,
         Account? Receiver, PaymentType? PaymentType, Instruction? Instruction,
         RomorkType? RomorkType, Department? Department, LoadTransferType? LoadTransferType,
-        StatusType? StatusType, string? CurrentUserSiberName, string? CurrentUserSiberCode,
+        StatusType? StatusType,
         bool HasContents, bool HasFinancialItems, bool HasFinancialItemWithoutKalem,
-        string? ChargePersonSiberName, string? ChargePersonSiberCode, string? SalesRepSiberCode,
+        // GÖREVLİLER TİPE GÖRE ÇÖZÜLÜR (aşağıdaki nota bakınız). 1. ve 2.
+        // operasyon yetkilisi Siber'in iki ayrı sütununa yazılıyor.
+        int? OperationOfficerUserId, string? ChargePersonSiberName, string? ChargePersonSiberCode,
+        int? SecondOperationOfficerUserId, string? SecondChargePersonSiberName,
+        int? SalesRepUserId, string? SalesRepSiberCode,
+        // Teslim şekli Siber'de Incoterm KODU (EXW/FOB), döviz üç harfli kod.
+        string? DeliveryMethodEdikod, string? CurrencyCode,
+        // FİYATLANDIRAN: yerel kimliği (yük aynasına) ve Siber GUID'i
+        // (skn_yuk.fiyatlandirankullaniciid) birlikte taşınır.
+        int? PricingUserId, string? PricingUserSiberId,
         Account? CompanyPayFreight,
         // Ülkenin Siber karşılığı: kimliği (rezervasyon karşılaştırması), adı ve
         // kıtası (skn_yuk metin sütunları). Bkz. ISiberCountryResolver.
@@ -656,12 +692,30 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
 
     private async Task<OfferContext> LoadContextAsync(Load load, CancellationToken cancellationToken)
     {
+        // TİPE GÖRE, SIRAYA GÖRE DEĞİL.
+        //
+        // Eskiden görevliler konuma göre okunuyordu: [0] operasyon yetkilisi,
+        // [1] satış temsilcisi. Yazma tarafı yetkiliyi tek satır olarak
+        // eklediği sürece çalışıyordu; teklif artık İKİ operasyon yetkilisi
+        // taşıdığı için [1] satış temsilcisi değil, 2. yetkili olurdu ve
+        // satistemsilcisikod'a yanlış kod giderdi.
         var chargePeople = await _db.LoadChargePeople.AsNoTracking()
             .Where(p => p.LoadId == (int)load.Id)
             .OrderBy(p => p.Id)
             .Join(_db.Users, p => p.UserId, u => (int)u.Id,
-                (p, u) => new { u.SiberName, u.SiberCode })
+                (p, u) => new { p.UserType, UserId = (int)u.Id, u.SiberName, u.SiberCode, u.SiberId })
             .ToListAsync(cancellationToken);
+
+        var officers = chargePeople.Where(p => p.UserType == OperationOfficerType).ToList();
+        var operationOfficer = officers.ElementAtOrDefault(0);
+        var secondOperationOfficer = officers.ElementAtOrDefault(1);
+        var salesRep = chargePeople.FirstOrDefault(p => p.UserType == SalesRepType);
+
+        // Fiyatlandıran teklifle birlikte YÜKE TAŞINIR; teklifte hiç yoksa
+        // (Siber'den senkronlanmış eski kayıtlar) 1. operasyon yetkilisine
+        // düşülür — Siber'de ikisi zaten kayıtların %73'ünde aynı kişi.
+        var pricingUser = chargePeople.FirstOrDefault(p => p.UserType == PricingUserType)
+                          ?? operationOfficer;
 
         var countries = await _countries.ResolveAsync(
             [load.DepartureCountryId?.ToString(), load.TargetCountryId?.ToString()],
@@ -682,10 +736,6 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             await _db.Departments.AsNoTracking().FirstOrDefaultAsync(d => d.Id == load.DepartmentId, cancellationToken),
             await _db.LoadTransferTypes.AsNoTracking().FirstOrDefaultAsync(t => t.Id == load.LoadTransferTypeId, cancellationToken),
             await _db.StatusTypes.AsNoTracking().FirstOrDefaultAsync(s => s.Id == load.StatusTypeId, cancellationToken),
-            // Siber'e "müşteri temsilcisi" ve "kayıt giren" olarak yükün ilk
-            // görevlisi yazılır (olsold da loadChargePerson[0]'ı kullanıyordu).
-            chargePeople.ElementAtOrDefault(0)?.SiberName,
-            chargePeople.ElementAtOrDefault(0)?.SiberCode,
             await _db.LoadContents.AnyAsync(c => c.LoadId == load.Id, cancellationToken),
             await _db.LoadFinancialItems.AnyAsync(f => f.LoadId == load.Id, cancellationToken),
             // sfy_modulkalem.kalemid gerçek Siber'de NOT NULL — Kalem'i boş bir mali
@@ -694,9 +744,23 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
             // Raporu; 18 ETL-senkron kaydında Kalem gerçekten boş (kaynakta da NULL,
             // bu bir eşleme hatası değil) — o kayıtlar burada nazikçe reddedilir.
             await _db.LoadFinancialItems.AnyAsync(f => f.LoadId == load.Id && f.Item == null, cancellationToken),
-            chargePeople.ElementAtOrDefault(0)?.SiberName,
-            chargePeople.ElementAtOrDefault(0)?.SiberCode,
-            chargePeople.ElementAtOrDefault(1)?.SiberCode,
+            // Siber'e "müşteri temsilcisi" ve "kayıt giren" olarak 1. operasyon
+            // yetkilisi yazılır; 2. yetkili musteritemsilcisi2ad sütununa.
+            operationOfficer?.UserId,
+            operationOfficer?.SiberName,
+            operationOfficer?.SiberCode,
+            secondOperationOfficer?.UserId,
+            secondOperationOfficer?.SiberName,
+            salesRep?.UserId,
+            salesRep?.SiberCode,
+            await _db.LoadTransferDeliveryMethods.AsNoTracking()
+                .Where(d => d.Id == load.DeliveryMethodId)
+                .Select(d => d.Edikod).FirstOrDefaultAsync(cancellationToken),
+            await _db.Currencies.AsNoTracking()
+                .Where(c => c.Id == load.CurrencyId)
+                .Select(c => c.Code).FirstOrDefaultAsync(cancellationToken),
+            pricingUser?.UserId,
+            pricingUser?.SiberId,
             await _db.Accounts.AsNoTracking().FirstOrDefaultAsync(a => a.Id == load.CompanyPayFreightId, cancellationToken),
             Country(load.DepartureCountryId),
             Country(load.TargetCountryId));
@@ -727,8 +791,22 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
         if (c.Sender?.SiberId is null) return "Gönderici boş olamaz";
         if (c.Receiver?.SiberId is null) return "Alıcı boş olamaz";
         if (c.StatusType?.SiberId is null) return "Durum boş olamaz";
-        if (c.ChargePersonSiberName is null) return "Müşteri temsilcisi boş olamaz";
-        if (c.ChargePersonSiberCode is null) return "Müşteri temsilcisi kodu boş olamaz";
+        // MESAJLAR AÇILDI (olsold ile birebir DEĞİL, bilinçli).
+        //
+        // Kaynaktaki "Müşteri temsilcisi boş olamaz" metni gerçek nedeni
+        // gizliyordu: teklifte görevli ATANMIŞ oluyor, ama o kullanıcının Siber
+        // karşılığı (sky_kullanici) olmadığı için adı/kodu boş geliyordu.
+        // Canlıda yaşanan durum tam olarak buydu — Siber hesabı olmayan kurulum
+        // admini teklif açıyor, cariye de operasyon yetkilisi tanımlı olmadığı
+        // için yetkili o hesap oluyor ve "Yük Oluştur" hiç geçmiyordu.
+        // Kullanıcının yapabileceği tek şey teklifteki yetkiliyi değiştirmek;
+        // mesaj artık bunu söylüyor.
+        if (c.OperationOfficerUserId is null)
+            return "Operasyon yetkilisi boş olamaz";
+
+        if (c.ChargePersonSiberName is null || c.ChargePersonSiberCode is null)
+            return "Operasyon yetkilisinin Siber karşılığı yok — teklifi açıp Siber hesabı olan bir operasyon yetkilisi seçin.";
+
         if (c.SalesRepSiberCode is null) return "Satış temsilcisi kodu boş olamaz";
         if (c.Department?.SiberId is null) return "Departman boş olamaz";
         if (load.DepartureCountryId is null) return "Yükleme ülke boş olamaz";

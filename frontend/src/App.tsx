@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { AuthProvider } from "@/lib/AuthProvider";
 import { ToastProvider } from "@/components/ui/ToastProvider";
+import { RefreshProvider } from "@/lib/RefreshProvider";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LoginPage } from "@/pages/LoginPage";
 import { DashboardPage } from "@/pages/dashboard/DashboardPage";
@@ -41,6 +42,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
+          <RefreshProvider>
           <Routes>
             <Route path="/giris" element={<LoginPage />} />
             <Route element={<AppLayout />}>
@@ -65,6 +67,7 @@ export default function App() {
             </Route>
             <Route path="*" element={<Navigate to="/panel" replace />} />
           </Routes>
+          </RefreshProvider>
         </ToastProvider>
       </AuthProvider>
     </BrowserRouter>

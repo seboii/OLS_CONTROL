@@ -14,9 +14,19 @@ CREATE TABLE skn_rezervasyon (
     ontasimatarafimizdanyapilir INT, sontasimatarafimizdanyapilir INT,
     musteriid NVARCHAR(64), navlunfirmaid NVARCHAR(64), gondericiid NVARCHAR(64),
     aliciid NVARCHAR(64), durumid NVARCHAR(64), musteritemsilcisi NVARCHAR(255),
-    satistemsilcisikod NVARCHAR(64), departmanid NVARCHAR(64), aciklama NVARCHAR(1000),
+    -- IKI operasyon yetkilisi: 1.'si musteritemsilcisi (kullanici ADI),
+    -- 2.'si operasyonyetkilisikod2 (kullanici KODU). Gercek Siber'de
+    -- 19.554 rezervasyonun 17.620/17.127'sinde dolu.
+    operasyonyetkilisikod2 NVARCHAR(128) NULL,
+    satistemsilcisikod NVARCHAR(64),
+    -- FIYATLANDIRAN: gercek Siber'de uniqueidentifier (sky_kullanici.kullaniciid);
+    -- burada digerleriyle ayni sekilde NVARCHAR tutuluyor.
+    fiyatlandirankullaniciid NVARCHAR(64) NULL,
+    departmanid NVARCHAR(64), aciklama NVARCHAR(1000),
     yil INT, instime DATETIME, insuser NVARCHAR(64),
     yuklemeulkeid NVARCHAR(64), bosaltmaulkeid NVARCHAR(64), calismasekli INT,
+    -- Teklifin "Olumlu"ya cekildigi gun (bkz. LoadWriteService.ResolveApprovalDate).
+    onaytarih DATETIME NULL,
     yukid NVARCHAR(64) NULL);
 
 CREATE TABLE skn_rezervasyonyukkoli (

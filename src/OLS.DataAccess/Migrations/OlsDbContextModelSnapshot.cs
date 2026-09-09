@@ -2080,6 +2080,10 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnType("character varying(255)")
                         .HasColumnName("default_account_name");
 
+                    b.Property<bool>("IsFreight")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_freight");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(191)
@@ -2103,6 +2107,46 @@ namespace OLS.DataAccess.Migrations
                         .HasName("financial_items_pkey");
 
                     b.ToTable("financial_items", (string)null);
+                });
+
+            modelBuilder.Entity("OLS.DataAccess.Entities.FinancialItemPair", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<DateTime?>("CreatedAt")
+                        .HasColumnType("timestamp(0) without time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal>("MarkupPercent")
+                        .HasColumnType("numeric(5,2)")
+                        .HasColumnName("markup_percent");
+
+                    b.Property<long>("PurchaseItemId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("purchase_item_id");
+
+                    b.Property<long>("SaleItemId")
+                        .HasColumnType("bigint")
+                        .HasColumnName("sale_item_id");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp(0) without time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("financial_item_pairs_pkey");
+
+                    b.HasIndex("PurchaseItemId")
+                        .IsUnique();
+
+                    b.HasIndex("SaleItemId");
+
+                    b.ToTable("financial_item_pairs", (string)null);
                 });
 
             modelBuilder.Entity("OLS.DataAccess.Entities.Instruction", b =>
@@ -2471,9 +2515,17 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnType("timestamp(0) without time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<int?>("CurrencyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("currency_id");
+
                     b.Property<int?>("CustomerId")
                         .HasColumnType("integer")
                         .HasColumnName("customer_id");
+
+                    b.Property<int?>("DeliveryMethodId")
+                        .HasColumnType("integer")
+                        .HasColumnName("delivery_method_id");
 
                     b.Property<int?>("DepartmentId")
                         .HasColumnType("integer")
@@ -3070,6 +3122,10 @@ namespace OLS.DataAccess.Migrations
                         .HasColumnType("timestamp(0) without time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<int?>("CurrencyId")
+                        .HasColumnType("integer")
+                        .HasColumnName("currency_id");
+
                     b.Property<int?>("CustomerId")
                         .HasColumnType("integer")
                         .HasColumnName("customer_id");
@@ -3162,6 +3218,10 @@ namespace OLS.DataAccess.Migrations
                     b.Property<int?>("PaymentTypeId")
                         .HasColumnType("integer")
                         .HasColumnName("payment_type_id");
+
+                    b.Property<int?>("PricingUserId")
+                        .HasColumnType("integer")
+                        .HasColumnName("pricing_user_id");
 
                     b.Property<DateOnly?>("ReadinessDate")
                         .HasColumnType("date")
@@ -3317,6 +3377,93 @@ namespace OLS.DataAccess.Migrations
                     b.HasIndex(new[] { "SiberDeletedAt" }, "load_transfers_siber_deleted_at_index");
 
                     b.ToTable("load_transfers", (string)null);
+                });
+
+            modelBuilder.Entity("OLS.DataAccess.Entities.LoadTransferActualPackage", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasColumnName("id");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("CaseTypeId")
+                        .HasMaxLength(191)
+                        .HasColumnType("character varying(191)")
+                        .HasColumnName("case_type_id");
+
+                    b.Property<DateTime?>("CreatedAt")
+                        .HasColumnType("timestamp(0) without time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal?>("GrossWeight")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("gross_weight");
+
+                    b.Property<decimal?>("Height")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("height");
+
+                    b.Property<decimal?>("Lademeter")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("lademeter");
+
+                    b.Property<decimal?>("Length")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("length");
+
+                    b.Property<string>("LoadTransferId")
+                        .HasMaxLength(191)
+                        .HasColumnType("character varying(191)")
+                        .HasColumnName("load_transfer_id");
+
+                    b.Property<decimal?>("NetWeight")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("net_weight");
+
+                    b.Property<int?>("ProductTypeId")
+                        .HasColumnType("integer")
+                        .HasColumnName("product_type_id");
+
+                    b.Property<int?>("Quantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("quantity");
+
+                    b.Property<int?>("Stackable")
+                        .HasColumnType("integer")
+                        .HasColumnName("stackable");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp(0) without time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<decimal?>("Volume")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("volume");
+
+                    b.Property<decimal?>("Width")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)")
+                        .HasColumnName("width");
+
+                    b.Property<string>("Yukkolidepoid")
+                        .HasMaxLength(191)
+                        .HasColumnType("character varying(191)")
+                        .HasColumnName("yukkolidepoid");
+
+                    b.HasKey("Id")
+                        .HasName("load_transfer_actual_packages_pkey");
+
+                    b.HasIndex("LoadTransferId");
+
+                    b.ToTable("load_transfer_actual_packages", (string)null);
                 });
 
             modelBuilder.Entity("OLS.DataAccess.Entities.LoadTransferDeliveryMethod", b =>
@@ -4971,6 +5118,27 @@ namespace OLS.DataAccess.Migrations
                     b.Navigation("Account");
 
                     b.Navigation("FinanceVoucher");
+                });
+
+            modelBuilder.Entity("OLS.DataAccess.Entities.FinancialItemPair", b =>
+                {
+                    b.HasOne("OLS.DataAccess.Entities.FinancialItem", "PurchaseItem")
+                        .WithMany()
+                        .HasForeignKey("PurchaseItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("financial_item_pairs_purchase_item_id_foreign");
+
+                    b.HasOne("OLS.DataAccess.Entities.FinancialItem", "SaleItem")
+                        .WithMany()
+                        .HasForeignKey("SaleItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("financial_item_pairs_sale_item_id_foreign");
+
+                    b.Navigation("PurchaseItem");
+
+                    b.Navigation("SaleItem");
                 });
 
             modelBuilder.Entity("OLS.DataAccess.Entities.Invoice", b =>

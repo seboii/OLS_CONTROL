@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 using OLS.DataAccess.Siber;
@@ -23,7 +24,12 @@ namespace OLS.Business.Services.Expeditions;
 /// </summary>
 public interface IExpeditionLoadMappingService
 {
+    /// <param name="expeditionId">
+    /// Seçim yapılan sefer. Yalnızca BU sefere zaten bağlı yükler listeden
+    /// çıkarılır; başka seferlerde bağlı olanlar uyarıyla birlikte listelenir.
+    /// </param>
     Task<object> AvailableLoadsAsync(
+        long? expeditionId,
         string? search, int? perPage, int page, string path,
         CancellationToken cancellationToken = default);
 
@@ -161,6 +167,13 @@ public sealed class AvailableLoadDto
     [JsonPropertyName("load_status_id")] public LoadStatusRefDto? LoadStatusId { get; init; }
     [JsonPropertyName("customer_id")] public MappedNameDto? CustomerId { get; init; }
     [JsonPropertyName("sender_id")] public MappedNameDto? SenderId { get; init; }
+
+    /// <summary>
+    /// Bu yük BAŞKA seferlere de bağlı mı (kaç tane)? Sıfırdan büyükse arayüz
+    /// uyarı gösterir. Yük birden çok sefere bağlanabilir — Siber'in kendi
+    /// verisinde 143 yük öyle — ama bu istisnadır, kullanıcı bilerek seçsin.
+    /// </summary>
+    [JsonPropertyName("other_expedition_count")] public int OtherExpeditionCount { get; init; }
 }
 
 public sealed class LoadStatusRefDto
@@ -190,24 +203,42 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
     }
 
     public async Task<object> AvailableLoadsAsync(
-        string? search, int? perPage, int page, string path,
+        long? expeditionId, string? search, int? perPage, int page, string path,
         CancellationToken cancellationToken = default)
     {
-        // Eşleme tablosunda load_transfer_id METİN tutuluyor; sayıya çevirip
-        // hariç tutuyoruz (kaynak pluck + whereNotIn ile aynı sonuç).
-        var mappedIds = await _db.ExpeditionLoadMappings.AsNoTracking()
-            .Select(m => m.LoadTransferId)
+        // BULUNAN GERÇEK HATA: liste, BAŞKA bir sefere bağlı yükleri de
+        // gizliyordu. Oysa bir yük birden çok sefere bağlanabilir — Siber'in
+        // kendi verisinde 10.540 eşlemenin içinde 143 yük tam olarak öyle
+        // (bkz. proje notları). Sonuç: kullanıcı aradığı yükü listede hiç
+        // bulamıyordu.
+        //
+        // Artık yalnızca BU sefere zaten bağlı olanlar çıkarılıyor; diğerleri
+        // "başka seferde bağlı" uyarısıyla listeleniyor.
+        //
+        // Eşleme tablosunda hem load_transfer_id hem expedition_id METİN
+        // tutuluyor; sayıya çevirmek gerekiyor.
+        var mappings = await _db.ExpeditionLoadMappings.AsNoTracking()
+            .Select(m => new { m.LoadTransferId, m.ExpeditionId })
             .ToListAsync(cancellationToken);
 
-        // TryParse iki kez cagrilmiyor ve null'a karsi guvenli: sutun metin
-        // oldugu icin liste string? tasiyor, long.Parse metot grubu ise null
-        // kabul etmiyordu (CS8622).
-        var excluded = mappedIds
-            .Select(id => long.TryParse(id, out var parsed) ? parsed : (long?)null)
+        static long? ToId(string? value) =>
+            long.TryParse(value, out var parsed) ? parsed : null;
+
+        var expeditionKey = expeditionId?.ToString();
+
+        var excluded = mappings
+            .Where(m => expeditionKey != null && m.ExpeditionId == expeditionKey)
+            .Select(m => ToId(m.LoadTransferId))
             .Where(id => id is not null)
             .Select(id => id!.Value)
             .Distinct()
             .ToList();
+
+        // "Başka seferde bağlı" sayısı SQL'de hesaplanıyor: sayfalama sunucu
+        // tarafında yapıldığı için bellekteki bir sözlükle birleştirilemezdi.
+        // Null anahtar boş dizgeye düşürülüyor ki karşılaştırma her satırda
+        // tanımlı olsun.
+        var otherKey = expeditionKey ?? string.Empty;
 
         var transfers = _db.LoadTransfers.AsNoTracking()
             .Where(t => !excluded.Contains(t.Id));
@@ -218,7 +249,7 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
             var pattern = $"%{QueryableExtensions.NormalizeTurkish(search)}%";
             transfers = transfers.Where(t =>
                 t.LoadNumberWorkType != null &&
-                EF.Functions.Like(t.LoadNumberWorkType.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern));
+                EF.Functions.Like(TurkishFold.Fold(t.LoadNumberWorkType), pattern));
         }
 
         var projected = transfers
@@ -239,6 +270,8 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
                 SenderId = _db.Accounts.Where(a => a.Id == t.SenderId)
                     .Select(a => new MappedNameDto { Id = a.Id, Name = a.Name })
                     .FirstOrDefault(),
+                OtherExpeditionCount = _db.ExpeditionLoadMappings
+                    .Count(m => m.LoadTransferId == t.Id.ToString() && m.ExpeditionId != otherKey),
             });
 
         return await projected.ToPagedOrListAsync(perPage, page, path, cancellationToken);
@@ -431,18 +464,68 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
         if (transfer is null)
             return MappingSaveResult.Fail("Transfer Tipi Bulunamadı");
 
-        if (romork.RomorkType != transfer.RomorkTypeId)
-            return MappingSaveResult.Fail("Yük ile Araç romork tipi uyuşmuyor");
+        // RÖMORK TİPİ KONTROLÜ KALDIRILDI — BULUNAN GERÇEK HATA.
+        //
+        // Kural şuydu: seferin aracıyla yükün römork tipi AYNI olmalı, aksi
+        // hâlde "Yük ile Araç romork tipi uyuşmuyor" ile reddet. Bu kural
+        // Siber'in kendi verisiyle çelişiyor ve sefere yük eklemeyi fiilen
+        // çalışmaz hâle getiriyordu:
+        //
+        //   • Siber'de var olan 10.540 yük-sefer eşlemesinin yalnızca 3.633'ünde
+        //     (%34) tipler tutuyor; 6.777'sinde (%64) TUTMUYOR.
+        //   • 8.070 yükün 4.195'inde (%52) römork tipi zaten BOŞ — boş değer
+        //     hiçbir araç tipine eşit olmadığı için bu yükler koşulsuz
+        //     reddediliyordu.
+        //   • skn_yukaktarma üzerinde böyle bir kısıt YOK: tabloda hiç
+        //     tetikleyici bulunmuyor, yani Siber bu eşleşmeyi hiç aramıyor.
+        //
+        // Kısacası uygulama, Siber'in yıllardır kaydettiği eşlemelerin üçte
+        // ikisini reddediyordu. (Karşılaştırma için: seferin KENDİ römorku
+        // Siber'de gerçekten tetikleyiciyle korunuyor — bkz.
+        // skn_pozisyon_seferromorkkontrol_tr — ve o kural yerinde duruyor.)
 
         var key = transfer.Id.ToString();
+        var expeditionKey = expedition.Id.ToString();
 
+        // KOPYA KONTROLÜ AYNI SEFERE DARALTILDI. Eskiden yük BAŞKA bir sefere
+        // bağlıysa da reddediliyordu ("Bu Sefer Zaten Eklendi" — mesaj da
+        // yanlıştı, eklenen sefer değil yüktü). Oysa bir yük birden çok sefere
+        // bağlanabiliyor: Siber'de 143 yük tam olarak öyle ve bu her yıl
+        // tekrarlıyor (bkz. proje notları). Anlamsız olan tek şey AYNI yükü
+        // AYNI sefere iki kez bağlamak.
         var alreadyMapped = await _db.ExpeditionLoadMappings
-            .AnyAsync(m => m.LoadTransferId == key, cancellationToken);
+            .AnyAsync(m => m.LoadTransferId == key && m.ExpeditionId == expeditionKey,
+                cancellationToken);
 
         if (alreadyMapped)
-            return MappingSaveResult.Fail("Bu Sefer Zaten Eklendi");
+            return MappingSaveResult.Fail("Bu yük zaten bu sefere bağlı");
 
         var now = _clock.Now;
+
+        // ŞEHRİN SİBER KİMLİĞİ — BULUNAN GERÇEK HATA (sefere yük bağlanamıyordu).
+        //
+        // skn_yukaktarma.yerid, sbr_sehir'e YABANCI ANAHTARLI
+        // (FK_skn_yukaktarma_sbr_sehir). Buraya expeditions.start_city_id
+        // YEREL kimliği ham olarak yazılıyordu; oysa yerel cities.id ile
+        // Siber'in sehirid'si 351 şehrin 248'inde FARKLI. Sonuç: INSERT yabancı
+        // anahtar ihlaliyle düşüyor, işlem geri alınıyor ve yük sefere HİÇ
+        // bağlanmıyordu. Üretimde geri alınan bir denemeyle doğrulandı: yerel
+        // kimlikle "FK_skn_yukaktarma_sbr_sehir" hatası, Siber kimliğiyle
+        // başarılı.
+        //
+        // Etki: başlangıç şehri olan 3.222 seferin 324'ünde yazım kesin
+        // düşüyordu; kalan 2.898'inde yerel kimlik tesadüfen Siber'inkiyle aynı
+        // olduğu için çalışıyordu — yani hata "bazen" değil, ŞEHRE BAĞLI olarak
+        // çıkıyordu ve en son açılan seferlerin ikisi de düşen gruptaydı.
+        //
+        // Çözülemezse null yazılır: sütun nullable, tek zorunlu alanlar
+        // yukaktarmaid ve yukid.
+        var yerId = expedition.StartCityId is { } startCityId
+            ? await _db.Cities.AsNoTracking()
+                .Where(c => c.Id == startCityId)
+                .Select(c => c.SiberId)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
 
         var siberId = _siber.IsConfigured
             ? (await _siber.GenerateYukAktarmaIdAsync(cancellationToken)).ToString()
@@ -477,7 +560,7 @@ public sealed class ExpeditionLoadMappingService : IExpeditionLoadMappingService
                 YukId = transfer.LoadTransferId,
                 PozisyonId = expedition.ExpeditionId,
                 RomorkId = romork.SiberId,
-                YerId = expedition.StartCityId?.ToString(),
+                YerId = yerId,
                 Tarih = now,
             }, cancellationToken);
 

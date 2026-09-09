@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
 using OLS.DataAccess.Entities;
 
 namespace OLS.DataAccess.Context;
@@ -87,6 +88,12 @@ public partial class OlsDbContext : DbContext
 
     public virtual DbSet<FinancialItem> FinancialItems { get; set; }
 
+    /// <summary>Navlun alış → satış kalem eşleşmeleri (bkz. FinancialItemPair).</summary>
+    public virtual DbSet<FinancialItemPair> FinancialItemPairs { get; set; }
+
+    /// <summary>Gerçek koli bilgileri (skn_yukkolidepo) — bkz. LoadTransferActualPackage.</summary>
+    public virtual DbSet<LoadTransferActualPackage> LoadTransferActualPackages { get; set; }
+
     public virtual DbSet<Instruction> Instructions { get; set; }
 
     public virtual DbSet<Invoice> Invoices { get; set; }
@@ -172,6 +179,36 @@ public partial class OlsDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // TÜRKÇE KATLAMA (bkz. TurkishFold). Arama sorgularında sütun bu
+        // fonksiyondan geçirilir; PostgreSQL karşılığı
+        // lower(translate(sütun, 'İIı…', 'iii…')).
+        //
+        // Veritabanı yereli en_US.utf8 (bkz. Dockerfile) ve o yerelde ILIKE
+        // Türkçe noktasız 'I'yı küçük 'ı' ile eşleştiremiyor — "TAŞIMA" ILIKE
+        // '%taşıma%' HİÇ eşleşmiyordu. Yereli canlı veritabanında değiştirmek
+        // yeniden oluşturma gerektirdiği için katlama sorguda yapılıyor.
+        modelBuilder
+            .HasDbFunction(typeof(Common.TurkishFold).GetMethod(nameof(Common.TurkishFold.Fold))!)
+            .HasTranslation(args => new SqlFunctionExpression(
+                "lower",
+                [
+                    new SqlFunctionExpression(
+                        "translate",
+                        [
+                            args[0],
+                            new SqlConstantExpression(Common.TurkishFold.From, args[0].TypeMapping),
+                            new SqlConstantExpression(Common.TurkishFold.To, args[0].TypeMapping),
+                        ],
+                        nullable: true,
+                        argumentsPropagateNullability: [true, false, false],
+                        typeof(string),
+                        args[0].TypeMapping),
+                ],
+                nullable: true,
+                argumentsPropagateNullability: [true],
+                typeof(string),
+                args[0].TypeMapping));
+
         modelBuilder.Entity<Account>(entity =>
         {
             entity.HasKey(e => e.Id).HasName("accounts_pkey");
@@ -1306,6 +1343,7 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.SiberId)
                 .HasMaxLength(191)
                 .HasColumnName("siber_id");
+            entity.Property(e => e.IsFreight).HasColumnName("is_freight");
             entity.Property(e => e.Type).HasColumnName("type");
             entity.Property(e => e.UpdatedAt)
                 .HasColumnType("timestamp(0) without time zone")
@@ -1612,6 +1650,8 @@ public partial class OlsDbContext : DbContext
                 .HasColumnName("siber_id");
             entity.Property(e => e.StatusTypeId).HasColumnName("status_type_id");
             entity.Property(e => e.TargetCountryId).HasColumnName("target_country_id");
+            entity.Property(e => e.DeliveryMethodId).HasColumnName("delivery_method_id");
+            entity.Property(e => e.CurrencyId).HasColumnName("currency_id");
             entity.Property(e => e.TransferToSiber)
                 .HasDefaultValue(0)
                 .HasColumnName("transfer_to_siber");
@@ -1743,6 +1783,40 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.UpdatedAt)
                 .HasColumnType("timestamp(0) without time zone")
                 .HasColumnName("updated_at");
+        });
+
+        modelBuilder.Entity<FinancialItemPair>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("financial_item_pairs_pkey");
+
+            entity.ToTable("financial_item_pairs");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.PurchaseItemId).HasColumnName("purchase_item_id");
+            entity.Property(e => e.SaleItemId).HasColumnName("sale_item_id");
+            entity.Property(e => e.MarkupPercent)
+                .HasColumnType("numeric(5,2)")
+                .HasColumnName("markup_percent");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("updated_at");
+
+            // Bir alış kalemi TEK satış kalemine eşlenir — aksi hâlde otomatik
+            // satır hangi kalemi açacağını bilemezdi.
+            entity.HasIndex(e => e.PurchaseItemId).IsUnique();
+
+            entity.HasOne(e => e.PurchaseItem).WithMany()
+                .HasForeignKey(e => e.PurchaseItemId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("financial_item_pairs_purchase_item_id_foreign");
+
+            entity.HasOne(e => e.SaleItem).WithMany()
+                .HasForeignKey(e => e.SaleItemId)
+                .OnDelete(DeleteBehavior.Cascade)
+                .HasConstraintName("financial_item_pairs_sale_item_id_foreign");
         });
 
         modelBuilder.Entity<LoadFinancialItem>(entity =>
@@ -1923,6 +1997,8 @@ public partial class OlsDbContext : DbContext
                 .HasColumnName("loading_continent");
             entity.Property(e => e.OperationDepartmentId).HasColumnName("operation_department_id");
             entity.Property(e => e.PaymentTypeId).HasColumnName("payment_type_id");
+            entity.Property(e => e.CurrencyId).HasColumnName("currency_id");
+            entity.Property(e => e.PricingUserId).HasColumnName("pricing_user_id");
             entity.Property(e => e.ReadinessDate).HasColumnName("readiness_date");
             entity.Property(e => e.ReceiverId).HasColumnName("receiver_id");
             entity.Property(e => e.RequestArrivalDate).HasColumnName("request_arrival_date");
@@ -2162,6 +2238,36 @@ public partial class OlsDbContext : DbContext
                 .HasForeignKey(d => d.UserId)
                 .OnDelete(DeleteBehavior.Restrict)
                 .HasConstraintName("load_transfer_movements_user_id_foreign");
+        });
+
+        // GERÇEK KOLİ BİLGİLERİ (skn_yukkolidepo) — beyan edilen kolilerin
+        // (load_transfer_packages) yanında duran ikinci set. Bkz. entity.
+        modelBuilder.Entity<LoadTransferActualPackage>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("load_transfer_actual_packages_pkey");
+
+            entity.ToTable("load_transfer_actual_packages");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Yukkolidepoid).HasMaxLength(191).HasColumnName("yukkolidepoid");
+            entity.Property(e => e.LoadTransferId).HasMaxLength(191).HasColumnName("load_transfer_id");
+            entity.Property(e => e.Quantity).HasColumnName("quantity");
+            entity.Property(e => e.CaseTypeId).HasMaxLength(191).HasColumnName("case_type_id");
+            entity.Property(e => e.Width).HasPrecision(10, 2).HasColumnName("width");
+            entity.Property(e => e.Length).HasPrecision(10, 2).HasColumnName("length");
+            entity.Property(e => e.Height).HasPrecision(10, 2).HasColumnName("height");
+            entity.Property(e => e.Volume).HasPrecision(10, 2).HasColumnName("volume");
+            entity.Property(e => e.GrossWeight).HasPrecision(10, 2).HasColumnName("gross_weight");
+            entity.Property(e => e.NetWeight).HasPrecision(10, 2).HasColumnName("net_weight");
+            entity.Property(e => e.Lademeter).HasPrecision(10, 2).HasColumnName("lademeter");
+            entity.Property(e => e.Stackable).HasColumnName("stackable");
+            entity.Property(e => e.ProductTypeId).HasColumnName("product_type_id");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone").HasColumnName("updated_at");
+
+            entity.HasIndex(e => e.LoadTransferId);
         });
 
         modelBuilder.Entity<LoadTransferPackage>(entity =>

@@ -144,6 +144,25 @@ public partial class Load
 
     public virtual ICollection<LoadContent> LoadContents { get; set; } = new List<LoadContent>();
 
+    /// <summary>
+    /// TESLİM ŞEKLİ (Incoterm: EXW/FOB/CIF…) — teklifte toplanır, yük açılınca
+    /// yüke TAŞINIR ve Siber'de <c>skn_yuk.teslimsekil</c>'e yazılır.
+    ///
+    /// YALNIZCA YEREL: Siber'in rezervasyon tablosunda da bir
+    /// <c>teslimsekil</c> sütunu var ama 19.613 kaydın yalnızca 4'ünde dolu —
+    /// yani Siber teklif aşamasında bu alanı kullanmıyor. Alan burada,
+    /// dönüşümde yükü doldurabilmek için tutuluyor (transit ülkeyle aynı
+    /// desen).
+    /// </summary>
+    public int? DeliveryMethodId { get; set; }
+
+    /// <summary>
+    /// DÖVİZ TÜRÜ — teklifte toplanır, yük açılınca <c>skn_yuk.dovizkod</c>'a
+    /// taşınır. Siber'in rezervasyonunda düz bir <c>dovizkod</c> sütunu YOK,
+    /// bu yüzden yalnızca yerel.
+    /// </summary>
+    public int? CurrencyId { get; set; }
+
     public virtual ICollection<LoadFinancialItem> LoadFinancialItems { get; set; } = new List<LoadFinancialItem>();
 
     public virtual ICollection<LoadMovement> LoadMovements { get; set; } = new List<LoadMovement>();

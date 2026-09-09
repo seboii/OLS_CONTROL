@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
-import { FileText, Package, Plus, Trash2, Upload, File as FileIcon, X, Filter, ChevronDown, Truck } from "lucide-react";
+import { FileText, Package, Plus, Trash2, Upload, File as FileIcon, X, Filter, ChevronDown, Truck, Copy } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
+import { useRegisterRefresh } from "@/lib/refresh";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { computeLademeter, parseDecimalInput, parseIntegerInput } from "@/lib/number";
@@ -16,6 +17,9 @@ import { AccountPicker, type AccountOption } from "@/components/shared/AccountPi
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
 import { FinancialItemManagerModal } from "@/components/shared/FinancialItemManagerModal";
 import { FinancialItemPicker, type FinancialItemOption } from "@/components/shared/FinancialItemPicker";
+import {
+  useFreightPairs, syncFreightSaleRows, type FreightRowAdapter,
+} from "@/lib/freightPairs";
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
 import { CompanyPicker } from "@/components/shared/CompanyPicker";
 import { BusyLabel } from "@/components/ui/Busy";
@@ -83,6 +87,8 @@ interface LoadTransferDetail extends LoadTransferItem {
   load_transfer_invoice_item: InvoiceItemDetail[];
   customer_representative: UserOption | null;
   second_customer_representative: UserOption | null;
+  pricing_user: UserOption | null;
+  sales_rep: UserOption | null;
   load_id: number | null;
   load_file: LoadFileDetail[];
   /** Siber'in FTP arşivindeki evraklar — sahibi Siber, salt görüntüleme. */
@@ -96,6 +102,7 @@ interface LoadTransferDetail extends LoadTransferItem {
   load_type_id: NamedRef | null;
   instruction_id: NamedRef | null;
   delivery_method_id: NamedRef | null;
+  currency_id: NamedRef | null;
   load_transfer_type_id: NamedRef | null;
   way_of_working: number | null;
   front_transportation_by_us: number | null;
@@ -195,6 +202,22 @@ const EMPTY_DOCUMENT_FORM = {
   delivered_to: "", delivered_at: "", note: "",
 };
 
+/** Gerçek koli ucunun yanıtı — beyan edilen koli DTO'suyla aynı şekil. */
+interface ActualPackageResponse {
+  id: number;
+  quantity: number | null;
+  case_type_id: LookupOption | null;
+  product_type_id: LookupOption | null;
+  width: number | null;
+  length: number | null;
+  height: number | null;
+  volume: number | null;
+  gross_weight: number | null;
+  net_weight: number | null;
+  lademeter: number | null;
+  stackable: number | null;
+}
+
 type PackageRow = {
   id: number | null; product_type_id: LookupOption | null; case_type_id: LookupOption | null; quantity: string;
   gross_weight: string; net_weight: string; volume: string; lademeter: string;
@@ -210,11 +233,51 @@ type InvoiceItemRow = {
   id: number | null; item_id: FinancialItemOption | null; account: AccountOption | null; currency_code: string;
   buysell: string; quantity: string; net_price: string; total_price: string; description: string;
   status: string;
+  /**
+   * Navlun ALIŞINDAN otomatik türetilen satırda, türediği alış kaleminin
+   * kimliği. Kullanıcı fiyata dokununca null'a çekilir (bkz. freightPairs).
+   */
+  auto_from_item?: number | null;
 };
 
 const EMPTY_INVOICE_ITEM_ROW: InvoiceItemRow = {
   id: null, item_id: null, account: null, currency_code: "", buysell: "1",
   quantity: "1", net_price: "", total_price: "", description: "", status: "pending",
+};
+
+/**
+ * Yük ekranlarının satır biçimi için navlun senkron adaptörü. Hem teklifsiz
+ * yük formu hem yük detayı aynı satır tipini kullanıyor, tek adaptör yetiyor.
+ *
+ * Toplam fiyat teklifsiz yük formunda hiç toplanmıyor (yalnızca birim fiyat
+ * var); orada boş kalır ve senkron da boş üretir.
+ */
+const FREIGHT_ADAPTER: FreightRowAdapter<InvoiceItemRow> = {
+  itemId: (r) => r.item_id?.id ?? null,
+  buysell: (r) => r.buysell,
+  autoFromItem: (r) => r.auto_from_item ?? null,
+  netPrice: (r) => r.net_price,
+  totalPrice: (r) => r.total_price,
+  createSaleRow: (source, pair, net, total) => ({
+    ...EMPTY_INVOICE_ITEM_ROW,
+    item_id: {
+      id: pair.sale_item_id,
+      name: pair.sale_item_name,
+      type: pair.sale_item_type ?? 2,
+      default_account_id: pair.sale_default_account_id,
+      default_account_name: pair.sale_default_account_name,
+    },
+    buysell: "2",
+    account: pair.sale_default_account_id
+      ? { id: pair.sale_default_account_id, name: pair.sale_default_account_name }
+      : null,
+    currency_code: source.currency_code,
+    quantity: source.quantity,
+    net_price: net,
+    total_price: total,
+    auto_from_item: pair.purchase_item_id,
+  }),
+  updateSaleRow: (row, net, total) => ({ ...row, net_price: net, total_price: total }),
 };
 
 // olsold: system_data.js financial_item_status_type — buysell=1 (Alış) ise "Faturası
@@ -305,7 +368,7 @@ export function LoadsPage() {
   const [form, setForm] = useState({
     load_status_id: "", payment_type_id: "", department_id: "", romork_type_id: "",
     instruction_arrival_date: "", request_arrival_date: "", readiness_date: "", date_of_receipt_customer: "",
-    load_type_id: "", instruction_id: "", delivery_method_id: "", load_transfer_type_id: "",
+    load_type_id: "", instruction_id: "", delivery_method_id: "", currency_id: "", load_transfer_type_id: "",
     way_of_working: "", front_transportation_by_us: "", final_transportation_by_us: "",
   });
   const [customer, setCustomer] = useState<AccountOption | null>(null);
@@ -318,7 +381,17 @@ export function LoadsPage() {
   const [targetCountry, setTargetCountry] = useState("");
   const [customerRep, setCustomerRep] = useState<UserOption | null>(null);
   const [secondCustomerRep, setSecondCustomerRep] = useState<UserOption | null>(null);
+  const [pricingUser, setPricingUser] = useState<UserOption | null>(null);
+  const [salesRep, setSalesRep] = useState<UserOption | null>(null);
   const [packages, setPackages] = useState<PackageRow[]>([]);
+  /**
+   * GERÇEK KOLİ BİLGİLERİ — Siber'de skn_yukkolidepo. Beyan edilen kolilerin
+   * (yukarıdaki `packages`) yanında duran ikinci set; aradaki "Gerçek Koli
+   * Bilgilerine Aktar" düğmesi ilkini buraya kopyalıyor.
+   */
+  const [actualPackages, setActualPackages] = useState<PackageRow[]>([]);
+  const [actualLoading, setActualLoading] = useState(false);
+  const [openActualPackages, setOpenActualPackages] = useState<Set<number>>(new Set());
   const [removedPackageIds, setRemovedPackageIds] = useState<number[]>([]);
 
   // Açık satırlar. Anahtar olarak DİZİN kullanılıyor (satırların kalıcı bir
@@ -332,7 +405,26 @@ export function LoadsPage() {
     if (!next.delete(i)) next.add(i);
     return next;
   }
-  const [invoiceItems, setInvoiceItems] = useState<InvoiceItemRow[]>([]);
+  const [invoiceItems, setInvoiceItemsRaw] = useState<InvoiceItemRow[]>([]);
+  const freightPairs = useFreightPairs();
+
+  // Eşleşmeler ayrı bir istekle GEÇ geliyor; sarmalayıcıların kimliği sabit
+  // kalsın diye ref üzerinden okunuyor.
+  const freightPairsRef = useRef(freightPairs);
+  freightPairsRef.current = freightPairs;
+
+  /**
+   * NAVLUN OTOMATİĞİ TEK KAPIDAN. Alış satırı eklenince/fiyatı değişince
+   * eşleşen satış satırı burada açılıp güncelleniyor (bkz. freightPairs).
+   * Senkron idempotent, her çağrıda güvenle çalışır.
+   */
+  const setInvoiceItems = useCallback(
+    (update: InvoiceItemRow[] | ((prev: InvoiceItemRow[]) => InvoiceItemRow[])) =>
+      setInvoiceItemsRaw((prev) => {
+        const next = typeof update === "function" ? update(prev) : update;
+        return syncFreightSaleRows(next, freightPairsRef.current, FREIGHT_ADAPTER);
+      }),
+    []);
   const [movements, setMovements] = useState<MovementDetail[]>([]);
   const [deletedMovements, setDeletedMovements] = useState<MovementDetail[]>([]);
   const [deletedMovementsModalOpen, setDeletedMovementsModalOpen] = useState(false);
@@ -380,10 +472,11 @@ export function LoadsPage() {
     siber_company_id: "",
     work_type_id: "", loading_type_id: "", load_transfer_type_id: "",
     instruction_id: "", romork_type_id: "", payment_type_id: "", department_id: "",
-    delivery_method_id: "", payer_company: "",
+    delivery_method_id: "", currency_id: "", payer_company: "",
     departure_country_id: "", transit_country_id: "", target_country_id: "",
     front_transportation_by_us: "0", final_transportation_by_us: "0", way_of_working: "0",
     instruction_arrival_date: "", request_arrival_date: "", readiness_date: "",
+    date_of_receipt_customer: "",
     description: "",
   });
   const [directCustomer, setDirectCustomer] = useState<AccountOption | null>(null);
@@ -391,8 +484,24 @@ export function LoadsPage() {
   const [directReceiver, setDirectReceiver] = useState<AccountOption | null>(null);
   const [directAgent, setDirectAgent] = useState<AccountOption | null>(null);
   const [directFreightPayer, setDirectFreightPayer] = useState<AccountOption | null>(null);
+
+  // GÖREVLİLER — teklif formundaki kuralın aynısı: operasyon yetkilisi İKİ
+  // kişi ve elle düzenlenebilir, satış temsilcisi TEK. Eskiden teklifsiz yük
+  // hiç sormuyor, dördünü de "kaydı açan kullanıcı" olarak yazıyordu.
+  const [directOfficers, setDirectOfficers] = useState<(UserOption | null)[]>([null, null]);
+  const [directSalesRep, setDirectSalesRep] = useState<UserOption | null>(null);
+
   const [directPackages, setDirectPackages] = useState<PackageRow[]>([{ ...EMPTY_PACKAGE_ROW }]);
-  const [directItems, setDirectItems] = useState<InvoiceItemRow[]>([]);
+  const [directItems, setDirectItemsRaw] = useState<InvoiceItemRow[]>([]);
+
+  /** Teklifsiz yük formunda aynı navlun otomatiği. */
+  const setDirectItems = useCallback(
+    (update: InvoiceItemRow[] | ((prev: InvoiceItemRow[]) => InvoiceItemRow[])) =>
+      setDirectItemsRaw((prev) => {
+        const next = typeof update === "function" ? update(prev) : update;
+        return syncFreightSaleRows(next, freightPairsRef.current, FREIGHT_ADAPTER);
+      }),
+    []);
 
   // DOSYA ARŞİVİ — yük oluşmadan dosya yüklenemiyor: arşiv kaydı yükün Siber
   // kimliğine bağlanıyor ve o kimlik ancak kayıt sırasında oluşuyor. Bu yüzden
@@ -437,10 +546,13 @@ export function LoadsPage() {
     receiver: directReceiver,
     agent: directAgent,
     freightPayer: directFreightPayer,
+    officers: directOfficers,
+    salesRep: directSalesRep,
     packages: directPackages,
     items: directItems,
   }), [directForm, directCustomer, directSender, directReceiver,
-       directAgent, directFreightPayer, directPackages, directItems]);
+       directAgent, directFreightPayer, directOfficers, directSalesRep,
+       directPackages, directItems]);
 
   /** Anlık görüntüyü forma geri yükler. */
   const applySnapshot = useCallback((raw: unknown) => {
@@ -453,8 +565,11 @@ export function LoadsPage() {
     setDirectReceiver(snap.receiver ?? null);
     setDirectAgent(snap.agent ?? null);
     setDirectFreightPayer(snap.freightPayer ?? null);
+    setDirectOfficers([snap.officers?.[0] ?? null, snap.officers?.[1] ?? null]);
+    setDirectSalesRep(snap.salesRep ?? null);
     setDirectPackages(snap.packages?.length ? snap.packages : [{ ...EMPTY_PACKAGE_ROW }]);
-    setDirectItems(snap.items ?? []);
+    // Taslaktan yükleme senkron TETİKLEMEZ — kayıtlı satırlar olduğu gibi gelir.
+    setDirectItemsRaw(snap.items ?? []);
   }, []);
 
   // Form açıkken her değişiklikte kaza kurtarma kopyası yazılır. Kaydedilmemiş
@@ -513,16 +628,18 @@ export function LoadsPage() {
       siber_company_id: "",
       work_type_id: "", loading_type_id: "", load_transfer_type_id: "",
       instruction_id: "", romork_type_id: "", payment_type_id: "", department_id: "",
-      delivery_method_id: "", payer_company: "",
+      delivery_method_id: "", currency_id: "", payer_company: "",
       departure_country_id: "", transit_country_id: "", target_country_id: "",
       front_transportation_by_us: "0", final_transportation_by_us: "0", way_of_working: "0",
       instruction_arrival_date: "", request_arrival_date: "", readiness_date: "",
+      date_of_receipt_customer: "",
       description: "",
     });
     setDirectCustomer(null); setDirectSender(null); setDirectReceiver(null);
     setDirectAgent(null); setDirectFreightPayer(null);
+    setDirectOfficers([null, null]); setDirectSalesRep(null);
     setDirectPackages([{ ...EMPTY_PACKAGE_ROW }]);
-    setDirectItems([]);
+    setDirectItemsRaw([]);
     setDirectFiles([]);
   }
 
@@ -533,6 +650,41 @@ export function LoadsPage() {
       .then((res) => setCanDirect(res.data.allowed))
       .catch(() => setCanDirect(false));
   }, []);
+
+  /**
+   * Müşteri seçilince görevlileri müşterinin tanımlı temsilcilerinden TÜRETİR
+   * (teklif ekranındaki kuralın aynısı).
+   *
+   * ÖN DOLDURUR, KİLİTLEMEZ: üç alan da elle değiştirilebilir. Uç yalnızca
+   * AKTİF kullanıcıyı döndürüyor, ayrılmış personel "tanımlı" sayılmıyor.
+   */
+  async function applyDirectCustomer(account: AccountOption | null) {
+    setDirectCustomer(account);
+
+    if (!account) {
+      setDirectOfficers([null, null]);
+      setDirectSalesRep(null);
+      return;
+    }
+
+    try {
+      const res = await api.get<{ data: {
+        operation_officers: UserOption[];
+        sales_reps: UserOption[];
+      } }>(`/api/v1/account/${account.id}/representatives`);
+
+      const { operation_officers: officers, sales_reps: reps } = res.data;
+
+      setDirectOfficers([officers?.[0] ?? null, officers?.[1] ?? null]);
+      // TEK SATIŞ TEMSİLCİSİ — Siber ikinciyi fiilen kullanmıyor.
+      setDirectSalesRep(reps?.[0] ?? null);
+    } catch {
+      // Bağ okunamazsa alanlar elle seçime açık boş kalır; sunucu kaydederken
+      // kuralı yine kendisi uygular (boşsa kaydı açan kullanıcı).
+      setDirectOfficers([null, null]);
+      setDirectSalesRep(null);
+    }
+  }
 
   async function submitDirectLoad() {
     if (directSaving) return;
@@ -552,6 +704,14 @@ export function LoadsPage() {
           sender_id: directSender?.id ?? null,
           receiver_id: directReceiver?.id ?? null,
           delivery_method_id: int(directForm.delivery_method_id),
+          currency_id: int(directForm.currency_id),
+          // SIRA ÖNEMLİ: 1. yetkili musteritemsilcisiad'a, 2. yetkili
+          // musteritemsilcisi2ad'a gidiyor. Boş satırlar atılıyor ki tek
+          // yetkili seçildiğinde ikinci sütun boş kalsın.
+          operation_officer_ids: directOfficers
+            .filter((o): o is UserOption => Boolean(o?.id))
+            .map((o) => o.id),
+          sales_rep_id: directSalesRep?.id ?? null,
           agent_id: directAgent?.id ?? null,
           company_pay_freight_id: directFreightPayer?.id ?? null,
           payer_company: directForm.payer_company || null,
@@ -564,6 +724,7 @@ export function LoadsPage() {
           instruction_arrival_date: directForm.instruction_arrival_date || null,
           request_arrival_date: directForm.request_arrival_date || null,
           readiness_date: directForm.readiness_date || null,
+          date_of_receipt_customer: directForm.date_of_receipt_customer || null,
           description: directForm.description || null,
           packages: directPackages.map((p) => ({
             product_type_id: p.product_type_id?.id ?? null,
@@ -616,7 +777,10 @@ export function LoadsPage() {
 
       setDirectOpen(false);
       resetDirectForm();
-      load();
+      // Yeni yük, oluşturma tarihine göre azalan listenin 1. SAYFASININ
+      // başında. Kullanıcı başka bir sayfadaysa listeyi tazelemek yetmiyor,
+      // kayıt görünmüyordu (ancak F5'ten sonra çıkıyordu).
+      if (page !== 1) setPage(1); else load();
     } catch (err) {
       addToast(err instanceof Error ? err.message : "Yük oluşturulamadı", "error");
     } finally {
@@ -701,6 +865,9 @@ export function LoadsPage() {
         if (requestId === loadRequestRef.current) setLoading(false);
       });
   }
+
+  // Üst bardaki Yenile düğmesi bu sayfanın listesini tazeler (bkz. refresh.ts).
+  useRegisterRefresh(load);
 
   // ?yuk=<id> geldiyse o yükün kartını aç.
   //
@@ -787,6 +954,7 @@ export function LoadsPage() {
         load_type_id: d.load_type_id ? String(d.load_type_id.id) : "",
         instruction_id: d.instruction_id ? String(d.instruction_id.id) : "",
         delivery_method_id: d.delivery_method_id ? String(d.delivery_method_id.id) : "",
+        currency_id: d.currency_id ? String(d.currency_id.id) : "",
         load_transfer_type_id: d.load_transfer_type_id ? String(d.load_transfer_type_id.id) : "",
         way_of_working: d.way_of_working != null ? String(d.way_of_working) : "",
         front_transportation_by_us: d.front_transportation_by_us != null ? String(d.front_transportation_by_us) : "",
@@ -797,11 +965,16 @@ export function LoadsPage() {
       setReceiver(d.receiver_id);
       setCustomerRep(d.customer_representative);
       setSecondCustomerRep(d.second_customer_representative);
+      // Uç, yerelde boşsa 1. yetkiliyi döndürüyor — ekranda gösterilen ile
+      // kaydedilecek değer aynı olsun diye.
+      setPricingUser(d.pricing_user ?? d.customer_representative);
+      setSalesRep(d.sales_rep);
       setDepartureCountry(d.departure_country_id?.id ?? "");
       setLoadCompany(d.siber_company_id ?? "");
       setTransitCountry(d.transit_country_id?.id ?? "");
       setTargetCountry(d.target_country_id?.id ?? "");
       setExistingFiles(d.load_file);
+      loadActualPackages(d.id);
       setPackages(
         d.load_transfer_package.map((p) => ({
           id: p.id,
@@ -818,7 +991,7 @@ export function LoadsPage() {
           stackable: p.stackable != null ? String(p.stackable) : "1",
         })),
       );
-      setInvoiceItems(
+      setInvoiceItemsRaw(
         d.load_transfer_invoice_item.map((f) => ({
           id: f.id,
           item_id: f.item_id,
@@ -866,6 +1039,109 @@ export function LoadsPage() {
     } catch {
       addToast("Evrak açılamadı", "error");
     }
+  }
+
+  /** Gerçek koli setini sunucudan okur (skn_yukkolidepo aynası). */
+  const loadActualPackages = useCallback(async (id: number) => {
+    setActualLoading(true);
+    try {
+      const res = await api.get<DataMessage<ActualPackageResponse[]>>(
+        `/api/v1/load_transfer/${id}/actual_package`);
+
+      setActualPackages((res.data ?? []).map((p) => ({
+        id: p.id,
+        product_type_id: p.product_type_id,
+        case_type_id: p.case_type_id,
+        quantity: p.quantity != null ? String(p.quantity) : "",
+        gross_weight: p.gross_weight != null ? String(p.gross_weight) : "",
+        net_weight: p.net_weight != null ? String(p.net_weight) : "",
+        volume: p.volume != null ? String(p.volume) : "",
+        lademeter: p.lademeter != null ? String(p.lademeter) : "",
+        width: p.width != null ? String(p.width) : "",
+        height: p.height != null ? String(p.height) : "",
+        length: p.length != null ? String(p.length) : "",
+        stackable: p.stackable != null ? String(p.stackable) : "1",
+      })));
+    } catch {
+      setActualPackages([]);
+    } finally {
+      setActualLoading(false);
+    }
+  }, []);
+
+  /**
+   * Siber'deki "GERÇEK KOLİ BİLGİLERİNE AKTAR" düğmesi: beyan edilen kolileri
+   * gerçek koli setine kopyalar. Set zaten doluysa sunucu reddediyor; üzerine
+   * yazmak kullanıcı onayıyla ayrıca isteniyor, çünkü o satırlar depoda elle
+   * düzeltilmiş olabilir.
+   */
+  async function copyToActualPackages(replaceExisting = false) {
+    if (!editingId) return;
+    try {
+      await api.post(`/api/v1/load_transfer/${editingId}/actual_package/copy`, {
+        replace_existing: replaceExisting,
+      });
+      addToast("Gerçek koli bilgilerine aktarıldı");
+      loadActualPackages(editingId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Aktarılamadı";
+
+      if (!replaceExisting && message.includes("zaten dolu")) {
+        if (window.confirm("Gerçek koli bilgileri dolu. Üzerine yazılsın mı?"))
+          await copyToActualPackages(true);
+        return;
+      }
+
+      addToast(message, "error");
+    }
+  }
+
+  async function saveActualPackages() {
+    if (!editingId) return;
+    try {
+      await api.post(`/api/v1/load_transfer/${editingId}/actual_package`, {
+        packages: actualPackages.map((p) => ({
+          id: p.id,
+          quantity: int(p.quantity),
+          case_type_id: p.case_type_id ? String(p.case_type_id.id) : null,
+          product_type_id: p.product_type_id ? Number(p.product_type_id.id) : null,
+          width: num(p.width),
+          length: num(p.length),
+          height: num(p.height),
+          volume: num(p.volume),
+          gross_weight: num(p.gross_weight),
+          net_weight: num(p.net_weight),
+          lademeter: num(p.lademeter),
+          stackable: int(p.stackable),
+        })),
+      });
+      addToast("Gerçek koli bilgileri kaydedildi");
+      loadActualPackages(editingId);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : "Kaydedilemedi", "error");
+    }
+  }
+
+  function addActualPackageRow() {
+    setActualPackages((list) => {
+      setOpenActualPackages((open) => new Set(open).add(list.length));
+      return [...list, { ...EMPTY_PACKAGE_ROW }];
+    });
+  }
+
+  async function removeActualPackageRow(i: number) {
+    const row = actualPackages[i];
+    if (row.id) {
+      if (!window.confirm("Bu gerçek koli satırı silinsin mi?")) return;
+      try {
+        await api.delete(`/api/v1/load_transfer/${editingId}/actual_package`, { deletion_id: [row.id] });
+      } catch (err) {
+        addToast(err instanceof Error ? err.message : "Silinemedi", "error");
+        return;
+      }
+    }
+    setOpenActualPackages(new Set());
+    setActualPackages((list) => list.filter((_, xi) => xi !== i));
   }
 
   function addPackageRow() {
@@ -1108,9 +1384,16 @@ export function LoadsPage() {
         receiver_id: receiver?.id ?? null,
         customer_representative_user_id: customerRep?.id ?? null,
         second_customer_representative_user_id: secondCustomerRep?.id ?? null,
+        // Siber: skn_yuk.fiyatlandirankullaniciid. Boş gidilirse sunucu
+        // 1. operasyon yetkilisine düşer.
+        pricing_user_id: pricingUser?.id ?? null,
+        // Siber: skn_yuk.satistemsilcisikod (kullanıcı KODU). Boş gidilirse
+        // sunucu mevcut değeri korur, sıfırlamaz.
+        sales_rep_user_id: salesRep?.id ?? null,
         load_type_id: int(form.load_type_id),
         instruction_id: int(form.instruction_id),
         delivery_method_id: int(form.delivery_method_id),
+        currency_id: int(form.currency_id),
         load_transfer_type_id: int(form.load_transfer_type_id),
         way_of_working: int(form.way_of_working),
         front_transportation_by_us: int(form.front_transportation_by_us),
@@ -1432,6 +1715,13 @@ export function LoadsPage() {
               <FormField label="Teslim Şekli">
                 <SelectInput value={directForm.delivery_method_id} onChange={(v) => setDirectForm((f) => ({ ...f, delivery_method_id: v }))} options={codeOpts(deliveryMethods)} />
               </FormField>
+              {/* DÖVİZ TÜRÜ yükün kendi para birimi (skn_yuk.dovizkod) — mali
+                  kalem satırlarındaki dövizle karıştırılmamalı. Siber'de
+                  yüklerin %82'sinde dolu ama uygulama bu alanı hiç
+                  toplamıyordu. */}
+              <FormField label="Döviz Türü">
+                <SelectInput value={directForm.currency_id} onChange={(v) => setDirectForm((f) => ({ ...f, currency_id: v }))} options={codeOpts(currencies)} />
+              </FormField>
               <FormField label="Talimat Geliş Şekli">
                 <SelectInput value={directForm.instruction_id} onChange={(v) => setDirectForm((f) => ({ ...f, instruction_id: v }))} options={opts(instructions)} />
               </FormField>
@@ -1447,11 +1737,16 @@ export function LoadsPage() {
               <FormField label="Hazır Olma Tarihi">
                 <TextInput type="date" value={directForm.readiness_date} onChange={(v) => setDirectForm((f) => ({ ...f, readiness_date: v }))} />
               </FormField>
+              {/* Müşteriden alınış tarihi: yük açılırken biliniyor ve durumu
+                  etkilemiyor — eskiden yalnızca yük detayından girilebiliyordu. */}
+              <FormField label="Müşteriden Alınış Tarihi">
+                <TextInput type="date" value={directForm.date_of_receipt_customer} onChange={(v) => setDirectForm((f) => ({ ...f, date_of_receipt_customer: v }))} />
+              </FormField>
             </div>
 
             {/* Cari seçiciler iki sütun — teklif ekranıyla aynı ölçü. */}
             <div className="mt-6 grid grid-cols-2 gap-x-6 gap-y-6">
-              <AccountPicker label="Müşteri" value={directCustomer} onChange={setDirectCustomer} required />
+              <AccountPicker label="Müşteri" value={directCustomer} onChange={applyDirectCustomer} required />
               <AccountPicker label="Gönderici" value={directSender} onChange={setDirectSender} required />
               <AccountPicker label="Alıcı" value={directReceiver} onChange={setDirectReceiver} required />
               <AccountPicker label="Acente" value={directAgent} onChange={setDirectAgent} />
@@ -1479,6 +1774,34 @@ export function LoadsPage() {
             <FormField label="Son Taşıma Bizde">
               <SelectInput value={directForm.final_transportation_by_us} onChange={(v) => setDirectForm((f) => ({ ...f, final_transportation_by_us: v }))} options={[{ value: "0", label: "Hayır" }, { value: "1", label: "Evet" }]} />
             </FormField>
+            </div>
+          </section>
+
+          {/* GÖREVLİLER — teklif ekranındaki alanların aynısı.
+
+              Teklifsiz yük bu üç kişiyi hiç sormuyor, Siber'e de yalnızca
+              kaydı açan kullanıcıyı yazıyordu: 2. operasyon yetkilisi
+              (musteritemsilcisi2ad) ve satış temsilcisi (satistemsilcisikod)
+              boş kalıyordu. Alanlar müşteriden ön dolar, kilitli değildir. */}
+          <section>
+            <SectionTitle>Görevliler</SectionTitle>
+            <p className="mb-4 text-[12px] leading-relaxed text-gray-500">
+              <b>Operasyon Yetkilisi</b> iki kişidir ve elle değiştirilebilir;
+              müşteriye tanımlıysa kendiliğinden dolar. <b>Satış Temsilcisi</b>
+              tek kişidir. Boş bırakılırsa yükü açan kullanıcı yazılır.
+            </p>
+            <div className="grid grid-cols-3 gap-x-6 gap-y-6">
+              <UserPicker
+                label="Operasyon Yetkilisi 1"
+                value={directOfficers[0]}
+                onChange={(v) => setDirectOfficers((o) => [v, o[1]])}
+              />
+              <UserPicker
+                label="Operasyon Yetkilisi 2"
+                value={directOfficers[1]}
+                onChange={(v) => setDirectOfficers((o) => [o[0], v])}
+              />
+              <UserPicker label="Satış Temsilcisi" value={directSalesRep} onChange={setDirectSalesRep} />
             </div>
           </section>
 
@@ -1579,7 +1902,7 @@ export function LoadsPage() {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <FormField label="Net Fiyat">
-                      <TextInput value={item.net_price} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, net_price: v } : x)))} />
+                      <TextInput value={item.net_price} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, net_price: v, auto_from_item: null } : x)))} />
                     </FormField>
                     <FormField label="Açıklama">
                       <TextInput value={item.description} onChange={(v) => setDirectItems((l) => l.map((x, xi) => (xi === i ? { ...x, description: v } : x)))} />
@@ -1771,7 +2094,12 @@ export function LoadsPage() {
                       <SelectInput value={form.instruction_id} onChange={(v) => setForm((f) => ({ ...f, instruction_id: v }))} options={opts(instructions)} />
                     </FormField>
                     <FormField label="Teslimat Şekli">
-                      <SelectInput value={form.delivery_method_id} onChange={(v) => setForm((f) => ({ ...f, delivery_method_id: v }))} options={opts(deliveryMethods)} />
+                      <SelectInput value={form.delivery_method_id} onChange={(v) => setForm((f) => ({ ...f, delivery_method_id: v }))} options={codeOpts(deliveryMethods)} />
+                    </FormField>
+                    {/* Yükün kendi para birimi (skn_yuk.dovizkod) — mali kalem
+                        satırlarındaki dövizle aynı şey değil. */}
+                    <FormField label="Döviz Türü">
+                      <SelectInput value={form.currency_id} onChange={(v) => setForm((f) => ({ ...f, currency_id: v }))} options={codeOpts(currencies)} />
                     </FormField>
                     <FormField label="Çalışma Şekli">
                       <SelectInput value={form.way_of_working} onChange={(v) => setForm((f) => ({ ...f, way_of_working: v }))} options={WAY_OF_WORKING_OPTIONS} />
@@ -1897,6 +2225,106 @@ export function LoadsPage() {
                       </CollapsibleRow>
                     ))
                   )}
+
+                  {/* GERÇEK KOLİ BİLGİLERİ — Siber'de skn_yukkolidepo. Yük
+                      ekranındaki ikinci koli seti ve aradaki "Gerçek Koli
+                      Bilgilerine Aktar" düğmesi. Canlıda iki seti de olan
+                      4.064 yükün 3.920'sinde toplamlar birebir aynı, yani
+                      aktarılmış ve dokunulmamış. */}
+                  <div className="mt-8 pt-6 border-t border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">
+                        Gerçek Koli Bilgileri
+                      </p>
+                      <div className="flex items-center gap-2">
+                        {canUpdate && packages.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => copyToActualPackages()}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors"
+                          >
+                            <Copy size={14} />Gerçek Koli Bilgilerine Aktar
+                          </button>
+                        )}
+                        {canUpdate && (
+                          <button type="button" onClick={addActualPackageRow} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
+                            <Plus size={12} />Satır Ekle
+                          </button>
+                        )}
+                        {canUpdate && actualPackages.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={saveActualPackages}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-300 text-xs font-semibold hover:bg-gray-50 transition-colors"
+                          >
+                            Kaydet
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {actualLoading ? (
+                      <p className="text-xs text-gray-400 text-center py-8">Yükleniyor...</p>
+                    ) : actualPackages.length === 0 ? (
+                      <p className="text-xs text-gray-400 text-center py-8">
+                        Gerçek koli bilgisi yok. Yukarıdaki kolileri aktarabilir ya da elle satır ekleyebilirsiniz.
+                      </p>
+                    ) : (
+                      actualPackages.map((p, i) => (
+                        <CollapsibleRow
+                          key={i}
+                          title={p.product_type_id?.name ?? p.case_type_id?.name ?? `${i + 1}. Gerçek Koli`}
+                          summary={`${p.quantity || 0} adet${p.gross_weight ? ` · ${p.gross_weight} kg` : ""}`}
+                          open={openActualPackages.has(i)}
+                          onToggle={() => setOpenActualPackages((o) => toggleIn(o, i))}
+                          onRemove={canDelete ? () => removeActualPackageRow(i) : undefined}
+                          removeTitle="Gerçek koli satırını sil"
+                        >
+                          <div className="grid grid-cols-3 gap-3">
+                            <LookupPicker
+                              label="Ürün Tipi"
+                              endpoint="/api/v1/product_type"
+                              value={p.product_type_id}
+                              onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, product_type_id: v } : x)))}
+                            />
+                            <LookupPicker
+                              label="Kap Tipi"
+                              endpoint="/api/v1/case_type"
+                              value={p.case_type_id}
+                              onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, case_type_id: v } : x)))}
+                            />
+                            <FormField label="Adet">
+                              <TextInput value={p.quantity} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
+                            </FormField>
+                            <FormField label="Brüt Ağırlık (kg)">
+                              <TextInput value={p.gross_weight} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, gross_weight: v } : x)))} />
+                            </FormField>
+                            <FormField label="Net Ağırlık (kg)">
+                              <TextInput value={p.net_weight} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, net_weight: v } : x)))} />
+                            </FormField>
+                            <FormField label="Hacim (m³)">
+                              <TextInput value={p.volume} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, volume: v } : x)))} />
+                            </FormField>
+                            <FormField label="Lademetre">
+                              <TextInput value={p.lademeter} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, lademeter: v } : x)))} />
+                            </FormField>
+                            <FormField label="Yükseklik (cm)">
+                              <TextInput value={p.height} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, height: v } : x)))} />
+                            </FormField>
+                            <FormField label="En (cm)">
+                              <TextInput value={p.width} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, width: v, lademeter: computeLademeter(v, x.length) } : x)))} />
+                            </FormField>
+                            <FormField label="Boy (cm)">
+                              <TextInput value={p.length} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, length: v, lademeter: computeLademeter(x.width, v) } : x)))} />
+                            </FormField>
+                            <FormField label="İstiflenebilir">
+                              <SelectInput value={p.stackable} onChange={(v) => setActualPackages((list) => list.map((x, xi) => (xi === i ? { ...x, stackable: v } : x)))} options={[{ value: "1", label: "Evet" }, { value: "0", label: "Hayır" }]} />
+                            </FormField>
+                          </div>
+                        </CollapsibleRow>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -1989,10 +2417,10 @@ export function LoadsPage() {
                                   <TextInput value={item.quantity} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" />
                                 </FormField>
                                 <FormField label="Net Fiyat">
-                                  <TextInput value={item.net_price} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, net_price: v } : x)))} />
+                                  <TextInput value={item.net_price} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, net_price: v, auto_from_item: null } : x)))} />
                                 </FormField>
                                 <FormField label="Toplam Fiyat">
-                                  <TextInput value={item.total_price} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, total_price: v } : x)))} />
+                                  <TextInput value={item.total_price} onChange={(v) => setInvoiceItems((list) => list.map((x, xi) => (xi === i ? { ...x, total_price: v, auto_from_item: null } : x)))} />
                                 </FormField>
                               </div>
                               <div className="mt-3">
@@ -2022,8 +2450,43 @@ export function LoadsPage() {
 
               {tab === "Görevliler" && (
                 <div className="space-y-6">
-                  <UserPicker label="Operasyon Yetkilisi" value={customerRep} onChange={setCustomerRep} />
-                  <UserPicker label="Satış Temsilcisi" value={secondCustomerRep} onChange={setSecondCustomerRep} />
+                  <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-900">
+                    Dördü de Siber'e yazılır (<code>musteritemsilcisiad</code> /
+                    <code>musteritemsilcisi2ad</code> / <code>fiyatlandirankullaniciid</code> /
+                    <code>satistemsilcisikod</code>). <b>Fiyatlandıran</b> 1. yetkiliden
+                    dolar, gerekirse değiştirebilirsiniz. Alanı boş bırakmak Siber'deki
+                    değeri SİLMEZ, olduğu gibi bırakır.
+                  </div>
+
+                  {/* ETİKET DÜZELTİLDİ: ikinci alan "Satış Temsilcisi" diye
+                      etiketlenmişti ama Siber'de musteritemsilcisi2ad sütununa,
+                      yani İKİNCİ OPERASYON YETKİLİSİNE karşılık geliyor. Satış
+                      temsilcisi Siber'de ayrı bir sütun (satistemsilcisikod) ve
+                      bu ekranda hiç toplanmıyor. Teklif ekranındaki adlandırma
+                      ile de aynı hâle geldi. */}
+                  <UserPicker
+                    label="Operasyon Yetkilisi 1"
+                    value={customerRep}
+                    onChange={(v) => {
+                      setCustomerRep(v);
+                      // Fiyatlandıran 1. yetkiliyle aynıysa onu izler; kullanıcı
+                      // ayırdıysa dokunulmaz.
+                      if (!pricingUser || pricingUser.id === customerRep?.id) setPricingUser(v);
+                    }}
+                  />
+                  <UserPicker label="Operasyon Yetkilisi 2" value={secondCustomerRep} onChange={setSecondCustomerRep} />
+
+                  {/* Siber: skn_yuk.fiyatlandirankullaniciid — 8.043 yükün
+                      870'inde dolu, 869'u son 12 aydan. "Tedarik eden" diye bir
+                      alan Siber'in yük/teklif tablolarında YOK. */}
+                  <UserPicker label="Fiyatlandıran" value={pricingUser} onChange={setPricingUser} />
+
+                  {/* Siber: skn_yuk.satistemsilcisikod — 8.043 yükün 7.645'inde
+                      dolu (%95) ve bunların 2.703'ünde (%35) operasyon
+                      yetkilisinden FARKLI kişi, yani türetilemez. Teklif
+                      ekranında bu alan cariden gelip salt-okunur; yükte
+                      seçilebilir çünkü yük dönüşümden sonra el değiştiriyor. */}
+                  <UserPicker label="Satış Temsilcisi" value={salesRep} onChange={setSalesRep} />
                 </div>
               )}
 

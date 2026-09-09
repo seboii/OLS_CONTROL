@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 
 namespace OLS.Business.Services.Lookups;
@@ -59,8 +60,7 @@ public sealed class LookupService<TEntity> : ILookupService<TEntity> where TEnti
             var pattern = $"%{QueryableExtensions.NormalizeTurkish(search)}%";
             query = query.Where(e =>
                 EF.Functions.Like(
-                    EF.Property<string>(e, LookupMap<TEntity>.NameProperty!)
-                        .Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(),
+                    TurkishFold.Fold(EF.Property<string>(e, LookupMap<TEntity>.NameProperty!)),
                     pattern));
         }
 

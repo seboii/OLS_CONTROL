@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 using OLS.DataAccess.Siber;
@@ -30,7 +31,14 @@ public interface IAccountService
 /// <summary>Cariye bağlı varsayılan görevliler.</summary>
 public sealed class AccountRepresentativesDto
 {
-    [JsonPropertyName("operation_officer")] public MappedUserDto? OperationOfficer { get; init; }
+    /// <summary>
+    /// OPERASYON YETKİLİSİ ÇOĞUL: Siber'in teklif kaydında iki alan var —
+    /// <c>musteritemsilcisi</c> (ad) ve <c>operasyonyetkilisikod2</c> (kod);
+    /// 19.561 rezervasyonun 17.628'inde birincisi, 17.135'inde ikincisi dolu
+    /// ve ikisi 6.627 kayıtta FARKLI kişi. Bu yüzden alan tekil olamaz.
+    /// Liste teklif formunu ÖN DOLDURUR, kilitlemez.
+    /// </summary>
+    [JsonPropertyName("operation_officers")] public IReadOnlyList<MappedUserDto> OperationOfficers { get; init; } = [];
     [JsonPropertyName("sales_reps")] public IReadOnlyList<MappedUserDto> SalesReps { get; init; } = [];
 }
 
@@ -189,14 +197,14 @@ public sealed class AccountService : IAccountService
             // (Süper admin dalında 'address' aranmıyordu, diğerinde aranıyordu —
             //  bu tutarsızlık kaynakta var; burada her iki dalda da aynı davranıyoruz.)
             var countryIds = _db.Countries
-                .Where(c => EF.Functions.Like(c.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(c => EF.Functions.Like(TurkishFold.Fold(c.Name!), pattern))
                 .Select(c => (Guid?)c.Id);
 
             accounts = accounts.Where(a =>
-                EF.Functions.Like(a.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(a.Phone!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(a.Email!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(a.Address!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(a.Name!), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(a.Phone!), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(a.Email!), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(a.Address!), pattern) ||
                 countryIds.Contains(a.CountryId) ||
                 countryIds.Contains(a.PhoneCountryId));
         }
@@ -427,8 +435,9 @@ public sealed class AccountService : IAccountService
     /// </summary>
     /// <summary>
     /// Siber'den senkronlanan cari-görevli bağını okur (bkz.
-    /// SiberSyncService.SyncAccountRepresentativesAsync). Operasyon Yetkilisi tekil,
-    /// Satış Temsilcisi çoğul — teklif formundaki alanlarla aynı şekil.
+    /// SiberSyncService.SyncAccountRepresentativesAsync). İkisi de çoğul —
+    /// teklif formundaki alanlarla aynı şekil: iki Operasyon Yetkilisi
+    /// (ön doldurulur, elle değiştirilebilir) ve Satış Temsilcileri.
     /// </summary>
     public async Task<AccountRepresentativesDto> RepresentativesAsync(
         long accountId, CancellationToken cancellationToken = default)
@@ -458,7 +467,9 @@ public sealed class AccountService : IAccountService
 
         return new AccountRepresentativesDto
         {
-            OperationOfficer = reps.Where(x => x.UserType == 1).Select(x => Map(x)).FirstOrDefault(),
+            // İkiden fazlası gönderilmez: teklif formunda iki alan var, fazlası
+            // arayüzde görünmeyen ama "tanımlı" sanılan bir kişi bırakırdı.
+            OperationOfficers = reps.Where(x => x.UserType == 1).Select(x => Map(x)).Take(2).ToList(),
             SalesReps = reps.Where(x => x.UserType == 2).Select(x => Map(x)).ToList(),
         };
     }

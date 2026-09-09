@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using OLS.API.Filters;
@@ -37,12 +37,16 @@ public sealed class ExpeditionLoadMappingController : ApiControllerBase
     [RequiresPermission(PermissionAction.Read, "expedition_management")]
     public async Task<IActionResult> All(
         [FromQuery] string? search,
+        [FromQuery(Name = "expedition_id")] long? expeditionId,
         [FromQuery(Name = "per_page")] int? perPage,
         [FromQuery] int page = 1,
         CancellationToken cancellationToken = default)
     {
+        // expedition_id verilirse yalnızca O sefere bağlı yükler listeden
+        // çıkarılır; başka seferlerde bağlı olanlar uyarıyla listelenir
+        // (bir yük birden çok sefere bağlanabiliyor).
         var result = await _mappings.AvailableLoadsAsync(
-            search, perPage, page, CurrentPath, cancellationToken);
+            expeditionId, search, perPage, page, CurrentPath, cancellationToken);
 
         return Ok(result, "Kayıtlar");
     }

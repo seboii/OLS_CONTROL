@@ -108,8 +108,31 @@ public sealed class SiberRezervasyonYaz
     public string? GondericiId { get; init; }
     public string? AliciId { get; init; }
     public string? DurumId { get; init; }
+    /// <summary>1. operasyon yetkilisinin ADI (sky_kullanici.ad).</summary>
     public string? MusteriTemsilcisi { get; init; }
+
+    /// <summary>
+    /// 2. operasyon yetkilisinin KODU (sky_kullanici.kod) — ad değil.
+    /// Canlıda 17.127 rezervasyonda dolu ve 17.124'ü bir kullanıcı koduyla
+    /// eşleşiyor; 1. yetkilinin sütunu ise AD tutuyor. İki sütunun biçimi
+    /// farklı, karıştırılmamalı.
+    /// </summary>
+    public string? OperasyonYetkilisiKod2 { get; init; }
+
     public string? SatisTemsilcisiKod { get; init; }
+
+    /// <summary>
+    /// FİYATLANDIRAN — <c>skn_rezervasyon.fiyatlandirankullaniciid</c>,
+    /// <c>uniqueidentifier</c> ve <c>sky_kullanici.kullaniciid</c>'ye bakar
+    /// (kod/ad DEĞİL). Canlıda 19.561 teklifin 7.952'sinde dolu; bunların
+    /// 7.951'i son 12 aydan, yani alan HÂLÂ kullanılıyor ve dolu değerlerin
+    /// tamamı bir kullanıcıya çözülüyor.
+    ///
+    /// SATIŞ TEMSİLCİSİ 2 (<c>satistemsilcisi2kod</c>) bilinçli olarak YAZILMIYOR:
+    /// 19.561 teklifin yalnızca 540'ında (%2,8), son 12 ayda 12.431'in 294'ünde
+    /// (%2,4) dolu — Siber'in kendi kullanıcıları bu alanı kullanmıyor.
+    /// </summary>
+    public string? FiyatlandiranKullaniciId { get; init; }
     public string? DepartmanId { get; init; }
     public string? Aciklama { get; init; }
     public int Yil { get; init; }
@@ -254,7 +277,8 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
                  pazarlamabildirimtarih, talimatgelistarih, gecerliliktarih, odemesekliid,
                  ontasimatarafimizdanyapilir, sontasimatarafimizdanyapilir, musteriid,
                  navlunfirmaid, gondericiid, aliciid, durumid, musteritemsilcisi,
-                 satistemsilcisikod, departmanid, aciklama, yil, instime, insuser,
+                 operasyonyetkilisikod2, satistemsilcisikod, fiyatlandirankullaniciid,
+                 departmanid, aciklama, yil, instime, insuser,
                  yuklemeulkeid, bosaltmaulkeid, calismasekli, onaytarih)
             VALUES
                 (@RezervasyonId, @SirketId, @SubeId, @TalimatGelisSekli, @nextNo,
@@ -262,7 +286,8 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
                  @PazarlamaBildirimTarih, @TalimatGelisTarih, @GecerlilikTarih, @OdemeSekliId,
                  @OnTasimaTarafimizdanYapilir, @SonTasimaTarafimizdanYapilir, @MusteriId,
                  @NavlunFirmaId, @GondericiId, @AliciId, @DurumId, @MusteriTemsilcisi,
-                 @SatisTemsilcisiKod, @DepartmanId, @Aciklama, @Yil, @InsTime, @InsUser,
+                 @OperasyonYetkilisiKod2, @SatisTemsilcisiKod, @FiyatlandiranKullaniciId,
+                 @DepartmanId, @Aciklama, @Yil, @InsTime, @InsUser,
                  @YuklemeUlkeId, @BosaltmaUlkeId, @CalismaSekli, @OnayTarih);
 
             COMMIT TRANSACTION;
@@ -323,7 +348,9 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
                 aliciid = ISNULL(@AliciId, aliciid),
                 durumid = @DurumId,
                 musteritemsilcisi = ISNULL(@MusteriTemsilcisi, musteritemsilcisi),
+                operasyonyetkilisikod2 = ISNULL(@OperasyonYetkilisiKod2, operasyonyetkilisikod2),
                 satistemsilcisikod = ISNULL(@SatisTemsilcisiKod, satistemsilcisikod),
+                fiyatlandirankullaniciid = ISNULL(@FiyatlandiranKullaniciId, fiyatlandirankullaniciid),
                 departmanid = ISNULL(@DepartmanId, departmanid),
                 aciklama = @Aciklama, yil = @Yil,
                 yuklemeulkeid = ISNULL(@YuklemeUlkeId, yuklemeulkeid),
@@ -498,7 +525,8 @@ public sealed class SiberReservationRepository : ISiberReservationRepository
         r.PazarlamaBildirimTarih, r.TalimatGelisTarih, r.GecerlilikTarih, r.OdemeSekliId,
         r.OnTasimaTarafimizdanYapilir, r.SonTasimaTarafimizdanYapilir, r.MusteriId,
         r.NavlunFirmaId, r.GondericiId, r.AliciId, r.DurumId, r.MusteriTemsilcisi,
-        r.SatisTemsilcisiKod, r.DepartmanId, r.Aciklama, r.Yil, r.InsTime, r.InsUser,
+        r.OperasyonYetkilisiKod2, r.SatisTemsilcisiKod, r.FiyatlandiranKullaniciId,
+        r.DepartmanId, r.Aciklama, r.Yil, r.InsTime, r.InsUser,
         r.YuklemeUlkeId, r.BosaltmaUlkeId, r.CalismaSekli, r.OnayTarih,
     };
 

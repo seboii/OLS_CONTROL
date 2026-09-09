@@ -94,6 +94,10 @@ public sealed record LoadWriteModel
 
     public IReadOnlyList<LoadContentInput> Contents { get; init; } = [];
     public IReadOnlyList<LoadFinancialItemInput> FinancialItems { get; init; } = [];
+    /// <summary>Teslim şekli / döviz — dönüşümde yüke taşınır.</summary>
+    public int? DeliveryMethodId { get; init; }
+    public int? CurrencyId { get; init; }
+
     public IReadOnlyList<LoadChargePersonInput> ChargePersons { get; init; } = [];
     public IReadOnlyList<string> EmailTo { get; init; } = [];
     public IReadOnlyList<string> EmailCc { get; init; } = [];
@@ -129,9 +133,14 @@ public sealed class LoadWriteService : ILoadWriteService
     /// <summary>status_types tablosundaki "Olumlu" satırı.</summary>
     private const int PositiveStatusTypeId = 5;
 
-    /// <summary>load_charge_people.user_type: 1 = Operasyon Yetkilisi, 2 = Satış Temsilcisi.</summary>
+    /// <summary>
+    /// load_charge_people.user_type: 1 = Operasyon Yetkilisi, 2 = Satış
+    /// Temsilcisi, 3 = Fiyatlandıran (bkz. LoadChargePerson — hangi rolün
+    /// Siber'de gerçekten kullanıldığı orada ölçümle yazılı).
+    /// </summary>
     private const int OperationOfficerType = 1;
     private const int SalesRepType = 2;
+    private const int PricingUserType = 3;
 
     /// <summary>
     /// Gerekçe YALNIZCA Olumsuz durumunda saklanır: kullanıcı önce Olumsuz seçip
@@ -177,6 +186,8 @@ public sealed class LoadWriteService : ILoadWriteService
             LoadingTypeId = model.LoadingTypeId,
             PaymentTypeId = model.PaymentTypeId,
             StatusTypeId = model.StatusTypeId,
+            DeliveryMethodId = model.DeliveryMethodId,
+            CurrencyId = model.CurrencyId,
             OfferDate = model.OfferDate,
             ApprovalDate = ResolveApprovalDate(model, null),
             OfferValidityDate = model.OfferValidityDate,
@@ -233,6 +244,8 @@ public sealed class LoadWriteService : ILoadWriteService
         load.PaymentTypeId = model.PaymentTypeId;
         load.ApprovalDate = ResolveApprovalDate(model, load.ApprovalDate);
         load.StatusTypeId = model.StatusTypeId;
+        load.DeliveryMethodId = model.DeliveryMethodId;
+        load.CurrencyId = model.CurrencyId;
         load.OfferDate = model.OfferDate;
         load.OfferValidityDate = model.OfferValidityDate;
         load.MarketingNotificationDate = model.MarketingNotificationDate;
@@ -368,34 +381,57 @@ public sealed class LoadWriteService : ILoadWriteService
     /// <summary>
     /// Görevlileri yazar.
     ///
-    /// OPERASYON YETKİLİSİ (user_type=1) — MÜŞTERİNİNKİ VARSA DEĞİŞMEZ:
+    /// OPERASYON YETKİLİSİ (user_type=1) — İKİ TANE VE ELLE DÜZENLENİR.
     ///
-    ///   1. Müşteriye tanımlı operasyon yetkilisi varsa O yazılır ve istekten
-    ///      gelen değer YOK SAYILIR ("varsa değişmesin").
-    ///   2. Yoksa formdan elle seçilen kişi yazılır ("yoksa manuel girilebilsin").
+    /// Siber'in teklif kaydında yetkili için İKİ ayrı sütun var:
+    /// <c>musteritemsilcisi</c> (kullanıcı ADI) ve <c>operasyonyetkilisikod2</c>
+    /// (kullanıcı KODU). Canlıda 19.554 rezervasyonun 17.620'sinde birincisi,
+    /// 17.127'sinde ikincisi dolu; ikisi 6.627 kayıtta FARKLI kişiyi
+    /// gösteriyor — yani ikinci yetkili gerçekten ikinci bir kişi, birincinin
+    /// kopyası değil. Uygulama bu alanı tek ve türetilmiş tutuyordu.
+    ///
+    /// Sıra:
+    ///
+    ///   1. Formdan gelen seçim(ler) yazılır — en fazla iki, gönderilen sırada.
+    ///      Alan artık ELLE DÜZENLENEBİLİR: müşterinin tanımlı yetkilisi
+    ///      formu yalnızca ÖN DOLDURUR, kullanıcı değiştirebilir.
+    ///   2. İstekte hiç yetkili yoksa (arayüz dışı çağrı) müşteriye tanımlı
+    ///      AKTİF yetkililere düşülür.
     ///   3. O da yoksa kaydeden kullanıcıya düşülür — Siber aktarımı boş
     ///      <c>musteritemsilcisi</c>/<c>insuser</c> kabul etmiyor.
     ///
-    /// Eskiden 1. adım YOKTU: daima kaydeden kullanıcı yazılıyor, müşteriye
-    /// tanımlı yetkili (canlıda 3.209 caride dolu) yalnızca kaydedenin Siber
-    /// karşılığı olmadığı durumda kullanılıyordu. Yeni kural o istisnayı da
-    /// kapsıyor, çünkü müşterinin yetkilisi artık her durumda önceliklidir.
+    /// Seçilen kişinin var VE aktif olduğu doğrulanır: var olmayan bir kimlik
+    /// Siber'e boş ad/kod gönderir, yük dönüşümü de "Müşteri temsilcisi boş
+    /// olamaz" ile düşerdi.
     ///
-    /// AYRILMIŞ PERSONEL "VAR" SAYILMAZ: bağların 3.209 carisinden 1.651'inde
-    /// yetkili pasif/silinmiş bir kullanıcı. Böyle bir kaydı göreve yazmak işi
-    /// şirkette olmayan birine atamak olurdu; bu yüzden yalnızca AKTİF kullanıcı
-    /// "tanımlı yetkili" sayılır, aksi hâlde elle seçime düşülür.
+    /// AYRILMIŞ PERSONEL "TANIMLI" SAYILMAZ: bağların 3.209 carisinden
+    /// 1.651'inde yetkili pasif/silinmiş bir kullanıcı; ön doldurma da bu
+    /// yüzden yalnızca aktif kullanıcıya bakar.
     ///
     /// 243 carinin birden çok yetkilisi var; sıralama olmadan hangisinin
     /// seçildiği çağrıdan çağrıya değişebilirdi — kimliğe göre sıralanır.
     ///
-    /// SATIŞ TEMSİLCİSİ (user_type=2) = müşteriye tanımlı temsilciler; hiç yoksa
-    /// operasyon yetkilisi yazılır. Siber aktarımı <c>satistemsilcisikod</c> boş
-    /// gelirse doğrulamada takılıyor, alanı boş bırakmak teklifi aktarılamaz
-    /// hâle getirirdi.
+    /// SATIŞ TEMSİLCİSİ (user_type=2) — TEK KİŞİ. Müşteriye tanımlı temsilci,
+    /// arayüzde salt-okunur, istekten geleni bilinçli olarak yok sayar. Hiç
+    /// yoksa birinci operasyon yetkilisi yazılır — Siber aktarımı
+    /// <c>satistemsilcisikod</c> boş gelirse doğrulamada takılıyor, alanı boş
+    /// bırakmak teklifi aktarılamaz hâle getirirdi.
     ///
-    /// Kural arayüzde değil BURADA uygulanıyor: alanlar salt-okunur gösterilse
-    /// bile istek elle çağrılabilir, tek doğruluk noktası sunucu tarafıdır.
+    /// Eskiden cariye tanımlı TÜM satış temsilcileri yazılıyordu (249 caride
+    /// 2-4 kişi), ama Siber'e yalnızca ilki gidiyordu: ikinci sütun
+    /// <c>satistemsilcisi2kod</c> 19.561 teklifin 540'ında dolu (%2,8) ve
+    /// fiilen kullanılmıyor. Ekranda kaydedilecek diye gösterilen fazladan
+    /// kişiler Siber'e hiç ulaşmıyordu; artık kimliğe göre sıralanıp TEK kişi
+    /// yazılıyor — gösterilen ile yazılan aynı.
+    ///
+    /// FİYATLANDIRAN (user_type=3) — Siber'de
+    /// <c>skn_rezervasyon.fiyatlandirankullaniciid</c>. Formdan gelmezse
+    /// BİRİNCİ OPERASYON YETKİLİSİ yazılır: Siber'in kendi verisinde dolu 7.952
+    /// kaydın 5.798'inde (%73) fiyatlandıran zaten 1. operasyon yetkilisiyle
+    /// aynı kişi.
+    ///
+    /// Kural arayüzde değil BURADA uygulanıyor: tek doğruluk noktası sunucu
+    /// tarafıdır.
     /// </summary>
     private async Task WriteChargePersonsAsync(
         Load load, LoadWriteModel model, DateTime now, CancellationToken cancellationToken)
@@ -410,69 +446,122 @@ public sealed class LoadWriteService : ILoadWriteService
                 UpdatedAt = now,
             });
 
-        var operationOfficerId =
-            await CustomerOperationOfficerAsync(model.CustomerId, cancellationToken)
-            ?? await RequestedOperationOfficerAsync(model, cancellationToken)
-            ?? (int)model.CurrentUserId;
+        var officers = await ResolveOperationOfficersAsync(model, cancellationToken);
 
-        Add(operationOfficerId, OperationOfficerType);
+        // SIRA ANLAMLI: 1. yetkili Siber'de musteritemsilcisi, 2. yetkili
+        // operasyonyetkilisikod2 olarak yazılıyor. Okuma tarafı satırları
+        // kimliğe (ekleme sırasına) göre sıralıyor.
+        foreach (var userId in officers)
+            Add(userId, OperationOfficerType);
 
-        var salesReps = model.CustomerId is { } customerId
+        // TEK SATIŞ TEMSİLCİSİ (yukarıdaki nota bakınız). Sıralama olmadan
+        // hangisinin seçildiği çağrıdan çağrıya değişebilirdi.
+        var salesRep = model.CustomerId is { } customerId
             ? await _db.AccountRepresentatives.AsNoTracking()
                 .Where(r => r.AccountId == customerId && r.UserType == SalesRepType)
                 .Select(r => r.UserId)
                 .Distinct()
-                .ToListAsync(cancellationToken)
-            : [];
+                .OrderBy(userId => userId)
+                .Cast<int?>()
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
 
-        if (salesReps.Count == 0)
-        {
-            Add(operationOfficerId, SalesRepType);
-            return;
-        }
+        Add(salesRep ?? officers[0], SalesRepType);
 
-        foreach (var userId in salesReps)
-            Add(userId, SalesRepType);
+        // FİYATLANDIRAN: formdan geleni doğrula, yoksa 1. operasyon yetkilisi.
+        var pricingUser = await RequestedPricingUserAsync(model, cancellationToken)
+                          ?? officers[0];
+
+        Add(pricingUser, PricingUserType);
     }
 
     /// <summary>
-    /// Müşteriye tanımlı AKTİF operasyon yetkilisi. Bulunursa istekten gelen
-    /// değer yok sayılır — kural "varsa değişmesin".
+    /// Formdan seçilen fiyatlandıran. Var/aktif olduğu doğrulanır: var olmayan
+    /// bir kimlik Siber'e çözülemeyen bir GUID gönderir ve
+    /// <c>fiyatlandirankullaniciid</c> FK'siz olsa da çöp veri bırakırdı.
     /// </summary>
-    private async Task<int?> CustomerOperationOfficerAsync(
+    private async Task<int?> RequestedPricingUserAsync(
+        LoadWriteModel model, CancellationToken cancellationToken)
+    {
+        var requested = model.ChargePersons
+            .Where(p => p.UserType == PricingUserType && p.UserId is > 0)
+            .Select(p => p.UserId!.Value)
+            .FirstOrDefault();
+
+        if (requested == 0)
+            return null;
+
+        return (await ActiveUserIdsAsync([requested], cancellationToken)).Contains(requested)
+            ? requested
+            : null;
+    }
+
+    /// <summary>Teklif formundaki operasyon yetkilisi alanı sayısı.</summary>
+    private const int MaxOperationOfficers = 2;
+
+    /// <summary>
+    /// Yazılacak operasyon yetkilileri, sırasıyla. En az bir kişi döner
+    /// (en kötü hâlde kaydeden kullanıcı).
+    /// </summary>
+    private async Task<IReadOnlyList<int>> ResolveOperationOfficersAsync(
+        LoadWriteModel model, CancellationToken cancellationToken)
+    {
+        var requested = model.ChargePersons
+            .Where(p => p.UserType == OperationOfficerType && p.UserId is > 0)
+            .Select(p => p.UserId!.Value)
+            .Distinct()
+            .Take(MaxOperationOfficers)
+            .ToList();
+
+        if (requested.Count > 0)
+        {
+            var valid = await ActiveUserIdsAsync(requested, cancellationToken);
+
+            // GÖNDERİLEN SIRA KORUNUR — "yetkili 1" ile "yetkili 2" yer
+            // değiştirirse Siber'de ad ve kod sütunları da yer değiştirirdi.
+            var ordered = requested.Where(valid.Contains).ToList();
+            if (ordered.Count > 0)
+                return ordered;
+        }
+
+        var fromCustomer = await CustomerOperationOfficersAsync(model.CustomerId, cancellationToken);
+
+        return fromCustomer.Count > 0 ? fromCustomer : [(int)model.CurrentUserId];
+    }
+
+    /// <summary>
+    /// Müşteriye tanımlı AKTİF operasyon yetkilileri (en fazla iki, kimliğe
+    /// göre sıralı). İstekte hiç yetkili gelmediğinde ön dolduranın aynısına
+    /// düşmek için kullanılır.
+    /// </summary>
+    private async Task<List<int>> CustomerOperationOfficersAsync(
         int? customerId, CancellationToken cancellationToken)
     {
         if (customerId is not { } id)
-            return null;
+            return [];
 
         return await _db.AccountRepresentatives.AsNoTracking()
             .Where(r => r.AccountId == id && r.UserType == OperationOfficerType)
             .Join(_db.Users.AsNoTracking().Where(u => u.DeletedAt == null && u.Status),
-                  r => (long)r.UserId, u => u.Id, (r, u) => (int?)r.UserId)
-            .OrderBy(id2 => id2)
-            .FirstOrDefaultAsync(cancellationToken);
+                  r => (long)r.UserId, u => u.Id, (r, u) => r.UserId)
+            .Distinct()
+            .OrderBy(userId => userId)
+            .Take(MaxOperationOfficers)
+            .ToListAsync(cancellationToken);
     }
 
-    /// <summary>
-    /// Formdan elle seçilen operasyon yetkilisi. Yalnızca müşterinin tanımlı
-    /// yetkilisi YOKKEN dikkate alınır ve kullanıcının gerçekten var/aktif
-    /// olduğu doğrulanır: var olmayan bir kimlik Siber'e boş kod gönderirdi.
-    /// </summary>
-    private async Task<int?> RequestedOperationOfficerAsync(
-        LoadWriteModel model, CancellationToken cancellationToken)
+    /// <summary>Verilen kimliklerden var VE aktif olanlar.</summary>
+    private async Task<HashSet<int>> ActiveUserIdsAsync(
+        IReadOnlyList<int> userIds, CancellationToken cancellationToken)
     {
-        var requested = model.ChargePersons
-            .Where(p => p.UserType == OperationOfficerType && p.UserId > 0)
-            .Select(p => p.UserId)
-            .FirstOrDefault();
+        var ids = userIds.Select(id => (long)id).ToList();
 
-        if (requested is not { } userId)
-            return null;
+        var found = await _db.Users.AsNoTracking()
+            .Where(u => ids.Contains(u.Id) && u.DeletedAt == null && u.Status)
+            .Select(u => (int)u.Id)
+            .ToListAsync(cancellationToken);
 
-        return await _db.Users.AsNoTracking()
-            .AnyAsync(u => u.Id == userId && u.DeletedAt == null && u.Status, cancellationToken)
-            ? userId
-            : null;
+        return [.. found];
     }
 
     private void AddEmail(Load load, string key, string email, DateTime now) =>

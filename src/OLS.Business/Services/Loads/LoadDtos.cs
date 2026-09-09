@@ -122,6 +122,12 @@ public sealed class LoadDetailDto
     [JsonPropertyName("transit_country_id")] public CountryDto? TransitCountryId { get; init; }
     [JsonPropertyName("target_country_id")] public CountryDto? TargetCountryId { get; init; }
 
+    /// <summary>
+    /// Teslim şekli ve döviz — teklifte toplanıp dönüşümde yüke taşınıyor.
+    /// </summary>
+    [JsonPropertyName("delivery_method_id")] public NamedRefDto? DeliveryMethodId { get; init; }
+    [JsonPropertyName("currency_id")] public NamedRefDto? CurrencyId { get; init; }
+
     [JsonPropertyName("load_charge_person")]
     public IReadOnlyList<LoadChargePersonDto> LoadChargePerson { get; init; } = [];
 

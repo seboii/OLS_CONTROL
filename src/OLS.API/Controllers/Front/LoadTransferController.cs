@@ -393,6 +393,22 @@ public sealed class ExpeditionController : ApiControllerBase
     }
 
     /// <summary>
+    /// Bu ARAÇ başka AÇIK seferlerde bağlı mı? Plaka seçilirken uyarı için.
+    ///
+    /// Tamamlanmış (90 - BOŞALTILDI) seferler sayılmaz: bir aracın geçmişte
+    /// onlarca seferi olması normal, uyarı olsaydı sürekli çıkardı.
+    /// </summary>
+    [HttpGet("car_usage")]
+    [RequiresPermission(PermissionAction.Read, "expedition_management")]
+    public async Task<IActionResult> CarUsage(
+        [FromQuery(Name = "car_id")] long carId,
+        [FromQuery(Name = "exclude_expedition_id")] long? excludeExpeditionId,
+        CancellationToken cancellationToken) =>
+        base.Ok(ApiResponse.Success(
+            await _expeditions.CarUsageAsync(carId, excludeExpeditionId, cancellationToken),
+            "Kayıtlar"));
+
+    /// <summary>
     /// Sefer evrakını Siber'in arşivine (FTP) gönderir.
     ///
     /// Sefer evrakı yük evrakından AYRI bir kayda bağlanır: Siber'de sefer

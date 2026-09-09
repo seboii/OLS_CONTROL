@@ -50,13 +50,37 @@ public sealed class LoadTransferUpdateRequest
     public int? DeliveryMethodId { get; set; }
 
     /// <summary>
-    /// olsold "Görevliler" sekmesi: Operasyon Yetkilisi / Satış Temsilcisi.
-    /// Sütun adı yanıltıcı (<c>customer_representative_name</c>) ama içeriği
-    /// bir kullanıcı kimliğidir — dönüşüm sırasında hep işlemi yapan
-    /// kullanıcıya sabitleniyordu, bu uçla artık düzenlenebilir.
+    /// "Görevliler" sekmesi: BİRİNCİ ve İKİNCİ OPERASYON YETKİLİSİ.
+    ///
+    /// Sütun adı yanıltıcı (<c>customer_representative_name</c>) ama içeriği bir
+    /// kullanıcı kimliğidir. İkincisi de operasyon yetkilisidir, SATIŞ TEMSİLCİSİ
+    /// DEĞİL: Siber'de <c>skn_yuk.musteritemsilcisi2ad</c> sütununa karşılık
+    /// geliyor (satış temsilcisi ayrı bir sütun, <c>satistemsilcisikod</c>, ve bu
+    /// ekranda hiç toplanmıyor). olsold'dan gelen "Satış Temsilcisi" etiketi
+    /// düzeltildi.
+    ///
+    /// Seçim artık Siber'e de yazılıyor (bkz. SyncSiberAsync); önceden yalnızca
+    /// yerel tabloya işleniyor, Siber'e kaydeden kullanıcının adı gidiyordu.
     /// </summary>
     public int? CustomerRepresentativeUserId { get; set; }
     public int? SecondCustomerRepresentativeUserId { get; set; }
+
+    /// <summary>
+    /// FİYATLANDIRAN — Siber'de <c>skn_yuk.fiyatlandirankullaniciid</c>.
+    /// Gönderilmezse 1. operasyon yetkilisine düşülür.
+    /// </summary>
+    public int? PricingUserId { get; set; }
+
+    /// <summary>
+    /// SATIŞ TEMSİLCİSİ — Siber'de <c>skn_yuk.satistemsilcisikod</c> (kullanıcı
+    /// KODU). Operasyon yetkilisinden AYRI kişidir: Siber'in dolu 7.645 kaydının
+    /// 2.703'ünde (%35) farklı. Gönderilmezse yerel değer korunur — eskiden her
+    /// kaydetmede kaydeden kullanıcıya sabitleniyordu.
+    /// </summary>
+    public int? SalesRepUserId { get; set; }
+
+    /// <summary>Yükün döviz türü (<c>currencies.id</c>) → <c>skn_yuk.dovizkod</c>.</summary>
+    public int? CurrencyId { get; set; }
     public string? DepartureCountryId { get; set; }
     public string? TargetCountryId { get; set; }
 
@@ -157,6 +181,7 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
 
         ApplyFields(transfer, request, currentUserId, now);
+        await ApplyContinentsAsync(transfer, cancellationToken);
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -236,8 +261,12 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         transfer.DepartmentId = request.DepartmentId;
         transfer.LoadTransferTypeId = request.LoadTransferTypeId;
         transfer.DeliveryMethodId = request.DeliveryMethodId;
+        transfer.CurrencyId = request.CurrencyId;
         transfer.CustomerRepresentativeName = request.CustomerRepresentativeUserId;
         transfer.SecondCustomerRepresentativeName = request.SecondCustomerRepresentativeUserId;
+        // Fiyatlandıran boş gelirse 1. operasyon yetkilisi — Siber'de ikisi
+        // zaten kayıtların %73'ünde aynı kişi (bkz. LoadTransfer.PricingUserId).
+        transfer.PricingUserId = request.PricingUserId ?? request.CustomerRepresentativeUserId;
         transfer.DepartureCountryId = request.DepartureCountryId;
         transfer.TargetCountryId = request.TargetCountryId;
         transfer.TransitCountryId = request.TransitCountryId;
@@ -252,10 +281,19 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         // Kaynaktaki sabitler.
         transfer.TotalLademeterM3 = 0;
         transfer.CarHeight = 280;
-        transfer.LoadingContinent = "ASYA";
-        transfer.UnloadingContinent = "ASYA";
+        // KITA ARTIK SABİT DEĞİL — BULUNAN GERÇEK HATA.
+        //
+        // Buraya "ASYA" sabiti yazılıyordu ve yükün her kaydedilişinde gerçek
+        // kıta bu değerle EZİLİYORDU. Siber'in kendi verisinde kıta gerçekten
+        // dağılıyor: boşaltma kıtası 4.474 yükte ASYA, 2.634'ünde AVRUPA,
+        // 79'unda AFRİKA, 50'sinde AMERİKA. Yani Avrupa'ya giden her yük
+        // kaydedildiği anda "ASYA" oluyordu.
+        //
+        // Kıta artık seçilen ÜLKEDEN türetiliyor (bkz. ApplyContinentsAsync).
         transfer.UsercodeWithNotification = (int)userId;
-        transfer.SalesRepCode = (int)userId;
+        // SATIŞ TEMSİLCİSİ ARTIK SABİT DEĞİL. Gönderilmezse mevcut değer korunur;
+        // hiç yoksa (eski kayıt) kaydeden kullanıcıya düşülür.
+        transfer.SalesRepCode = request.SalesRepUserId ?? transfer.SalesRepCode ?? (int)userId;
         transfer.UpdatedAt = now;
     }
 
@@ -388,7 +426,15 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             ToplamLademetre = transfer.TotalLademeter,
             UcretAgirlik = transfer.WeightFee,
             ToplamKap = transfer.TotalCap,
-            MusteriTemsilcisiAd = user?.SiberName,
+            // Seçilen kişinin Siber karşılığı yoksa null gider ve UPDATE
+            // tarafındaki ISNULL sayesinde Siber'deki değer KORUNUR — bu
+            // ekrandaki 8.066 yükün 241'inde temsilci yerelde çözülemiyor
+            // (Siber'de dolu), düz atama onları silerdi.
+            MusteriTemsilcisiAd = refs.CustomerRepSiberName,
+            MusteriTemsilcisi2Ad = refs.SecondCustomerRepSiberName,
+            FiyatlandiranKullaniciId = refs.PricingUserSiberId,
+            SatisTemsilcisiKod = refs.SalesRepSiberCode,
+            DovizKod = refs.CurrencyCode,
             DepartmanId = refs.DepartmentSiberId,
             TalimatGelisTarihi = transfer.RequestArrivalDate?.ToDateTime(TimeOnly.MinValue)
                                  ?? _clock.Now,
@@ -529,6 +575,18 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         int.TryParse(value, out var parsed) ? parsed : 0;
 
     private sealed record SiberRefs(
+        // GÖREVLİ ADLARI: skn_yuk iki operasyon yetkilisini de AD olarak tutuyor
+        // (musteritemsilcisiad / musteritemsilcisi2ad) — teklifteki gibi ad/kod
+        // ayrımı YOK. Canlıda 8.040 yükün 8.020/7.827'sinde dolu ve ikisi 1.497
+        // yükte FARKLI kişi, yani ikincisi birincinin kopyası değil.
+        string? CustomerRepSiberName, string? SecondCustomerRepSiberName,
+        // Fiyatlandıran Siber'e GUID olarak yazılıyor (users.siber_id).
+        string? PricingUserSiberId,
+        // Satış temsilcisi ise KOD olarak (users.siber_code) — yükteki iki
+        // yetkili sütunu AD tutuyor, üçü farklı biçim.
+        string? SalesRepSiberCode,
+        /// <summary>Yükün döviz KODU (USD/EUR/TL) — skn_yuk.dovizkod.</summary>
+        string? CurrencyCode,
         string? LoadStatusSiberId, string? LoadTypeCode, string? CustomerSiberId,
         string? SenderSiberId, string? ReceiverSiberId, string? PaymentTypeSiberId,
         string? InstructionCode, string? RomorkTypeCode, string? DepartmentSiberId,
@@ -549,6 +607,16 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             .ToDictionaryAsync(a => (int)a.Id, a => a.SiberId, cancellationToken);
 
         return new SiberRefs(
+            // FORMDAN SEÇİLEN GÖREVLİLER. Eskiden Siber'e KAYDEDEN kullanıcının
+            // adı yazılıyordu: ekrandaki iki seçici yalnızca yerel tabloya
+            // işliyor, Siber'de yükün temsilcisi her kaydedende değişiyordu.
+            await UserSiberNameAsync(transfer.CustomerRepresentativeName, cancellationToken),
+            await UserSiberNameAsync(transfer.SecondCustomerRepresentativeName, cancellationToken),
+            await UserSiberIdAsync(transfer.PricingUserId, cancellationToken),
+            await UserSiberCodeAsync(transfer.SalesRepCode, cancellationToken),
+            await _db.Currencies.AsNoTracking()
+                .Where(c => c.Id == transfer.CurrencyId)
+                .Select(c => c.Code).FirstOrDefaultAsync(cancellationToken),
             // load_status_types tablosunda Siber karşılığı yok; durum kodu
             // yerel id olarak yazılır (dönüşüm akışı da sabit 1 yazıyor).
             transfer.LoadStatusId?.ToString(),
@@ -588,6 +656,63 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
     }
 
     /// <summary>
+    /// Görevli kimliğinin Siber adı (<c>users.siber_name</c>). Siber hesabı
+    /// olmayan kullanıcıda null döner; çağıran taraf bunu ISNULL ile "değişme"
+    /// olarak yazıyor.
+    /// </summary>
+    private async Task<string?> UserSiberNameAsync(
+        int? userId, CancellationToken cancellationToken)
+    {
+        if (userId is not { } id)
+            return null;
+
+        var name = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == id)
+            .Select(u => u.SiberName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
+
+    /// <summary>
+    /// Görevli kimliğinin Siber KODU (<c>users.siber_code</c> =
+    /// <c>sky_kullanici.kod</c>). Siber hesabı olmayan kullanıcıda null döner;
+    /// çağıran taraf bunu ISNULL ile "değişme" olarak yazıyor.
+    /// </summary>
+    private async Task<string?> UserSiberCodeAsync(
+        int? userId, CancellationToken cancellationToken)
+    {
+        if (userId is not { } id)
+            return null;
+
+        var code = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == id)
+            .Select(u => u.SiberCode)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return string.IsNullOrWhiteSpace(code) ? null : code;
+    }
+
+    /// <summary>
+    /// Görevli kimliğinin Siber GUID'i (<c>users.siber_id</c> =
+    /// <c>sky_kullanici.kullaniciid</c>). Siber hesabı olmayan kullanıcıda null
+    /// döner; çağıran taraf bunu ISNULL ile "değişme" olarak yazıyor.
+    /// </summary>
+    private async Task<string?> UserSiberIdAsync(
+        int? userId, CancellationToken cancellationToken)
+    {
+        if (userId is not { } id)
+            return null;
+
+        var siberId = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == id)
+            .Select(u => u.SiberId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return string.IsNullOrWhiteSpace(siberId) ? null : siberId;
+    }
+
+    /// <summary>
     /// Siber'in <c>_yuklemeulke</c>/<c>_bosaltmaulke</c> sütununa ülkenin GUID'i
     /// DEĞİL, ADI yazılır; <c>_yuklemekita</c>/<c>_bosaltmakita</c> ise kıtanın
     /// adını ister.
@@ -602,4 +727,29 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
     /// </summary>
     private async Task<SiberCountry?> CountryAsync(string? countryId, CancellationToken cancellationToken) =>
         await _countries.ResolveOneAsync(countryId, cancellationToken);
+
+    /// <summary>
+    /// Kıtayı SEÇİLEN ÜLKEDEN türetir. Eskiden iki alan da "ASYA" sabitiyle
+    /// yazılıyordu ve her kayıt gerçek kıtayı eziyordu.
+    ///
+    /// Çözülemezse MEVCUT değer korunur — ülkenin Siber karşılığı yoksa kıtayı
+    /// boşaltmak, senkronla gelmiş doğru değeri silmek olurdu.
+    /// </summary>
+    private async Task ApplyContinentsAsync(
+        LoadTransfer transfer, CancellationToken cancellationToken)
+    {
+        // Kıta Siber'in ülke tablosundan geliyor; bağlantı yoksa çözülemez ve
+        // MEVCUT değer korunur. (Çözümleyiciyi koşulsuz çağırmak, Siber'siz
+        // ortamda kaydetmeyi tamamen düşürürdü.)
+        if (!_siber.IsConfigured)
+            return;
+
+        transfer.LoadingContinent =
+            (await CountryAsync(transfer.DepartureCountryId, cancellationToken))?.Continent
+            ?? transfer.LoadingContinent;
+
+        transfer.UnloadingContinent =
+            (await CountryAsync(transfer.TargetCountryId, cancellationToken))?.Continent
+            ?? transfer.UnloadingContinent;
+    }
 }

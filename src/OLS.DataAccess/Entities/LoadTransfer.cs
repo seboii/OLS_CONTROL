@@ -97,6 +97,32 @@ public partial class LoadTransfer
 
     public int? SalesRepCode { get; set; }
 
+    /// <summary>
+    /// FİYATLANDIRAN kullanıcı — Siber'de <c>skn_yuk.fiyatlandirankullaniciid</c>
+    /// (<c>uniqueidentifier</c>, <c>sky_kullanici.kullaniciid</c>'ye bakar).
+    /// Burada YEREL kullanıcı kimliği tutulur, Siber'e yazılırken
+    /// <c>users.siber_id</c> üzerinden GUID'e çevrilir.
+    ///
+    /// Alan Siber'de gerçekten kullanılıyor: son 12 ayın 2.818 yükünün 869'unda
+    /// (%31), tekliflerde 12.431'in 7.951'inde (%64) dolu ve dolu değerlerin
+    /// TAMAMI bir kullanıcıya çözülüyor. Siber'in kendi verisinde fiyatlandıran
+    /// 5.798/7.952 kayıtta (%73) 1. operasyon yetkilisiyle AYNI kişi — bu yüzden
+    /// form onu oradan ön dolduruyor, ama %27 farklı olduğu için alan
+    /// düzenlenebilir kalıyor.
+    /// </summary>
+    public int? PricingUserId { get; set; }
+
+    /// <summary>
+    /// YÜKÜN DÖVİZ TÜRÜ — Siber'de <c>skn_yuk.dovizkod</c> (üç harfli KOD:
+    /// USD/EUR/TL…), yerelde <c>currencies.id</c>.
+    ///
+    /// Canlıda 8.044 yükün 6.556'sında (%82) dolu — USD 4.777, EUR 1.564,
+    /// TL 153 — ama uygulama bu alanı ne topluyor ne yazıyordu: döviz yalnızca
+    /// mali kalem satırlarında (<c>sfy_modulkalem.dovizkod</c>) vardı, yükün
+    /// kendisinde yoktu.
+    /// </summary>
+    public int? CurrencyId { get; set; }
+
     public int? WayOfWorking { get; set; }
 
     public int? FrontTransportationByUs { get; set; }

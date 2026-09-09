@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { Car, Plus, Filter, ChevronDown, X, Gauge, Trash2 } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
+import { useRegisterRefresh } from "@/lib/refresh";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
@@ -177,6 +178,9 @@ export function VehiclesPage() {
       .catch(() => addToast("Araç listesi yüklenemedi", "error"))
       .finally(() => setLoading(false));
   }
+
+  // Üst bardaki Yenile düğmesi bu sayfanın listesini tazeler (bkz. refresh.ts).
+  useRegisterRefresh(load);
 
   useEffect(() => {
     load();

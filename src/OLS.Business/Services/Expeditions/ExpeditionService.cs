@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Loads;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Siber;
 
@@ -16,6 +17,13 @@ namespace OLS.Business.Services.Expeditions;
 /// </summary>
 public interface IExpeditionService
 {
+    /// <summary>
+    /// Bu ARAÇ başka AÇIK seferlerde kullanılıyor mu? Kullanıcı plakayı
+    /// seçerken uyarılsın diye.
+    /// </summary>
+    Task<IReadOnlyList<CarExpeditionUsageDto>> CarUsageAsync(
+        long carId, long? excludeExpeditionId, CancellationToken cancellationToken = default);
+
     Task<object> ListAsync(ExpeditionListQuery query, CancellationToken cancellationToken = default);
     Task<ExpeditionDetailDto?> SingleAsync(long id, CancellationToken cancellationToken = default);
     Task<object> MovementsAsync(long expeditionId, CancellationToken cancellationToken = default);
@@ -121,6 +129,17 @@ public sealed class CityRefDto
     [JsonPropertyName("name")] public string? Name { get; init; }
 }
 
+/// <summary>
+/// Bir aracın bağlı olduğu AÇIK sefer — plaka seçilirken gösterilen uyarı.
+/// </summary>
+public sealed class CarExpeditionUsageDto
+{
+    [JsonPropertyName("id")] public long Id { get; init; }
+    [JsonPropertyName("expedition_number")] public string? ExpeditionNumber { get; init; }
+    [JsonPropertyName("status_name")] public string? StatusName { get; init; }
+    [JsonPropertyName("plate_number")] public string? PlateNumber { get; init; }
+}
+
 public sealed class ExpeditionService : IExpeditionService
 {
     private readonly OlsDbContext _db;
@@ -138,6 +157,38 @@ public sealed class ExpeditionService : IExpeditionService
         _companyScope = companyScope;
         _currentUser = currentUser;
     }
+
+    /// <summary>
+    /// Aracın bağlı olduğu AÇIK seferler (kendisi hariç).
+    ///
+    /// "Açık" ölçütü <c>expedition_statuses.order_number &lt; 90</c>: Siber'in
+    /// kendi durum numaralandırmasında 90 = BOŞALTILDI, yani seferin bittiği
+    /// nokta. Kimlik yerine numara kullanılıyor çünkü durum satırlarının yerel
+    /// kimlikleri ortamdan ortama değişebiliyor.
+    ///
+    /// Tamamlanmış seferler DIŞARIDA: canlıda 4.436 seferin 3.156'sı
+    /// BOŞALTILDI durumunda ve bir aracın geçmişte onlarca seferi olması
+    /// normal. Açık seferle sınırlandırıldığında uyarı yalnızca 10 araçta
+    /// çıkıyor — yani gürültü değil, gerçek çakışma.
+    /// </summary>
+    public async Task<IReadOnlyList<CarExpeditionUsageDto>> CarUsageAsync(
+        long carId, long? excludeExpeditionId, CancellationToken cancellationToken = default) =>
+        await _db.Expeditions.AsNoTracking()
+            .Where(e => e.RomorkId == (int)carId
+                     && (excludeExpeditionId == null || e.Id != excludeExpeditionId))
+            .Where(e => _db.ExpeditionStatuses
+                .Any(s => s.Id == e.StatusId && (s.OrderNumber == null || s.OrderNumber < 90)))
+            .OrderByDescending(e => e.Id)
+            .Select(e => new CarExpeditionUsageDto
+            {
+                Id = e.Id,
+                ExpeditionNumber = e.ExpeditionNumber,
+                StatusName = _db.ExpeditionStatuses
+                    .Where(s => s.Id == e.StatusId).Select(s => s.Name).FirstOrDefault(),
+                PlateNumber = _db.Cars
+                    .Where(c => c.Id == e.RomorkId).Select(c => c.PlateNumber).FirstOrDefault(),
+            })
+            .ToListAsync(cancellationToken);
 
     public async Task<object> ListAsync(
         ExpeditionListQuery query, CancellationToken cancellationToken = default)
@@ -164,11 +215,11 @@ public sealed class ExpeditionService : IExpeditionService
 
             // olsold: sefer numarası VEYA römorkun plakası
             var matchingCarIds = _db.Cars
-                .Where(c => EF.Functions.Like(c.PlateNumber!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(c => EF.Functions.Like(TurkishFold.Fold(c.PlateNumber!), pattern))
                 .Select(c => (int)c.Id);
 
             expeditions = expeditions.Where(e =>
-                EF.Functions.Like(e.ExpeditionNumber!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(e.ExpeditionNumber!), pattern) ||
                 (e.RomorkId != null && matchingCarIds.Contains(e.RomorkId.Value)));
         }
 

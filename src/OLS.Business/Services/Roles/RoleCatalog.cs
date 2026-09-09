@@ -161,23 +161,28 @@ public static class RoleCatalog
     /// Siber departman adı → rol slug'ı. Karşılaştırma Türkçe normalizasyonlu
     /// yapılır (bkz. QueryableExtensions.NormalizeTurkish), çünkü Siber adları
     /// BÜYÜK harfle ("İHRACAT OPERASYON"), yerel tanım tablosu ise başlık
-    /// düzeninde ("İhracat Operasyon") tutuyor.
+    /// düzeninde ("İhracat Operasyon") tutuyor. Normalleştirme tüm Türkçe
+    /// harfleri ASCII'ye katladığı için anahtarlar da ASCII'dir.
     /// </summary>
     public static readonly IReadOnlyDictionary<string, string> DepartmentToRoleSlug =
         new Dictionary<string, string>
         {
-            // DİKKAT: anahtarlar NormalizeTurkish ÇIKTISIDIR. O metot yalnızca
-            // İ/I/ı harflerini sadeleştirip küçültüyor; ş/ö/ü/ç/ğ AYNEN KALIYOR.
-            // İlk sürümde anahtarlar "satis & pazarlama" / "yonetim" diye
-            // yazılmıştı ve bu iki departman hiç eşleşmedi — Satış & Pazarlama
-            // ile Yönetim çalışanları yanlışlıkla Standart Kullanıcı rolüne
-            // düşmüştü. Doğru karşılıklar aşağıda.
-            ["yönetim"] = "yonetim",
-            ["satiş & pazarlama"] = "satis-pazarlama",
+            // DİKKAT: anahtarlar NormalizeTurkish ÇIKTISIDIR ve o metodun kuralı
+            // DEĞİŞTİ. Artık ş/ö/ü/ç/ğ de ASCII'ye katlanıyor, dolayısıyla
+            // anahtarlar TAMAMEN ASCII olmalı: "Yönetim" → "yonetim",
+            // "Satış & Pazarlama" → "satis & pazarlama", "İdari İşler" →
+            // "idari isler".
+            //
+            // Bu üç anahtar daha önce bir kez ters yönde yanlış yazılmıştı
+            // (kural dardı, anahtarlar ASCII'ydi) ve Satış & Pazarlama ile
+            // Yönetim çalışanları Standart Kullanıcı rolüne düşmüştü. Kural her
+            // değiştiğinde bu sözlük birlikte güncellenmeli.
+            ["yonetim"] = "yonetim",
+            ["satis & pazarlama"] = "satis-pazarlama",
             ["ihracat operasyon"] = "ihracat-operasyon",
             ["ithalat operasyon"] = "ithalat-operasyon",
             ["transit operasyon"] = "transit-operasyon",
             ["muhasebe & finans"] = "muhasebe-finans",
-            ["idari işler"] = "idari-isler",
+            ["idari isler"] = "idari-isler",
         };
 }

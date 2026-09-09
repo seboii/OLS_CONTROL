@@ -47,6 +47,7 @@ public sealed class LoadController : ApiControllerBase
     private readonly IFileStorage _files;
     private readonly ILoadArchivePublisher _archive;
     private readonly ITransferSiberService _transfer;
+    private readonly IFinancialItemPairService _pairs;
     private readonly ILogger<LoadController> _logger;
 
     public LoadController(
@@ -56,6 +57,7 @@ public sealed class LoadController : ApiControllerBase
         IFileStorage files,
         ITransferSiberService transfer,
         ILoadArchivePublisher archive,
+        IFinancialItemPairService pairs,
         ILogger<LoadController> logger)
     {
         _loads = loads;
@@ -64,6 +66,7 @@ public sealed class LoadController : ApiControllerBase
         _files = files;
         _transfer = transfer;
         _archive = archive;
+        _pairs = pairs;
         _logger = logger;
     }
 
@@ -372,6 +375,24 @@ public sealed class LoadController : ApiControllerBase
                 form.LoadingTypeId, form.LoadTransferTypeId, form.InstructionId, form.RomorkTypeId,
                 form.CustomerId, form.SenderId, form.ReceiverId, form.AgentId, form.CompanyPayFreightId),
             cancellationToken);
+
+        // OLUMLU TEKLİFTE EN AZ BİR NAVLUN KALEMİ (kullanıcı kuralı).
+        //
+        // Kontrol BURADA, senkron Validate() içinde değil: "navlun kalemi mi"
+        // sorusu veritabanına bakmayı gerektiriyor (financial_items.is_freight).
+        // Ada göre aramak yerine bayrak okunuyor — kalem tablosu 47.192 satır.
+        //
+        // Yalnızca Olumlu'da aranıyor çünkü teklif aşamasındaki (Teklif /
+        // Sipariş / Düzeltme Talebi) kayıtlarda finans henüz oluşmamış olabilir;
+        // Olumlu ise teklif Siber'e aktarılıp yüke dönüşecek demektir ve
+        // navlunsuz bir yükün kâr hesabı yapılamaz.
+        if (form.StatusTypeId == PositiveStatusTypeId
+            && !await _pairs.AnyFreightAsync(
+                form.LoadFinancialItem.Select(f => f.Item), cancellationToken))
+        {
+            errors["load_financial_item"] =
+                [Translator.Get("Olumlu teklifte en az bir navlun kalemi girilmelidir")];
+        }
 
         return errors.Count > 0 ? errors : null;
     }

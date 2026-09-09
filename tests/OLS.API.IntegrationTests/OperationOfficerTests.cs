@@ -29,6 +29,8 @@ namespace OLS.API.IntegrationTests;
 public sealed class OperationOfficerTests
 {
     private const int OperationOfficerType = 1;
+    private const int SalesRepType = 2;
+    private const int PricingUserType = 3;
 
     private readonly OlsApiFactory _factory;
 
@@ -46,7 +48,8 @@ public sealed class OperationOfficerTests
             .GetProperty("data").GetProperty("id").GetInt64();
     }
 
-    private async Task LinkRepresentativeAsync(long accountId, long userId, bool active)
+    private async Task LinkRepresentativeAsync(
+        long accountId, long userId, bool active, int userType = OperationOfficerType)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
@@ -55,7 +58,7 @@ public sealed class OperationOfficerTests
         {
             AccountId = (int)accountId,
             UserId = (int)userId,
-            UserType = OperationOfficerType,
+            UserType = userType,
         });
 
         if (!active)
@@ -68,7 +71,8 @@ public sealed class OperationOfficerTests
     }
 
     private async Task<long> SaveOfferAsync(
-        HttpClient client, long accountId, long? requestedOfficerId)
+        HttpClient client, long accountId, long? requestedPricingUserId = null,
+        params long[] requestedOfficerIds)
     {
         using var form = new MultipartFormDataContent
         {
@@ -83,10 +87,17 @@ public sealed class OperationOfficerTests
             { new StringContent("2026-09-01"), "marketing_notification_date" },
         };
 
-        if (requestedOfficerId is { } officerId)
+        for (var i = 0; i < requestedOfficerIds.Length; i++)
         {
-            form.Add(new StringContent(officerId.ToString()), "load_charge_person[0][user_id]");
-            form.Add(new StringContent("1"), "load_charge_person[0][user_type]");
+            form.Add(new StringContent(requestedOfficerIds[i].ToString()), $"load_charge_person[{i}][user_id]");
+            form.Add(new StringContent("1"), $"load_charge_person[{i}][user_type]");
+        }
+
+        if (requestedPricingUserId is { } pricingId)
+        {
+            var i = requestedOfficerIds.Length;
+            form.Add(new StringContent(pricingId.ToString()), $"load_charge_person[{i}][user_id]");
+            form.Add(new StringContent("3"), $"load_charge_person[{i}][user_type]");
         }
 
         var response = await client.PostAsync("/api/v1/load", form);
@@ -96,13 +107,30 @@ public sealed class OperationOfficerTests
             .GetProperty("data").GetProperty("id").GetInt64();
     }
 
-    private async Task<long?> OfficerOfAsync(long loadId)
+    /// <summary>Yükün operasyon yetkilileri, EKLEME SIRASINDA — sıra anlamlı.</summary>
+    private async Task<List<long?>> OfficersOfAsync(long loadId)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
 
         return await db.LoadChargePeople.AsNoTracking()
             .Where(p => p.LoadId == (int)loadId && p.UserType == OperationOfficerType)
+            .OrderBy(p => p.Id)
+            .Select(p => (long?)p.UserId)
+            .ToListAsync();
+    }
+
+    private async Task<long?> OfficerOfAsync(long loadId) =>
+        (await OfficersOfAsync(loadId)).FirstOrDefault();
+
+    private async Task<long?> ChargePersonAsync(long loadId, int userType)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+
+        return await db.LoadChargePeople.AsNoTracking()
+            .Where(p => p.LoadId == (int)loadId && p.UserType == userType)
+            .OrderBy(p => p.Id)
             .Select(p => (long?)p.UserId)
             .FirstOrDefaultAsync();
     }
@@ -117,7 +145,7 @@ public sealed class OperationOfficerTests
     }
 
     [Fact]
-    public async Task MusterininYetkilisiVarsa_OYazilir()
+    public async Task IstekteYetkiliYoksa_MusterinInkiYazilir()
     {
         using var admin = await _factory.CreateAdminClientAsync();
 
@@ -125,14 +153,17 @@ public sealed class OperationOfficerTests
         var officerId = await admin.CreateUserAsync($"yetkili-{Guid.NewGuid():N}@example.test");
         await LinkRepresentativeAsync(accountId, officerId, active: true);
 
-        var loadId = await SaveOfferAsync(admin, accountId, requestedOfficerId: null);
+        var loadId = await SaveOfferAsync(admin, accountId);
 
         (await OfficerOfAsync(loadId)).Should().Be(officerId);
     }
 
-    /// <summary>"varsa değişmesin" — istekten gelen değer müşterininkini EZEMEZ.</summary>
+    /// <summary>
+    /// "düzenlensin" — müşteriye tanımlı yetkili artık ÖN DOLDURUR, kilitlemez:
+    /// formdan gelen seçim onun yerine yazılır.
+    /// </summary>
     [Fact]
-    public async Task MusterininYetkilisiVarsa_IstektenGelenYokSayilir()
+    public async Task ElleSecim_MusterininYetkilisiniEzer()
     {
         using var admin = await _factory.CreateAdminClientAsync();
 
@@ -141,9 +172,43 @@ public sealed class OperationOfficerTests
         var baskasi = await admin.CreateUserAsync($"baskasi-{Guid.NewGuid():N}@example.test");
         await LinkRepresentativeAsync(accountId, officerId, active: true);
 
-        var loadId = await SaveOfferAsync(admin, accountId, requestedOfficerId: baskasi);
+        var loadId = await SaveOfferAsync(admin, accountId, null, baskasi);
 
-        (await OfficerOfAsync(loadId)).Should().Be(officerId);
+        (await OfficersOfAsync(loadId)).Should().Equal(baskasi);
+    }
+
+    /// <summary>
+    /// İKİ YETKİLİ, GÖNDERİLEN SIRADA. Sıra anlamlı: 1. yetkili Siber'de
+    /// musteritemsilcisi, 2.'si operasyonyetkilisikod2 sütununa yazılıyor.
+    /// </summary>
+    [Fact]
+    public async Task IkiYetkili_GonderilenSirayaGoreYazilir()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountId = await CreateAccountAsync(admin);
+        var birinci = await admin.CreateUserAsync($"birinci-{Guid.NewGuid():N}@example.test");
+        var ikinci = await admin.CreateUserAsync($"ikinci-{Guid.NewGuid():N}@example.test");
+
+        var loadId = await SaveOfferAsync(admin, accountId, null, birinci, ikinci);
+
+        (await OfficersOfAsync(loadId)).Should().Equal(birinci, ikinci);
+    }
+
+    /// <summary>İkiden fazlası yazılmaz — Siber'de yalnızca iki sütun var.</summary>
+    [Fact]
+    public async Task IkidenFazlaYetkili_IlkIkisiYazilir()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountId = await CreateAccountAsync(admin);
+        var birinci = await admin.CreateUserAsync($"birinci-{Guid.NewGuid():N}@example.test");
+        var ikinci = await admin.CreateUserAsync($"ikinci-{Guid.NewGuid():N}@example.test");
+        var ucuncu = await admin.CreateUserAsync($"ucuncu-{Guid.NewGuid():N}@example.test");
+
+        var loadId = await SaveOfferAsync(admin, accountId, null, birinci, ikinci, ucuncu);
+
+        (await OfficersOfAsync(loadId)).Should().Equal(birinci, ikinci);
     }
 
     /// <summary>"yoksa manuel girilebilsin".</summary>
@@ -155,7 +220,7 @@ public sealed class OperationOfficerTests
         var accountId = await CreateAccountAsync(admin);
         var secilen = await admin.CreateUserAsync($"secilen-{Guid.NewGuid():N}@example.test");
 
-        var loadId = await SaveOfferAsync(admin, accountId, requestedOfficerId: secilen);
+        var loadId = await SaveOfferAsync(admin, accountId, null, secilen);
 
         (await OfficerOfAsync(loadId)).Should().Be(secilen);
     }
@@ -167,13 +232,13 @@ public sealed class OperationOfficerTests
 
         var accountId = await CreateAccountAsync(admin);
 
-        var loadId = await SaveOfferAsync(admin, accountId, requestedOfficerId: null);
+        var loadId = await SaveOfferAsync(admin, accountId);
 
         (await OfficerOfAsync(loadId)).Should().Be(await AdminIdAsync());
     }
 
     /// <summary>
-    /// Ayrılmış personel "tanımlı yetkili" sayılmaz; alan elle seçime açılır.
+    /// Ayrılmış personel "tanımlı yetkili" sayılmaz; ön doldurma da ona bakmaz.
     /// </summary>
     [Fact]
     public async Task MusterininYetkilisiPasifse_ElleSecilenYazilir()
@@ -185,14 +250,14 @@ public sealed class OperationOfficerTests
         var secilen = await admin.CreateUserAsync($"secilen-{Guid.NewGuid():N}@example.test");
         await LinkRepresentativeAsync(accountId, ayrilan, active: false);
 
-        var loadId = await SaveOfferAsync(admin, accountId, requestedOfficerId: secilen);
+        var loadId = await SaveOfferAsync(admin, accountId, null, secilen);
 
         (await OfficerOfAsync(loadId)).Should().Be(secilen);
     }
 
     /// <summary>
-    /// Var olmayan bir kimlik yazılmaz: Siber'e boş kod gönderilir, teklif
-    /// aktarılamaz hâle gelirdi.
+    /// Var olmayan bir kimlik yazılmaz: Siber'e boş ad/kod gönderilir, yük
+    /// dönüşümü "Operasyon yetkilisinin Siber karşılığı yok" ile düşerdi.
     /// </summary>
     [Fact]
     public async Task ElleSecilenKullaniciYoksa_KaydedeneDuser()
@@ -201,7 +266,7 @@ public sealed class OperationOfficerTests
 
         var accountId = await CreateAccountAsync(admin);
 
-        var loadId = await SaveOfferAsync(admin, accountId, requestedOfficerId: 999_999_999);
+        var loadId = await SaveOfferAsync(admin, accountId, null, 999_999_999);
 
         (await OfficerOfAsync(loadId)).Should().Be(await AdminIdAsync());
     }
@@ -224,6 +289,94 @@ public sealed class OperationOfficerTests
 
         var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
 
-        data.GetProperty("operation_officer").ValueKind.Should().Be(JsonValueKind.Null);
+        data.GetProperty("operation_officers").GetArrayLength().Should().Be(0);
+    }
+
+    /// <summary>
+    /// FİYATLANDIRAN (user_type=3) — gönderilmezse 1. OPERASYON YETKİLİSİ.
+    ///
+    /// Siber'in kendi verisinde fiyatlandıran, dolu 7.952 teklifin 5.798'inde
+    /// (%73) zaten 1. operasyon yetkilisiyle aynı kişi.
+    /// </summary>
+    [Fact]
+    public async Task Fiyatlandiran_GonderilmezseOperasyonYetkilisiYazilir()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountId = await CreateAccountAsync(admin);
+        var yetkili = await admin.CreateUserAsync($"yetkili-{Guid.NewGuid():N}@example.test");
+
+        var loadId = await SaveOfferAsync(admin, accountId, null, yetkili);
+
+        (await ChargePersonAsync(loadId, PricingUserType)).Should().Be(yetkili);
+    }
+
+    /// <summary>Elle seçilen fiyatlandıran yetkiliden BAĞIMSIZ yazılır (%27).</summary>
+    [Fact]
+    public async Task Fiyatlandiran_ElleSecilirse_OYazilir()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountId = await CreateAccountAsync(admin);
+        var yetkili = await admin.CreateUserAsync($"yetkili-{Guid.NewGuid():N}@example.test");
+        var fiyatlandiran = await admin.CreateUserAsync($"fiyat-{Guid.NewGuid():N}@example.test");
+
+        var loadId = await SaveOfferAsync(admin, accountId, fiyatlandiran, yetkili);
+
+        (await ChargePersonAsync(loadId, PricingUserType)).Should().Be(fiyatlandiran);
+        (await OfficerOfAsync(loadId)).Should().Be(yetkili);
+    }
+
+    /// <summary>
+    /// SATIŞ TEMSİLCİSİ TEK KİŞİ. Siber'in ikinci sütunu (satistemsilcisi2kod)
+    /// 19.561 teklifin 540'ında dolu (%2,8) — kullanılmıyor. Eskiden cariye
+    /// tanımlı TÜM temsilciler yazılıyor ama Siber'e yalnızca ilki gidiyordu.
+    /// </summary>
+    [Fact]
+    public async Task SatisTemsilcisi_CokKisiTanimliOlsaBileTekYazilir()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountId = await CreateAccountAsync(admin);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var userId = await admin.CreateUserAsync($"satis{i}-{Guid.NewGuid():N}@example.test");
+            await LinkRepresentativeAsync(accountId, userId, active: true, userType: SalesRepType);
+        }
+
+        var loadId = await SaveOfferAsync(admin, accountId);
+
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<OlsDbContext>();
+
+        (await db.LoadChargePeople.AsNoTracking()
+            .CountAsync(p => p.LoadId == (int)loadId && p.UserType == SalesRepType))
+            .Should().Be(1);
+    }
+
+    /// <summary>
+    /// Temsilci ucu EN FAZLA İKİ yetkili döner — teklif formunda iki alan var,
+    /// fazlası ekranda görünmeyen ama "tanımlı" sanılan bir kişi bırakırdı.
+    /// </summary>
+    [Fact]
+    public async Task TemsilciUcu_EnFazlaIkiYetkiliDondurur()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountId = await CreateAccountAsync(admin);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var userId = await admin.CreateUserAsync($"yetkili{i}-{Guid.NewGuid():N}@example.test");
+            await LinkRepresentativeAsync(accountId, userId, active: true);
+        }
+
+        var response = await admin.GetAsync($"/api/v1/account/{accountId}/representatives");
+        response.EnsureSuccessStatusCode();
+
+        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+
+        data.GetProperty("operation_officers").GetArrayLength().Should().Be(2);
     }
 }

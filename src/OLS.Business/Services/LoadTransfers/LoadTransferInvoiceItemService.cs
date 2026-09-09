@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 
@@ -117,18 +118,18 @@ public sealed class LoadTransferInvoiceItemService : ILoadTransferInvoiceItemSer
             // .Any() yerine önce eşleşen ID'ler materialize edilip Contains() ile birleştiriliyor
             // (Postgres'in parametreli sorguda OR'lu EXISTS alt sorgularını kötü planlaması riski).
             var matchingItemIds = await _db.FinancialItems
-                .Where(f => f.Name != null && EF.Functions.Like(f.Name.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(f => f.Name != null && EF.Functions.Like(TurkishFold.Fold(f.Name), pattern))
                 .Select(f => (int)f.Id)
                 .ToListAsync(cancellationToken);
 
             var matchingAccountIds = await _db.Accounts
-                .Where(a => a.Name != null && EF.Functions.Like(a.Name.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(a => a.Name != null && EF.Functions.Like(TurkishFold.Fold(a.Name), pattern))
                 .Select(a => (int)a.Id)
                 .ToListAsync(cancellationToken);
 
             // Kaynak: insert_name VEYA ilişkili kalem adı VEYA cari adı.
             items = items.Where(i =>
-                (i.InsertName != null && EF.Functions.Like(i.InsertName.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)) ||
+                (i.InsertName != null && EF.Functions.Like(TurkishFold.Fold(i.InsertName), pattern)) ||
                 (i.ItemId != null && matchingItemIds.Contains(i.ItemId.Value)) ||
                 (i.AccountId != null && matchingAccountIds.Contains(i.AccountId.Value)));
         }

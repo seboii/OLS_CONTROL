@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 
 namespace OLS.Business.Services.Finance;
@@ -169,7 +170,7 @@ public sealed class LedgerService : ILedgerService
         {
             var term = QueryableExtensions.NormalizeTurkish(query.Search);
             joined = joined.Where(x =>
-                x.Name != null && x.Name.ToLower().Contains(term));
+                x.Name != null && TurkishFold.Fold(x.Name).Contains(term));
         }
 
         var rows = joined

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { Headphones, Filter, ChevronDown, X, CalendarDays, Phone, Mail } from "lucide-react";
 import { api, type Paginated } from "@/lib/api";
+import { useRegisterRefresh } from "@/lib/refresh";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
@@ -128,6 +129,9 @@ export function SupportPage() {
       .catch(() => addToast("Destek talepleri yüklenemedi", "error"))
       .finally(() => setLoading(false));
   }
+
+  // Üst bardaki Yenile düğmesi bu sayfanın listesini tazeler (bkz. refresh.ts).
+  useRegisterRefresh(load);
 
   useEffect(() => {
     load();

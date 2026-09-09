@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using OLS.DataAccess.Common;
 
 namespace OLS.Business.Common;
 
@@ -25,16 +26,11 @@ public static class QueryableExtensions
 
         var pattern = $"%{EscapeLike(NormalizeTurkish(search))}%";
 
-        // x => EF.Functions.Like(selector(x).Replace("İ","i").Replace("I","i").Replace("ı","i").ToLower(), pattern)
-        // Replace(string,string) kasıtlı - Replace(char,char) Npgsql/EF Core tarafından
-        // SQL'e çevrilemiyor (query çalışma zamanında InvalidOperationException/500).
-        var replaceStr = typeof(string).GetMethod(nameof(string.Replace), [typeof(string), typeof(string)])!;
-        var toLower = typeof(string).GetMethod(nameof(string.ToLower), Type.EmptyTypes)!;
-        Expression normalized = selector.Body;
-        normalized = Expression.Call(normalized, replaceStr, Expression.Constant("İ"), Expression.Constant("i"));
-        normalized = Expression.Call(normalized, replaceStr, Expression.Constant("I"), Expression.Constant("i"));
-        normalized = Expression.Call(normalized, replaceStr, Expression.Constant("ı"), Expression.Constant("i"));
-        normalized = Expression.Call(normalized, toLower);
+        // x => EF.Functions.Like(TurkishFold.Fold(selector(x)), pattern)
+        // Desen .NET'te, sütun SQL'de katlanıyor; ikisi de aynı tablodan
+        // besleniyor (bkz. TurkishFold), aksi hâlde arama sessizce boş döner.
+        Expression normalized = Expression.Call(
+            typeof(TurkishFold).GetMethod(nameof(TurkishFold.Fold))!, selector.Body);
 
         var body = Expression.Call(
             typeof(DbFunctionsExtensions).GetMethod(
@@ -71,8 +67,12 @@ public static class QueryableExtensions
     /// harf" kabul ediliyor - hem doğru hem rahat: kullanıcı İ/I/ı'yı karıştırsa
     /// bile arama çalışır).
     /// </summary>
-    internal static string NormalizeTurkish(string input) =>
-        input.Replace('İ', 'i').Replace('I', 'i').Replace('ı', 'i').ToLowerInvariant();
+    /// <summary>
+    /// Kural TEK YERDE: <see cref="TurkishFold"/>. Bu metot yalnızca eski
+    /// çağrı yerlerinin adını koruyor — kapsamı (hangi harflerin katlandığı) ve
+    /// gerekçesi orada, ölçümleriyle birlikte yazılı.
+    /// </summary>
+    internal static string NormalizeTurkish(string input) => TurkishFold.Normalize(input);
 
     /// <summary>İstemcinin isteyebileceği en büyük sayfa boyutu.</summary>
     public const int MaxPerPage = 200;

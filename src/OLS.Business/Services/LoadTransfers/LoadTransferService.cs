@@ -5,6 +5,7 @@ using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Accounts;
 using OLS.Business.Services.Loads;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Siber;
 
@@ -170,6 +171,22 @@ public sealed class LoadTransferDetailDto
     [JsonPropertyName("second_customer_representative")] public MappedUserDto? SecondCustomerRepresentative { get; init; }
 
     /// <summary>
+    /// FİYATLANDIRAN — Siber'de <c>skn_yuk.fiyatlandirankullaniciid</c>.
+    /// Kayıt açılırken 1. operasyon yetkilisinden dolar, elle değiştirilebilir.
+    /// </summary>
+    [JsonPropertyName("pricing_user")] public MappedUserDto? PricingUser { get; init; }
+
+    /// <summary>
+    /// SATIŞ TEMSİLCİSİ — Siber'de <c>skn_yuk.satistemsilcisikod</c>.
+    /// Operasyon yetkilisinden ayrı kişidir (Siber'de kayıtların %35'inde
+    /// farklı), bu yüzden kendi seçicisi var.
+    /// </summary>
+    [JsonPropertyName("sales_rep")] public MappedUserDto? SalesRep { get; init; }
+
+    /// <summary>Yükün döviz türü — Siber'de <c>skn_yuk.dovizkod</c>.</summary>
+    [JsonPropertyName("currency_id")] public NamedRefDto? CurrencyId { get; init; }
+
+    /// <summary>
     /// olsold: <c>load_data.load_belongs</c> — Yük'ün dönüştüğü ORİJİNAL Teklif.
     /// Dosya Arşivi bu Teklif'in <c>load_file</c> kayıtlarını gösterir (Yük'ün
     /// kendi dosya tablosu yok — kaynakta da yok, bkz. LoadFormDrawer.vue
@@ -323,12 +340,12 @@ public sealed class LoadTransferService : ILoadTransferService
             // karşılaştırmasını SQL'e çeviremiyor, o yüzden eşleşen id'leri önce
             // küçük bir sorguyla metne çevirip çekiyoruz.
             var matchingCaseTypeIds = await _db.CaseTypes
-                .Where(c => EF.Functions.Like(c.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(c => EF.Functions.Like(TurkishFold.Fold(c.Name!), pattern))
                 .Select(c => c.Id.ToString())
                 .ToListAsync(cancellationToken);
 
             var matchingFinancialItemIds = await _db.FinancialItems
-                .Where(f => EF.Functions.Like(f.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(f => EF.Functions.Like(TurkishFold.Fold(f.Name!), pattern))
                 .Select(f => (int)f.Id)
                 .ToListAsync(cancellationToken);
 
@@ -341,17 +358,17 @@ public sealed class LoadTransferService : ILoadTransferService
             // (= ANY(@array)) çeviriliyor, sorgu planlayıcısının 8'li OR'u nasıl
             // ele alacağına bağlı kalınmıyor.
             var matchingAccountIds = await _db.Accounts
-                .Where(a => EF.Functions.Like(a.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(a => EF.Functions.Like(TurkishFold.Fold(a.Name!), pattern))
                 .Select(a => (int)a.Id)
                 .ToListAsync(cancellationToken);
 
             var matchingUserIds = await _db.Users
-                .Where(u => EF.Functions.Like(((u.Name ?? "") + " " + (u.Surname ?? "")).Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(u => EF.Functions.Like(TurkishFold.Fold((u.Name ?? "") + " " + (u.Surname ?? "")), pattern))
                 .Select(u => (int)u.Id)
                 .ToListAsync(cancellationToken);
 
             var matchingStatusIds = await _db.LoadStatusTypes
-                .Where(s => EF.Functions.Like(s.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(s => EF.Functions.Like(TurkishFold.Fold(s.Name!), pattern))
                 .Select(s => (int)s.Id)
                 .ToListAsync(cancellationToken);
 
@@ -377,7 +394,7 @@ public sealed class LoadTransferService : ILoadTransferService
                 .ToListAsync(cancellationToken);
 
             transfers = transfers.Where(t =>
-                EF.Functions.Like(t.LoadNumberWorkType!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(t.LoadNumberWorkType!), pattern) ||
                 (t.CustomerId != null && matchingAccountIds.Contains(t.CustomerId.Value)) ||
                 (t.SenderId != null && matchingAccountIds.Contains(t.SenderId.Value)) ||
                 (t.ReceiverId != null && matchingAccountIds.Contains(t.ReceiverId.Value)) ||
@@ -407,7 +424,7 @@ public sealed class LoadTransferService : ILoadTransferService
         {
             var p = $"%{QueryableExtensions.NormalizeTurkish(query.FinancialItem)}%";
             var financialItemIds = await _db.FinancialItems
-                .Where(f => EF.Functions.Like(f.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), p))
+                .Where(f => EF.Functions.Like(TurkishFold.Fold(f.Name!), p))
                 .Select(f => (int)f.Id)
                 .ToListAsync(cancellationToken);
             transfers = transfers.Where(t => _db.LoadTransferInvoiceItems.Any(i =>
@@ -581,6 +598,10 @@ public sealed class LoadTransferService : ILoadTransferService
                 .Where(m => m.Id == t.DeliveryMethodId)
                 .Select(m => new NamedRefDto { Id = m.Id, Name = m.Name })
                 .FirstOrDefaultAsync(cancellationToken),
+            CurrencyId = await _db.Currencies.AsNoTracking()
+                .Where(c => c.Id == t.CurrencyId)
+                .Select(c => new NamedRefDto { Id = c.Id, Name = c.Name })
+                .FirstOrDefaultAsync(cancellationToken),
 
             LoadTransferTypeId = await _db.LoadTransferTypes.AsNoTracking()
                 .Where(l => l.Id == t.LoadTransferTypeId)
@@ -598,6 +619,11 @@ public sealed class LoadTransferService : ILoadTransferService
 
             CustomerRepresentative = await UserRefAsync(t.CustomerRepresentativeName, cancellationToken),
             SecondCustomerRepresentative = await UserRefAsync(t.SecondCustomerRepresentativeName, cancellationToken),
+            // Fiyatlandıran yerelde boşsa (senkronla gelmiş eski yük) ekranda
+            // 1. operasyon yetkilisi görünür — kaydedilecek değerin aynısı.
+            PricingUser = await UserRefAsync(
+                t.PricingUserId ?? t.CustomerRepresentativeName, cancellationToken),
+            SalesRep = await UserRefAsync(t.SalesRepCode, cancellationToken),
 
             OriginalLoadId = originalLoadId,
 

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { Plus, Trash2, Users, Upload, Filter, ChevronDown, X, Phone, Mail } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
+import { useRegisterRefresh } from "@/lib/refresh";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
@@ -264,6 +265,9 @@ export function CustomersPage() {
       .catch(() => addToast("Müşteri listesi yüklenemedi", "error"))
       .finally(() => setLoading(false));
   }
+
+  // Üst bardaki Yenile düğmesi bu sayfanın listesini tazeler (bkz. refresh.ts).
+  useRegisterRefresh(load);
 
   useEffect(() => {
     load();

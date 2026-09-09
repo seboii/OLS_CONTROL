@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 
@@ -89,11 +90,11 @@ public sealed class ContactFormService : IContactFormService
             // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
             var pattern = $"%{QueryableExtensions.EscapeLike(QueryableExtensions.NormalizeTurkish(search))}%";
             query = query.Where(f =>
-                EF.Functions.Like(f.FirstName.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(f.LastName.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(f.Email.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(f.Phone!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(f.Message.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern));
+                EF.Functions.Like(TurkishFold.Fold(f.FirstName), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(f.LastName), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(f.Email), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(f.Phone!), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(f.Message), pattern));
         }
 
         if (isRead is { } read)

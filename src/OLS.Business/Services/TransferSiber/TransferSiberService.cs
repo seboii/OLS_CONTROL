@@ -42,6 +42,7 @@ public sealed class TransferSiberService : ITransferSiberService
     /// <summary>load_charge_people.user_type sözleşmesi (bkz. LoadChargePerson).</summary>
     private const int OperationOfficerType = 1;
     private const int SalesRepType = 2;
+    private const int PricingUserType = 3;
 
     private readonly OlsDbContext _db;
     private readonly ISiberReservationRepository _siber;
@@ -123,7 +124,11 @@ public sealed class TransferSiberService : ITransferSiberService
             AliciId = refs.ReceiverSiberId,
             DurumId = refs.StatusTypeSiberId,
             MusteriTemsilcisi = refs.CustomerRepName,
+            // 2. operasyon yetkilisi AYRI sütunda ve KOD olarak tutuluyor
+            // (bkz. SiberRezervasyonYaz.OperasyonYetkilisiKod2).
+            OperasyonYetkilisiKod2 = refs.SecondCustomerRepCode,
             SatisTemsilcisiKod = refs.SalesRepCode,
+            FiyatlandiranKullaniciId = refs.PricingUserSiberId,
             DepartmanId = refs.DepartmentSiberId,
             Aciklama = load.Description,
             Yil = now.Year,
@@ -306,8 +311,9 @@ public sealed class TransferSiberService : ITransferSiberService
         string? LoadingTypeCode, string? LoadTransferTypeCode, string? PaymentTypeSiberId,
         string? CustomerSiberId, string? CompanyPayFreightSiberId, string? SenderSiberId,
         string? ReceiverSiberId, string? StatusTypeSiberId, string? DepartmentSiberId,
-        string? CustomerRepName, string? CustomerRepCode, string? SalesRepCode,
-        string? InsUserSiberCode,
+        string? CustomerRepName, string? CustomerRepCode,
+        string? SecondCustomerRepCode, string? SalesRepCode,
+        string? PricingUserSiberId, string? InsUserSiberCode,
         SiberCountry? DepartureCountry, SiberCountry? TargetCountry);
 
     /// <summary>
@@ -327,11 +333,23 @@ public sealed class TransferSiberService : ITransferSiberService
             .Where(p => p.LoadId == (int)load.Id)
             .OrderBy(p => p.Id)
             .Join(_db.Users, p => p.UserId, u => (int)u.Id,
-                (p, u) => new { p.UserType, u.SiberName, u.SiberCode })
+                (p, u) => new { p.UserType, u.SiberName, u.SiberCode, u.SiberId })
             .ToListAsync(cancellationToken);
 
-        var operationOfficer = chargePeople.FirstOrDefault(p => p.UserType == OperationOfficerType);
+        // İKİ operasyon yetkilisi, EKLENME SIRASINDA: 1.'si musteritemsilcisi
+        // (ad), 2.'si operasyonyetkilisikod2 (kod). Siber'in kendi verisinde
+        // ikisi 6.627 rezervasyonda farklı kişi — ikinciyi birincinin kopyası
+        // saymak yanlış olurdu.
+        var officers = chargePeople.Where(p => p.UserType == OperationOfficerType).ToList();
+        var operationOfficer = officers.ElementAtOrDefault(0);
+        var secondOperationOfficer = officers.ElementAtOrDefault(1);
         var salesRep = chargePeople.FirstOrDefault(p => p.UserType == SalesRepType);
+
+        // FİYATLANDIRAN kullanıcı GUID olarak yazılıyor (kod/ad değil):
+        // skn_rezervasyon.fiyatlandirankullaniciid → sky_kullanici.kullaniciid.
+        // Yerelde bu GUID users.siber_id'de duruyor (130 kullanıcının 125'inde
+        // dolu; kalan 5'i Siber hesabı olmayan test/kurulum hesapları).
+        var pricingUser = chargePeople.FirstOrDefault(p => p.UserType == PricingUserType);
 
         var insUserSiberCode = await _db.Users.AsNoTracking()
             .Where(u => u.Id == currentUserId)
@@ -360,7 +378,12 @@ public sealed class TransferSiberService : ITransferSiberService
             await CodeAsync(_db.Departments.Where(d => d.Id == load.DepartmentId).Select(d => d.SiberId), cancellationToken),
             operationOfficer?.SiberName,
             operationOfficer?.SiberCode,
+            secondOperationOfficer?.SiberCode,
             salesRep?.SiberCode,
+            // Fiyatlandıran çözülemezse (Siber hesabı yok) 1. operasyon
+            // yetkilisine düşülür — Siber'in kendi verisinde ikisi zaten
+            // 7.952 kaydın 5.798'inde (%73) aynı kişi.
+            pricingUser?.SiberId ?? operationOfficer?.SiberId,
             // insuser: işlemi yapan kullanıcı. Onun Siber karşılığı yoksa (sistem
             // hesabı) alan boş kalmasın diye operasyon yetkilisinin koduna düşülür —
             // Siber'in kendi kayıtlarında insuser 19023/19024 satırda dolu, boş

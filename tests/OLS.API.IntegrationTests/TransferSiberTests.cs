@@ -349,6 +349,14 @@ public sealed class TransferSiberTests
         var countryId = (await countryResponse.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("data").EnumerateArray().First().GetProperty("id").GetGuid().ToString();
 
+        long freightItemId;
+        using (var pairScope = _factory.Services.CreateScope())
+        {
+            var pairDb = pairScope.ServiceProvider.GetRequiredService<OlsDbContext>();
+            freightItemId = await pairDb.FinancialItemPairs.AsNoTracking()
+                .OrderBy(x => x.Id).Select(x => x.PurchaseItemId).FirstAsync();
+        }
+
         using var form = new MultipartFormDataContent
         {
             { new StringContent("1"), "work_type_id" },
@@ -377,7 +385,11 @@ public sealed class TransferSiberTests
             { new StringContent("100"), "load_content[0][gross_weight]" },
             { new StringContent("1"), "load_content[0][lademeter]" },
             { new StringContent("1"), "load_content[0][stackable]" },
-            { new StringContent("1"), "load_financial_item[0][item]" },
+            // NAVLUN KALEMİ ŞART: "Olumlu" teklifte en az bir navlun kalemi
+            // zorunlu (bkz. FreightItemRuleTests). Tohumlanan demo navlun
+            // gideri kullanılıyor; testin kendi konusu kalemin Siber
+            // karşılığının BOŞ olması, navlun olup olmaması değil.
+            { new StringContent(freightItemId.ToString()), "load_financial_item[0][item]" },
             { new StringContent("1"), "load_financial_item[0][quantity]" },
             { new StringContent("1"), "load_financial_item[0][buysell]" },
             { new StringContent("1"), "load_financial_item[0][transport_type_id]" },
@@ -405,10 +417,13 @@ public sealed class TransferSiberTests
 
         // ValidateRequired, kalem kontrolünden ÖNCE görevli (SiberCode/SiberName dolu
         // kullanıcı) arıyor. Teklif oluşturulurken işlemi yapan kullanıcı (seed admin,
-        // SiberCode boş) otomatik olarak hem operasyon yetkilisi hem satış temsilcisi
-        // olarak atanmış oluyor — bu iki satırı SiberCode/SiberName dolu testlik
-        // kullanıcılara yönlendiriyoruz (yeni satır eklemek değil, var olanı güncellemek
-        // gerekiyor; aksi hâlde ElementAtOrDefault(0/1) hâlâ admin'i buluyor).
+        // SiberCode boş) otomatik olarak operasyon yetkilisi, satış temsilcisi VE
+        // fiyatlandıran olarak atanmış oluyor — bu satırları SiberCode/SiberName dolu
+        // testlik kullanıcılara yönlendiriyoruz (yeni satır eklemek değil, var olanı
+        // güncellemek gerekiyor; aksi hâlde çözüm hâlâ admin'i buluyor).
+        //
+        // EŞLEME TİPE GÖRE: konuma göre yazmak, teklif iki operasyon yetkilisi
+        // taşıyabildiği için satış temsilcisi satırını kaçırırdı.
         var opUser = new User
         {
             Name = "Test", Surname = "Yetkili", Email = $"op-{Guid.NewGuid():N}@test.local",
@@ -424,9 +439,13 @@ public sealed class TransferSiberTests
 
         var existingChargePeople = await db.LoadChargePeople
             .Where(p => p.LoadId == (int)loadId).OrderBy(p => p.Id).ToListAsync();
-        existingChargePeople.Should().HaveCount(2, "teklif oluşturulunca işlemi yapan kullanıcı otomatik görevli atanıyor olmalı");
-        existingChargePeople[0].UserId = (int)opUser.Id;
-        existingChargePeople[1].UserId = (int)repUser.Id;
+        existingChargePeople.Should().HaveCount(3,
+            "teklif oluşturulunca işlemi yapan kullanıcı operasyon yetkilisi, satış "
+            + "temsilcisi ve fiyatlandıran olarak atanıyor olmalı");
+
+        foreach (var person in existingChargePeople)
+            person.UserId = person.UserType == 2 ? (int)repUser.Id : (int)opUser.Id;
+
         await db.SaveChangesAsync();
 
         var service = new LoadTransferWriteService(db, new FakeSiberLoadRepository(isConfigured: true), new FakeSiberReservationRepository(isConfigured: true), new FakeSiberCountryResolver(db), clock);
@@ -477,6 +496,15 @@ internal sealed class FakeSiberLoadRepository : ISiberLoadRepository
         throw new NotSupportedException();
     public Task DeleteYukKoliAsync(string yukKoliId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+    public Task<Guid> GenerateYukKoliDepoIdAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+    public Task InsertYukKoliDepoAsync(SiberYukKoliDepo koli, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+    public Task UpdateYukKoliDepoAsync(SiberYukKoliDepo koli, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+    public Task DeleteYukKoliDepoAsync(string yukKoliDepoId, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException();
+
     public Task DeleteModulKalemAsync(string modulKalemId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
     public Task MoveYukCompanyAsync(string yukId, string sirketId, CancellationToken cancellationToken = default) =>

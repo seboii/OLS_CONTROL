@@ -8,12 +8,25 @@ GO
 DROP TABLE IF EXISTS skn_yuk, skn_yukkoli, sfy_modulkalem, skn_pozisyon, skn_yukaktarma;
 GO
 
+-- GERCEK KOLI BILGILERI (skn_yukkolidepo) — Siber'in yuk ekranindaki ikinci
+-- koli seti. Alanlari skn_yukkoli ile ayni; "Gercek Koli Bilgilerine Aktar"
+-- dugmesi beyan edilen kolileri buraya kopyaliyor.
+IF OBJECT_ID('dbo.skn_yukkolidepo','U') IS NULL
+CREATE TABLE skn_yukkolidepo (
+    yukkolidepoid NVARCHAR(64), yukid NVARCHAR(64), kapadet INT, kapid NVARCHAR(64),
+    en DECIMAL(18,4), boy DECIMAL(18,4), yukseklik DECIMAL(18,4), hacim DECIMAL(18,4),
+    burutagirlik DECIMAL(18,4), netagirlik DECIMAL(18,4), lademetre DECIMAL(18,4),
+    istiflenemez INT, malcinsid NVARCHAR(64));
+GO
+
 CREATE TABLE skn_yuk (
     yukid NVARCHAR(64), yukno NVARCHAR(64), isturu NVARCHAR(64),
     bagliyukno NVARCHAR(64), durumid NVARCHAR(64), yuklemetip NVARCHAR(64),
     firmaid NVARCHAR(64), gondericiid NVARCHAR(64), aliciid NVARCHAR(64),
     odemesekliid NVARCHAR(64), talimatgelissekli NVARCHAR(64), istenenromorkcins NVARCHAR(64),
     musteritemsilcisiad NVARCHAR(255), musteritemsilcisi2ad NVARCHAR(255),
+    -- FIYATLANDIRAN: gercek Siber'de uniqueidentifier (sky_kullanici.kullaniciid).
+    fiyatlandirankullaniciid NVARCHAR(64) NULL,
     departmanid NVARCHAR(64), yukturkod NVARCHAR(64),
     bildirimyapankullanicikod NVARCHAR(64), satistemsilcisikod NVARCHAR(64),
     teslimsekil NVARCHAR(64),

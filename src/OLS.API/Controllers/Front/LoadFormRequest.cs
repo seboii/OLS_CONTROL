@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using OLS.Business.Common;
 using OLS.Business.Services.LoadTransfers;
@@ -38,6 +38,14 @@ public sealed class LoadFormRequest
     [FromForm(Name = "transit_country_id")] public Guid? TransitCountryId { get; set; }
     [FromForm(Name = "target_country_id")] public Guid? TargetCountryId { get; set; }
     [FromForm(Name = "department_id")] public int? DepartmentId { get; set; }
+
+    /// <summary>
+    /// TESLİM ŞEKLİ ve DÖVİZ TÜRÜ teklifte toplanıyor: ikisi de teklif
+    /// aşamasında bilinebiliyor, yükün durumunu etkilemiyor ve dönüşümde yüke
+    /// taşınıyor — böylece yük açıldıktan sonra elle doldurulmaları gerekmiyor.
+    /// </summary>
+    [FromForm(Name = "delivery_method_id")] public int? DeliveryMethodId { get; set; }
+    [FromForm(Name = "currency_id")] public int? CurrencyId { get; set; }
     [FromForm(Name = "front_transportation_by_us")] public int FrontTransportationByUs { get; set; }
     [FromForm(Name = "final_transportation_by_us")] public int FinalTransportationByUs { get; set; }
     /// <summary>
@@ -66,6 +74,8 @@ public sealed class LoadFormRequest
         LoadingTypeId = LoadingTypeId,
         PaymentTypeId = PaymentTypeId,
         StatusTypeId = StatusTypeId,
+        DeliveryMethodId = DeliveryMethodId,
+        CurrencyId = CurrencyId,
         OfferDate = OfferDate,
         OfferValidityDate = OfferValidityDate,
         MarketingNotificationDate = MarketingNotificationDate,
@@ -180,6 +190,27 @@ public sealed class DirectLoadRequest
     [JsonPropertyName("receiver_id")] public long? ReceiverId { get; set; }
     [JsonPropertyName("department_id")] public long? DepartmentId { get; set; }
     [JsonPropertyName("delivery_method_id")] public long? DeliveryMethodId { get; set; }
+
+    /// <summary>
+    /// DÖVİZ TÜRÜ — BULUNAN GERÇEK HATA: bu alan İSTEKTE HİÇ YOKTU.
+    ///
+    /// Form döviz türünü topluyor ve gönderiyor, servis de Siber'e
+    /// <c>skn_yuk.dovizkod</c> olarak yazacak durumda; arada bu bağlama eksik
+    /// olduğu için değer sunucuya ulaşır ulaşmaz sessizce düşüyordu.
+    /// Kullanıcının gördüğü belirti: "döviz türünü giriyoruz ama Siber'de
+    /// dolmuyor."
+    /// </summary>
+    [JsonPropertyName("currency_id")] public long? CurrencyId { get; set; }
+
+    /// <summary>
+    /// OPERASYON YETKİLİLERİ — en fazla iki kişi, gönderilen SIRA korunur.
+    /// Boş bırakılırsa kaydı açan kullanıcı 1. yetkili olur.
+    /// </summary>
+    [JsonPropertyName("operation_officer_ids")] public List<long> OperationOfficerIds { get; set; } = [];
+
+    /// <summary>Satış temsilcisi — tek kişi; boşsa kaydı açan kullanıcı.</summary>
+    [JsonPropertyName("sales_rep_id")] public long? SalesRepId { get; set; }
+
     [JsonPropertyName("agent_id")] public long? AgentId { get; set; }
     [JsonPropertyName("company_pay_freight_id")] public long? CompanyPayFreightId { get; set; }
     [JsonPropertyName("payer_company")] public string? PayerCompany { get; set; }
@@ -192,6 +223,7 @@ public sealed class DirectLoadRequest
     [JsonPropertyName("instruction_arrival_date")] public DateOnly? InstructionArrivalDate { get; set; }
     [JsonPropertyName("request_arrival_date")] public DateOnly? RequestArrivalDate { get; set; }
     [JsonPropertyName("readiness_date")] public DateOnly? ReadinessDate { get; set; }
+    [JsonPropertyName("date_of_receipt_customer")] public DateOnly? DateOfReceiptCustomer { get; set; }
     [JsonPropertyName("description")] public string? Description { get; set; }
     [JsonPropertyName("packages")] public List<DirectLoadPackageRequest> Packages { get; set; } = [];
     [JsonPropertyName("financial_items")] public List<DirectLoadFinancialItemRequest> FinancialItems { get; set; } = [];
@@ -213,6 +245,9 @@ public sealed class DirectLoadRequest
         ReceiverId = ReceiverId,
         DepartmentId = DepartmentId,
         DeliveryMethodId = DeliveryMethodId,
+        CurrencyId = CurrencyId,
+        OperationOfficerIds = OperationOfficerIds,
+        SalesRepId = SalesRepId,
         AgentId = AgentId,
         CompanyPayFreightId = CompanyPayFreightId,
         PayerCompany = PayerCompany,
@@ -225,6 +260,7 @@ public sealed class DirectLoadRequest
         InstructionArrivalDate = InstructionArrivalDate,
         RequestArrivalDate = RequestArrivalDate,
         ReadinessDate = ReadinessDate,
+        DateOfReceiptCustomer = DateOfReceiptCustomer,
         Description = Description,
         Packages = Packages
             .Select(p => new DirectLoadPackage(

@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Accounts;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 
@@ -114,12 +115,12 @@ public sealed class UserService : IUserService
             // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
             var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
             users = users.Where(u =>
-                EF.Functions.Like(u.Name.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(u.Surname.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                (u.Phone != null && EF.Functions.Like(u.Phone.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)) ||
-                EF.Functions.Like(u.Email.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(u.Name), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(u.Surname), pattern) ||
+                (u.Phone != null && EF.Functions.Like(TurkishFold.Fold(u.Phone), pattern)) ||
+                EF.Functions.Like(TurkishFold.Fold(u.Email), pattern) ||
                 _db.Countries.Any(c => c.Id == u.PhoneCountryId &&
-                                       c.Name != null && EF.Functions.Like(c.Name.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)));
+                                       c.Name != null && EF.Functions.Like(TurkishFold.Fold(c.Name), pattern)));
         }
 
         // olsold: yalnızca "true ise filtrele" — false gönderilirse süzgeç yok.

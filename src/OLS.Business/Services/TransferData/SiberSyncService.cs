@@ -33,6 +33,9 @@ public interface ISiberSyncService
     Task<SiberImportSummary> SyncOfferFinancialsAsync(CancellationToken cancellationToken = default);
     Task<SiberImportSummary> SyncLoadTransfersAsync(CancellationToken cancellationToken = default);
     Task<SiberImportSummary> SyncLoadTransferPackagesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Gerçek koli bilgileri (skn_yukkolidepo) — bkz. LoadTransferActualPackage.</summary>
+    Task<SiberImportSummary> SyncLoadTransferActualPackagesAsync(CancellationToken cancellationToken = default);
     Task<SiberImportSummary> SyncLoadTransferInvoiceItemsAsync(CancellationToken cancellationToken = default);
     Task<SiberImportSummary> SyncExpeditionsAsync(CancellationToken cancellationToken = default);
     Task<SiberImportSummary> SyncLoadTransferDocumentsAsync(CancellationToken cancellationToken = default);
@@ -1080,6 +1083,12 @@ public sealed class SiberSyncService : ISiberSyncService
         public int? Bagliyukno { get; set; }
         public string? Musteritemsilcisiad { get; set; }
         public string? Musteritemsilcisi2ad { get; set; }
+
+        /// <summary>
+        /// FİYATLANDIRAN — <c>uniqueidentifier</c>, <c>sky_kullanici.kullaniciid</c>
+        /// (kod/ad DEĞİL). Yerelde <c>users.siber_id</c> ile eşlenir.
+        /// </summary>
+        public string? Fiyatlandirankullaniciid { get; set; }
         public string? Bildirimyapankullanicikod { get; set; }
         public string? Satistemsilcisikod { get; set; }
         public int? Kamyonda { get; set; }
@@ -1090,6 +1099,9 @@ public sealed class SiberSyncService : ISiberSyncService
         public string? Yuklemekita { get; set; }
         public string? Bosaltmakita { get; set; }
         public string? Teslimsekil { get; set; }
+
+        /// <summary>Yükün döviz KODU (USD/EUR/TL) — skn_yuk.dovizkod.</summary>
+        public string? Dovizkod { get; set; }
         public int? Ontasimatarafimizdanyapilir { get; set; }
         public int? Sontasimatarafimizdanyapilir { get; set; }
         /// <summary>Yükün ait olduğu Siber şirketi — görünürlük ayrımı.</summary>
@@ -1151,6 +1163,9 @@ public sealed class SiberSyncService : ISiberSyncService
                        TRY_CAST(bagliyukno AS INT) AS Bagliyukno,
                        LTRIM(RTRIM(musteritemsilcisiad)) AS Musteritemsilcisiad,
                        LTRIM(RTRIM(musteritemsilcisi2ad)) AS Musteritemsilcisi2ad,
+                       -- uniqueidentifier → string: CAST ŞART, aksi hâlde Dapper
+                       -- "Object must implement IConvertible" ile düşer.
+                       LOWER(CAST(fiyatlandirankullaniciid AS VARCHAR(64))) AS Fiyatlandirankullaniciid,
                        LTRIM(RTRIM(bildirimyapankullanicikod)) AS Bildirimyapankullanicikod,
                        LTRIM(RTRIM(satistemsilcisikod)) AS Satistemsilcisikod,
                        TRY_CAST(kamyonda AS INT) AS Kamyonda, TRY_CAST(kuyrukta AS INT) AS Kuyrukta,
@@ -1159,6 +1174,7 @@ public sealed class SiberSyncService : ISiberSyncService
                        TRY_CAST(toplamlademetrem3 AS DECIMAL(18,4)) AS Toplamlademetrem3,
                        LTRIM(RTRIM(_yuklemekita)) AS Yuklemekita, LTRIM(RTRIM(_bosaltmakita)) AS Bosaltmakita,
                        LTRIM(RTRIM(teslimsekil)) AS Teslimsekil,
+                       LTRIM(RTRIM(dovizkod)) AS Dovizkod,
                        TRY_CAST(ontasimatarafimizdanyapilir AS INT) AS Ontasimatarafimizdanyapilir,
                        TRY_CAST(sontasimatarafimizdanyapilir AS INT) AS Sontasimatarafimizdanyapilir,
                        talimatgelistarihi AS Talimatgelistarihi, istenenvaristarihi AS Istenenvaristarihi,
@@ -1187,8 +1203,15 @@ public sealed class SiberSyncService : ISiberSyncService
         var users = await _db.Users.AsNoTracking().OrderBy(u => u.Id).ToListAsync(cancellationToken);
         var userBySiberName = ByTurkishName(users, u => u.SiberName, u => u.Id);
         var userBySiberCode = ByCode(users, u => u.SiberCode, u => u.Id);
+        // Fiyatlandıran GUID ile geliyor. Siber'in CAST'i BÜYÜK harf üretiyor,
+        // .NET küçük — sözlük harfe duyarsız (bkz. ByCode).
+        var userBySiberId = ByCode(users, u => u.SiberId, u => u.Id);
         // olsold ETL: LoadTransferDeliveryMethod::pluck('id','edikod') — skn_yuk.teslimsekil
         // bir GUID değil, EDI kodudur (char).
+        // Döviz KODA göre eşlenir (USD/EUR/TL) — skn_yuk.dovizkod kod tutuyor.
+        var currencyByCode = ByCode(
+            await _db.Currencies.AsNoTracking().ToListAsync(cancellationToken),
+            c => c.Code, c => c.Id);
         var deliveryMethodByEdikod = ByCode(
             await _db.LoadTransferDeliveryMethods.AsNoTracking().ToListAsync(cancellationToken),
             d => d.Edikod, d => d.Id);
@@ -1265,12 +1288,17 @@ public sealed class SiberSyncService : ISiberSyncService
                 transfer.SecondCustomerRepresentativeName = row.Musteritemsilcisi2ad is { } mt2
                     && userBySiberName.TryGetValue(QueryableExtensions.NormalizeTurkish(mt2), out var mt2Id)
                     ? (int)mt2Id : transfer.SecondCustomerRepresentativeName;
+                transfer.PricingUserId = row.Fiyatlandirankullaniciid is { } fk
+                    && userBySiberId.TryGetValue(fk, out var fkId)
+                    ? (int)fkId : transfer.PricingUserId;
                 transfer.UsercodeWithNotification = row.Bildirimyapankullanicikod is { } bk && userBySiberCode.TryGetValue(bk, out var bkId)
                     ? (int)bkId : transfer.UsercodeWithNotification;
                 transfer.SalesRepCode = row.Satistemsilcisikod is { } sk && userBySiberCode.TryGetValue(sk, out var skId)
                     ? (int)skId : transfer.SalesRepCode;
                 transfer.DeliveryMethodId = row.Teslimsekil is { } ts && deliveryMethodByEdikod.TryGetValue(ts, out var tsId)
                     ? (int)tsId : transfer.DeliveryMethodId;
+                transfer.CurrencyId = row.Dovizkod is { } dk && currencyByCode.TryGetValue(dk, out var dkId)
+                    ? (int)dkId : transfer.CurrencyId;
                 transfer.InTruck = row.Kamyonda ?? transfer.InTruck;
                 transfer.InTail = row.Kuyrukta ?? transfer.InTail;
                 transfer.CmrWaiting = row.Cmrduzenlenecek ?? transfer.CmrWaiting;
@@ -1437,6 +1465,131 @@ public sealed class SiberSyncService : ISiberSyncService
         {
             Errors = skipped > 0 ? [.. errors, $"{skipped} satır atlandı (yerel yük bulunamadı)."] : errors,
         };
+    }
+
+    /// <summary>
+    /// GERÇEK KOLİ BİLGİLERİ (<c>skn_yukkolidepo</c>) — Siber'in yük ekranındaki
+    /// ikinci koli seti. Alan eşlemesi <c>skn_yukkoli</c> ile birebir aynı
+    /// (en→width, boy→length, yukseklik→height) ve kap cinsi / ürün grubu yine
+    /// Siber GUID'inden YEREL kimliğe çözülüyor.
+    ///
+    /// Canlıda 4.207 satır / 4.082 yük; bunların 4.064'ünde beyan edilen set de
+    /// var ve 3.920'sinde toplamlar birebir aynı — yani "Gerçek Koli
+    /// Bilgilerine Aktar" ile kopyalanmış.
+    /// </summary>
+    public async Task<SiberImportSummary> SyncLoadTransferActualPackagesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var connection = await OpenAsync(cancellationToken);
+
+        var rows = (await connection.QueryAsync<LoadTransferActualPackageRow>(
+            new CommandDefinition(
+                """
+                SELECT CAST(yukkolidepoid AS VARCHAR(64)) AS Yukkolidepoid,
+                       LOWER(CAST(yukid AS VARCHAR(64))) AS Yukid,
+                       TRY_CAST(kapadet AS INT) AS Kapadet, CAST(kapid AS VARCHAR(64)) AS Kapid,
+                       TRY_CAST(en AS DECIMAL(18,4)) AS En, TRY_CAST(boy AS DECIMAL(18,4)) AS Boy,
+                       TRY_CAST(yukseklik AS DECIMAL(18,4)) AS Yukseklik, TRY_CAST(hacim AS DECIMAL(18,4)) AS Hacim,
+                       TRY_CAST(burutagirlik AS DECIMAL(18,4)) AS Burutagirlik,
+                       TRY_CAST(netagirlik AS DECIMAL(18,4)) AS Netagirlik,
+                       TRY_CAST(lademetre AS DECIMAL(18,4)) AS Lademetre,
+                       TRY_CAST(istiflenemez AS INT) AS Istiflenemez,
+                       CAST(malcinsid AS VARCHAR(64)) AS Malcinsid
+                FROM skn_yukkolidepo
+                """,
+                cancellationToken: cancellationToken))).ToList();
+
+        // ANAHTAR SİBER YUKID: beyan edilen koli tablosuyla AYNI kural
+        // (bkz. SyncLoadTransferPackagesAsync). İki set aynı anahtarı
+        // kullanmazsa "Gerçek Koli Bilgilerine Aktar" eşleşme bulamaz.
+        var loadTransferIds = new HashSet<string>(
+            await _db.LoadTransfers.AsNoTracking().Where(t => t.LoadTransferId != null)
+                .Select(t => t.LoadTransferId!).ToListAsync(cancellationToken),
+            StringComparer.OrdinalIgnoreCase);
+
+        var productTypes = BySiberId(await _db.ProductTypes.AsNoTracking().ToListAsync(cancellationToken), p => p.SiberId, p => p.Id);
+        var caseTypes = BySiberId(await _db.CaseTypes.AsNoTracking().ToListAsync(cancellationToken), c => c.SiberId, c => c.Id);
+        var existing = await ExistingByKeyAsync(
+            _db.LoadTransferActualPackages.Where(p => p.Yukkolidepoid != null).OrderBy(p => p.Id),
+            p => p.Yukkolidepoid, cancellationToken);
+
+        var created = 0;
+        var updated = 0;
+        var skipped = 0;
+        var errors = new List<string>();
+
+        foreach (var row in rows)
+        {
+            try
+            {
+                if (!loadTransferIds.Contains(row.Yukid))
+                {
+                    skipped++;
+                    continue;
+                }
+
+                var isNew = !existing.TryGetValue(row.Yukkolidepoid, out var package);
+                package ??= new LoadTransferActualPackage
+                {
+                    Yukkolidepoid = row.Yukkolidepoid,
+                    CreatedAt = DateTime.Now,
+                };
+
+                package.LoadTransferId = row.Yukid;
+                package.Quantity = row.Kapadet;
+                package.CaseTypeId = row.Kapid is { } kt && caseTypes.TryGetValue(kt, out var ctId)
+                    ? ctId.ToString()
+                    : package.CaseTypeId;
+                package.Width = row.En;
+                package.Length = row.Boy;
+                package.Height = row.Yukseklik;
+                package.Volume = row.Hacim;
+                package.GrossWeight = row.Burutagirlik;
+                package.NetWeight = row.Netagirlik;
+                package.Lademeter = row.Lademetre;
+                package.Stackable = row.Istiflenemez;
+                package.ProductTypeId = row.Malcinsid is { } mc && productTypes.TryGetValue(mc, out var mcId)
+                    ? (int)mcId : package.ProductTypeId;
+                package.UpdatedAt = DateTime.Now;
+
+                if (isNew)
+                {
+                    _db.LoadTransferActualPackages.Add(package);
+                    created++;
+                }
+                else
+                {
+                    updated++;
+                }
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{row.Yukkolidepoid}: {ex.Message}");
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return new SiberImportSummary(created, updated, errors) with
+        {
+            Errors = skipped > 0 ? [.. errors, $"{skipped} satır atlandı (yerel yük bulunamadı)."] : errors,
+        };
+    }
+
+    private sealed class LoadTransferActualPackageRow
+    {
+        public string Yukkolidepoid { get; set; } = string.Empty;
+        public string Yukid { get; set; } = string.Empty;
+        public int? Kapadet { get; set; }
+        public string? Kapid { get; set; }
+        public decimal? En { get; set; }
+        public decimal? Boy { get; set; }
+        public decimal? Yukseklik { get; set; }
+        public decimal? Hacim { get; set; }
+        public decimal? Burutagirlik { get; set; }
+        public decimal? Netagirlik { get; set; }
+        public decimal? Lademetre { get; set; }
+        public int? Istiflenemez { get; set; }
+        public string? Malcinsid { get; set; }
     }
 
     private sealed class YukEvrakRow

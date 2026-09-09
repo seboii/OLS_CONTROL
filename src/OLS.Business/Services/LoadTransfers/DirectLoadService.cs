@@ -48,6 +48,12 @@ public sealed class DirectLoadModel
     public long? DepartmentId { get; init; }
     public long? DeliveryMethodId { get; init; }
 
+    /// <summary>
+    /// Yükün döviz türü (<c>currencies.id</c>) — Siber'de
+    /// <c>skn_yuk.dovizkod</c>. Canlıda yüklerin %82'sinde dolu.
+    /// </summary>
+    public long? CurrencyId { get; init; }
+
     /// <summary>Acente ve navlunu ödeyecek firma — teklif formundaki karşılıkları.</summary>
     public long? AgentId { get; init; }
     public long? CompanyPayFreightId { get; init; }
@@ -66,6 +72,12 @@ public sealed class DirectLoadModel
     public DateOnly? RequestArrivalDate { get; init; }
     public DateOnly? ReadinessDate { get; init; }
 
+    /// <summary>
+    /// MÜŞTERİDEN ALINIŞ TARİHİ — yük açılırken biliniyor ve yükün durumunu
+    /// etkilemiyor; eskiden yalnızca yük detay ekranından girilebiliyordu.
+    /// </summary>
+    public DateOnly? DateOfReceiptCustomer { get; init; }
+
     public string? Description { get; init; }
     public IReadOnlyList<DirectLoadPackage> Packages { get; init; } = [];
 
@@ -78,6 +90,26 @@ public sealed class DirectLoadModel
 
     /// <summary>Kaydın açılacağı şirket; yalnızca süper adminde seçilebilir.</summary>
     public string? SiberCompanyId { get; init; }
+
+    /// <summary>
+    /// OPERASYON YETKİLİLERİ — en fazla İKİ kişi, SIRA ÖNEMLİ.
+    ///
+    /// Siber yükte iki ayrı sütun tutuyor ve ikisi de kullanıcının ADINI
+    /// bekliyor: <c>musteritemsilcisiad</c> (8.056 yükün 8.035'inde dolu) ve
+    /// <c>musteritemsilcisi2ad</c> (7.842'sinde). Ölçüm: dolu değerlerin
+    /// 7.657/7.675'i <c>sky_kullanici.ad</c> ile eşleşiyor, KOD ile eşleşen
+    /// yok — yani sütunlar ad taşıyor.
+    ///
+    /// Boş gelirse kaydı açan kullanıcı 1. yetkili sayılır (eski davranış).
+    /// </summary>
+    public IReadOnlyList<long> OperationOfficerIds { get; init; } = [];
+
+    /// <summary>
+    /// SATIŞ TEMSİLCİSİ — TEK kişi, Siber'e KODUYLA yazılır
+    /// (<c>skn_yuk.satistemsilcisikod</c>; 7.655 kayıtta kodla eşleşiyor,
+    /// 5'inde adla). Boş gelirse kaydı açan kullanıcı yazılır.
+    /// </summary>
+    public long? SalesRepId { get; init; }
 }
 
 public sealed record DirectLoadFinancialItem(
@@ -248,6 +280,35 @@ public sealed class DirectLoadService : IDirectLoadService
             .Where(u => u.Id == currentUserId).Select(u => u.SiberCode)
             .FirstOrDefaultAsync(cancellationToken);
 
+        // GÖREVLİLER — formdan gelir, gelmezse kaydı açan kullanıcıya düşer.
+        //
+        // BULUNAN GERÇEK HATA: teklifsiz yük Siber'e yalnızca
+        // `musteritemsilcisiad = kullanıcı KODU` yazıyordu. O sütun AD taşıyor
+        // (canlıda dolu 8.035 değerin 7.657'si sky_kullanici.ad ile eşleşiyor,
+        // kodla eşleşen yok), yani biçim yanlıştı; 2. yetkili, satış temsilcisi
+        // ve fiyatlandıran ise HİÇ yazılmıyordu — teklif yolunda üçü de
+        // yazıldığı hâlde.
+        var officerIds = model.OperationOfficerIds
+            .Where(id => id > 0).Distinct().Take(2).ToList();
+
+        if (officerIds.Count == 0)
+            officerIds.Add(currentUserId);
+
+        var salesRepId = model.SalesRepId is > 0 ? model.SalesRepId.Value : currentUserId;
+
+        var staffIds = officerIds.Append(salesRepId).Distinct().ToList();
+
+        var staff = await _db.Users.AsNoTracking()
+            .Where(u => staffIds.Contains(u.Id))
+            .Select(u => new { u.Id, u.SiberName, u.SiberCode, u.SiberId })
+            .ToListAsync(cancellationToken);
+
+        var firstOfficer = staff.FirstOrDefault(u => u.Id == officerIds[0]);
+        var secondOfficer = officerIds.Count > 1
+            ? staff.FirstOrDefault(u => u.Id == officerIds[1])
+            : null;
+        var salesRep = staff.FirstOrDefault(u => u.Id == salesRepId);
+
         var companyId = await _companyScope.ResolveWriteCompanyAsync(
             currentUserId, model.SiberCompanyId, cancellationToken);
 
@@ -267,6 +328,21 @@ public sealed class DirectLoadService : IDirectLoadService
 
         try
         {
+            // Teslim şekli Siber'de Incoterm KODUYLA tutuluyor (EXW/FOB/CIF…),
+            // döviz ise üç harfli kodla (USD/EUR/TL) — ikisi de yerel kimlikten
+            // çözülüyor.
+            var deliveryMethodCode = model.DeliveryMethodId is { } deliveryId
+                ? await _db.LoadTransferDeliveryMethods.AsNoTracking()
+                    .Where(d => d.Id == deliveryId).Select(d => d.Edikod)
+                    .FirstOrDefaultAsync(cancellationToken)
+                : null;
+
+            var currencyCode = model.CurrencyId is { } currencyId
+                ? await _db.Currencies.AsNoTracking()
+                    .Where(c => c.Id == currencyId).Select(c => c.Code)
+                    .FirstOrDefaultAsync(cancellationToken)
+                : null;
+
             var numberResult = await _siber.InsertYukWithLockedNumberAsync(new SiberYuk
             {
                 YukId = yukId,
@@ -286,15 +362,30 @@ public sealed class DirectLoadService : IDirectLoadService
                 ToplamLademetre = totalLademeter,
                 ToplamKap = totalQuantity,
                 UcretAgirlik = totalLademeter * SiberLoadRepository.LademeterMultiplier,
-                MusteriTemsilcisiAd = userSiberCode,
+                // 1. ve 2. yetkili ADIYLA, satış temsilcisi KODUYLA yazılır —
+                // sütunların canlıda ölçülen biçimi bu. Fiyatlandıran, teklif
+                // yolundaki kuralın aynısıyla 1. yetkiliye düşer.
+                MusteriTemsilcisiAd = firstOfficer?.SiberName ?? userSiberCode,
+                MusteriTemsilcisi2Ad = secondOfficer?.SiberName,
+                SatisTemsilcisiKod = salesRep?.SiberCode ?? userSiberCode,
+                FiyatlandiranKullaniciId = firstOfficer?.SiberId,
                 DepartmanId = department.SiberId,
                 YukTurKod = loadTransferType?.Code,
+                // TESLİM ŞEKLİ ve DÖVİZ artık AÇILIŞTA yazılıyor. Teslim şekli
+                // formda toplanıyor ama yalnızca yerel tabloya işleniyordu;
+                // Siber'e ancak sonradan bir güncelleme yapılırsa gidiyordu.
+                TeslimSekil = deliveryMethodCode,
+                DovizKod = currencyCode,
                 YuklemeUlke = departureCountry?.Name,
                 BosaltmaUlke = targetCountry?.Name,
                 YuklemeKita = departureCountry?.Continent,
                 BosaltmaKita = targetCountry?.Continent,
                 CalismaSekli = model.WayOfWorking,
-                TalimatGelisTarihi = now,
+                // Talimat geliş tarihi formda varsa ondan gelir; yoksa kayıt anı.
+                TalimatGelisTarihi = model.InstructionArrivalDate?.ToDateTime(TimeOnly.MinValue) ?? now,
+                IstenenVarisTarihi = model.RequestArrivalDate?.ToDateTime(TimeOnly.MinValue),
+                HazirOlmaTarih = model.ReadinessDate?.ToDateTime(TimeOnly.MinValue),
+                MusteridenAlinisTarih = model.DateOfReceiptCustomer?.ToDateTime(TimeOnly.MinValue),
                 KayitGiren = userSiberCode,
                 KayitGirisTarih = now,
             }, year, workType.AdditionalCode ?? string.Empty, cancellationToken);
@@ -332,21 +423,27 @@ public sealed class DirectLoadService : IDirectLoadService
                 CarHeight = SiberLoadRepository.DefaultCarHeight,
                 LoadingContinent = departureCountry?.Continent,
                 UnloadingContinent = targetCountry?.Continent,
-                CustomerRepresentativeName = (int)currentUserId,
-                SecondCustomerRepresentativeName = (int)currentUserId,
+                // Yerel ayna Siber'le aynı kişileri göstermeli; eskiden dördü de
+                // koşulsuz "kaydı açan kullanıcı" yazılıyordu ve yük detay
+                // ekranı 2. yetkiliyi hep yanlış gösteriyordu.
+                CustomerRepresentativeName = (int)officerIds[0],
+                SecondCustomerRepresentativeName = officerIds.Count > 1 ? (int)officerIds[1] : null,
                 UsercodeWithNotification = (int)currentUserId,
-                SalesRepCode = (int)currentUserId,
+                SalesRepCode = (int)salesRepId,
+                PricingUserId = (int)officerIds[0],
                 InTruck = 1,
                 InTail = 1,
                 CmrWaiting = 1,
                 FcrWaiting = 1,
                 DeliveryMethodId = (int?)model.DeliveryMethodId,
+                CurrencyId = (int?)model.CurrencyId,
                 WayOfWorking = model.WayOfWorking,
                 FrontTransportationByUs = model.FrontTransportationByUs,
                 FinalTransportationByUs = model.FinalTransportationByUs,
                 InstructionArrivalDate = model.InstructionArrivalDate,
                 RequestArrivalDate = model.RequestArrivalDate,
                 ReadinessDate = model.ReadinessDate,
+                DateOfReceiptCustomer = model.DateOfReceiptCustomer,
                 CreatedAt = now,
                 UpdatedAt = now,
             };

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Authorization;
 using OLS.Business.Services.Accounts;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Siber;
 using OLS.DataAccess.Entities;
@@ -209,22 +210,22 @@ public sealed class LoadService : ILoadService
             // iş tipi, yükleme tipi, müşteri/gönderici/alıcı/acente adları ile
             // onların ülke adları üzerinde yapıyordu.
             var matchingAccountIds = _db.Accounts
-                .Where(a => EF.Functions.Like(a.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                .Where(a => EF.Functions.Like(TurkishFold.Fold(a.Name!), pattern) ||
                             _db.Countries.Any(c => c.Id == a.CountryId &&
-                                                   EF.Functions.Like(c.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)))
+                                                   EF.Functions.Like(TurkishFold.Fold(c.Name!), pattern)))
                 .Select(a => a.Id);
 
             var matchingWorkTypeIds = _db.WorkTypes
-                .Where(w => EF.Functions.Like(w.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(w => EF.Functions.Like(TurkishFold.Fold(w.Name!), pattern))
                 .Select(w => w.Id);
 
             var matchingLoadingTypeIds = _db.LoadingTypes
-                .Where(t => EF.Functions.Like(t.Name!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern))
+                .Where(t => EF.Functions.Like(TurkishFold.Fold(t.Name!), pattern))
                 .Select(t => t.Id);
 
             loads = loads.Where(l =>
-                EF.Functions.Like(l.LoadNumber!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
-                EF.Functions.Like(l.ReservationNumber!.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(l.LoadNumber!), pattern) ||
+                EF.Functions.Like(TurkishFold.Fold(l.ReservationNumber!), pattern) ||
                 (l.WorkTypeId != null && matchingWorkTypeIds.Contains(l.WorkTypeId.Value)) ||
                 (l.LoadingTypeId != null && matchingLoadingTypeIds.Contains(l.LoadingTypeId.Value)) ||
                 (l.CustomerId != null && matchingAccountIds.Contains(l.CustomerId.Value)) ||
@@ -287,6 +288,12 @@ public sealed class LoadService : ILoadService
 
                 LoadChargePerson = _db.LoadChargePeople
                     .Where(p => p.LoadId == (int)l.Id)
+                    // SIRA ANLAMLI: 1. operasyon yetkilisi Siber'de
+                    // musteritemsilcisi, 2.'si operasyonyetkilisikod2 olarak
+                    // yazılıyor (bkz. LoadWriteService.WriteChargePersonsAsync).
+                    // Sıralamasız sorguda satır sırası garanti değildir ve form
+                    // iki yetkiliyi ters doldurabilirdi.
+                    .OrderBy(p => p.Id)
                     .Select(p => new LoadChargePersonDto
                     {
                         Id = p.Id,
@@ -391,8 +398,19 @@ public sealed class LoadService : ILoadService
             TransitCountryId = await CountryAsync(l.TransitCountryId, cancellationToken),
             TargetCountryId = await CountryAsync(l.TargetCountryId, cancellationToken),
 
+            DeliveryMethodId = await _db.LoadTransferDeliveryMethods.AsNoTracking()
+                .Where(m => m.Id == l.DeliveryMethodId)
+                .Select(m => new NamedRefDto { Id = m.Id, Name = m.Name })
+                .FirstOrDefaultAsync(cancellationToken),
+            CurrencyId = await _db.Currencies.AsNoTracking()
+                .Where(c => c.Id == l.CurrencyId)
+                .Select(c => new NamedRefDto { Id = c.Id, Name = c.Name })
+                .FirstOrDefaultAsync(cancellationToken),
+
             LoadChargePerson = await _db.LoadChargePeople.AsNoTracking()
                 .Where(p => p.LoadId == (int)l.Id)
+                // Sıra anlamlı — bkz. liste sorgusundaki aynı not.
+                .OrderBy(p => p.Id)
                 .Select(p => new LoadChargePersonDto
                 {
                     Id = p.Id,

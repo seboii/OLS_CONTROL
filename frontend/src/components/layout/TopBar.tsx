@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useNavigate } from "react-router-dom";
-import { ChevronDown, LogOut, Menu, Settings, User } from "lucide-react";
+import { ChevronDown, LogOut, Menu, RefreshCw, Settings, User } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useRefresh } from "@/lib/refresh";
 
 function initials(name: string, surname: string) {
   return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase();
@@ -10,6 +11,7 @@ function initials(name: string, surname: string) {
 
 export function TopBar({ moduleLabel, onMenuToggle }: { moduleLabel: string; onMenuToggle: () => void }) {
   const { user, logout } = useAuth();
+  const { refresh, refreshing } = useRefresh();
   const navigate = useNavigate();
   const [userOpen, setUserOpen] = useState(false);
   const userRef = useRef<HTMLDivElement>(null);
@@ -37,6 +39,20 @@ export function TopBar({ moduleLabel, onMenuToggle }: { moduleLabel: string; onM
       </div>
 
       <div className="flex-1" />
+
+      {/* YENİLEME: açık sayfanın kendi listesini yeniden çeker (bkz.
+          useRegisterRefresh). Sayfa yenileyicisini kaydetmemişse tarayıcı
+          yenilemesine düşülür. */}
+      <button
+        onClick={refresh}
+        disabled={refreshing}
+        title="Yenile"
+        aria-label="Yenile"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition-colors text-gray-600 disabled:opacity-60"
+      >
+        <RefreshCw size={15} className={refreshing ? "animate-spin" : undefined} />
+        <span className="text-xs font-medium hidden sm:block">Yenile</span>
+      </button>
 
       <div className="relative" ref={userRef}>
         <button

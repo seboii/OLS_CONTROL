@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { Receipt, Plus, Trash2, Tag, CheckCircle, Pencil, PencilOff, Filter, ChevronDown, X, CalendarDays } from "lucide-react";
 import { api, ApiError, type DataMessage, type Paginated } from "@/lib/api";
+import { useRegisterRefresh } from "@/lib/refresh";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
@@ -255,6 +256,9 @@ export function InvoicesPage() {
       .catch(() => addToast("Fatura listesi yüklenemedi", "error"))
       .finally(() => setLoading(false));
   }
+
+  // Üst bardaki Yenile düğmesi bu sayfanın listesini tazeler (bkz. refresh.ts).
+  useRegisterRefresh(load);
 
   useEffect(() => {
     load();

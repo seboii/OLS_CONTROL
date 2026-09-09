@@ -173,6 +173,74 @@ public static class DbSeeder
             db.FinancialItems.Add(new FinancialItem { Name = "Navlun (Demo)", Type = 2, CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now });
 
         await db.SaveChangesAsync(ct);
+
+        await EnsureFreightPairAsync(db, ct);
+    }
+
+    /// <summary>
+    /// NAVLUN BAYRAĞI + BOŞ KURULUMDA ÖRNEK ÇİFT.
+    ///
+    /// Bayrak her açılışta tazelenir: adı NAVLUN geçen kalem navlun sayılır —
+    /// AddFinancialItemPairs migrasyonundaki kuralın aynısı. Migrasyon yalnızca
+    /// bir kez çalıştığı için sonradan içe aktarılan kalemler bayraksız kalırdı.
+    ///
+    /// ÖRNEK ÇİFT YALNIZCA BOŞ KURULUMDA. Gerçek kalem kataloğu Siber'den
+    /// geliyor (47.192 satır) ve çiftleri migrasyon tanımlıyor; burada eklenen
+    /// çift yalnızca kalem tablosu demo boyutundayken (100'den az satır) ve hiç
+    /// çift yokken oluşur. Amacı, taze bir kurulumda "navlun alışı gir → satış
+    /// satırı açılsın" akışının ve "Olumlu teklifte navlun zorunlu" kuralının
+    /// çalışabilir olması.
+    /// </summary>
+    private static async Task EnsureFreightPairAsync(OlsDbContext db, CancellationToken ct)
+    {
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE financial_items SET is_freight = TRUE WHERE btrim(name) ILIKE '%NAVLUN%' AND is_freight = FALSE",
+            ct);
+
+        if (await db.FinancialItemPairs.AnyAsync(ct))
+            return;
+
+        if (await db.FinancialItems.CountAsync(ct) >= 100)
+            return;
+
+        var purchase = await db.FinancialItems
+            .FirstOrDefaultAsync(f => f.Name == "Navlun Gideri (Demo)", ct);
+
+        if (purchase is null)
+        {
+            purchase = new FinancialItem
+            {
+                Name = "Navlun Gideri (Demo)", Type = 1, IsFreight = true,
+                CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now,
+            };
+            db.FinancialItems.Add(purchase);
+        }
+
+        var sale = await db.FinancialItems
+            .FirstOrDefaultAsync(f => f.Name == "Navlun Geliri (Demo)", ct);
+
+        if (sale is null)
+        {
+            sale = new FinancialItem
+            {
+                Name = "Navlun Geliri (Demo)", Type = 2, IsFreight = true,
+                CreatedAt = DateTime.Now, UpdatedAt = DateTime.Now,
+            };
+            db.FinancialItems.Add(sale);
+        }
+
+        await db.SaveChangesAsync(ct);
+
+        db.FinancialItemPairs.Add(new FinancialItemPair
+        {
+            PurchaseItemId = purchase.Id,
+            SaleItemId = sale.Id,
+            MarkupPercent = 15,
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now,
+        });
+
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>Acente (account_type_id=5) tipinde hiç cari yoksa bir demo cari ekler.</summary>
@@ -531,7 +599,7 @@ public static class DbSeeder
 
         // AD, SİBER'DEKİ ADLA EŞLEŞMELİ. Tohum ülkelerin SiberId'si boş gelir;
         // SiberImportService.ImportCountriesAsync bunu sonradan AD EŞLEŞMESİYLE
-        // dolduruyor (Key = NormalizeTurkish, yani yalnızca İ/I/ı katlanır).
+        // dolduruyor (Key = NormalizeTurkish: tüm Türkçe harfler ASCII'ye katlanır).
         // "Rusya" bu yüzden Siber'in "RUSYA FEDERASYONU" satırıyla HİÇ eşleşmiyor
         // ve SiberId'si sonsuza kadar boş kalan bir seçenek olarak listede
         // duruyordu — yük Siber'e ülke ADIYLA yazıldığı için böyle bir seçim

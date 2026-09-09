@@ -36,6 +36,17 @@ public partial class FinancialItem
     /// </summary>
     public string? DefaultAccountName { get; set; }
 
+    /// <summary>
+    /// NAVLUN KALEMİ Mİ? "Olumlu" teklifte en az bir navlun kalemi zorunlu
+    /// (kullanıcı kuralı) ve kontrol bu bayrağa bakıyor.
+    ///
+    /// Ada göre aramak yerine bayrak tutuluyor: kalem tablosu 47.192 satır ve
+    /// adı "NAVLUN" geçen 36 kalemin hepsi navlun değil ("İADE NAVLUN",
+    /// "CZ PART / NAVLUN"), geçmeyen bir kalem ise ileride navlun sayılabilir.
+    /// Bayrak veri, kural değil — SQL ile düzeltilebilir.
+    /// </summary>
+    public bool IsFreight { get; set; }
+
     public string? SiberId { get; set; }
 
     public DateTime? CreatedAt { get; set; }

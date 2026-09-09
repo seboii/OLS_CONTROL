@@ -49,6 +49,10 @@ public sealed class SiberSyncBackgroundService : BackgroundService
         ("Teklif mali kalemi", (s, ct) => s.SyncOfferFinancialsAsync(ct), c => c.OfferFinancials),
         ("Yük", (s, ct) => s.SyncLoadTransfersAsync(ct), c => c.LoadTransfers),
         ("Yük koli", (s, ct) => s.SyncLoadTransferPackagesAsync(ct), c => c.LoadTransferPackages),
+        // Gerçek koli bilgileri (skn_yukkolidepo). Beklenen sayı olarak beyan
+        // edilen koli sayacı kullanılıyor: SiberCounts bu tabloyu ayrıca
+        // saymıyor ve iki set birbirinin aynası.
+        ("Gerçek koli", (s, ct) => s.SyncLoadTransferActualPackagesAsync(ct), c => c.LoadTransferPackages),
         ("Yük mali kalemi", (s, ct) => s.SyncLoadTransferInvoiceItemsAsync(ct), c => c.LoadTransferInvoiceItems),
         ("Yük evrak", (s, ct) => s.SyncLoadTransferDocumentsAsync(ct), c => c.LoadTransferDocuments),
         ("Sefer", (s, ct) => s.SyncExpeditionsAsync(ct), c => c.Expeditions),

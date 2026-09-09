@@ -64,6 +64,15 @@ public interface ISiberLoadRepository
     /// <summary>Yükü ve alt kayıtlarını Siber'den siler — bkz. uygulamadaki açıklama.</summary>
     Task DeleteYukAsync(string yukId, CancellationToken cancellationToken = default);
     Task DeleteYukKoliAsync(string yukKoliId, CancellationToken cancellationToken = default);
+
+    /// <summary>Gerçek koli (skn_yukkolidepo) için yeni kimlik.</summary>
+    Task<Guid> GenerateYukKoliDepoIdAsync(CancellationToken cancellationToken = default);
+
+    Task InsertYukKoliDepoAsync(SiberYukKoliDepo koli, CancellationToken cancellationToken = default);
+
+    Task UpdateYukKoliDepoAsync(SiberYukKoliDepo koli, CancellationToken cancellationToken = default);
+
+    Task DeleteYukKoliDepoAsync(string yukKoliDepoId, CancellationToken cancellationToken = default);
     Task DeleteModulKalemAsync(string modulKalemId, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -183,7 +192,38 @@ public sealed class SiberYuk
     public decimal? ToplamHacim { get; init; }
     public decimal? ToplamLademetre { get; init; }
     public decimal? UcretAgirlik { get; init; }
+    /// <summary>1. operasyon yetkilisinin ADI (skn_yuk.musteritemsilcisiad).</summary>
     public string? MusteriTemsilcisiAd { get; init; }
+
+    /// <summary>
+    /// 2. operasyon yetkilisinin ADI (skn_yuk.musteritemsilcisi2ad). Yükte iki
+    /// sütun da AD tutuyor — teklifteki gibi ad/kod ayrımı YOK: canlıda 8.040
+    /// yükün 8.020/7.827'sinde dolu ve 7.644/7.660'ı sky_kullanici.ad ile
+    /// eşleşiyor.
+    /// </summary>
+    public string? MusteriTemsilcisi2Ad { get; init; }
+
+    /// <summary>
+    /// FİYATLANDIRAN — <c>skn_yuk.fiyatlandirankullaniciid</c>,
+    /// <c>uniqueidentifier</c> ve <c>sky_kullanici.kullaniciid</c>'ye bakar.
+    /// Canlıda 8.043 yükün 870'inde dolu, 869'u son 12 aydan.
+    /// </summary>
+    public string? FiyatlandiranKullaniciId { get; init; }
+
+    /// <summary>
+    /// SATIŞ TEMSİLCİSİ — <c>skn_yuk.satistemsilcisikod</c>, kullanıcı KODU
+    /// (<c>sky_kullanici.kod</c>): dolu 7.645 kaydın 7.643'ü koda eşleşiyor,
+    /// yalnızca 4'ü ada. Yükteki iki operasyon yetkilisi sütunu AD tutuyor —
+    /// ikisi karıştırılmamalı.
+    ///
+    /// AYRI KİŞİDİR, türetilemez: dolu kayıtların 2.703'ünde (%35) 1. operasyon
+    /// yetkilisinden FARKLI. Bu yüzden ekranda kendi seçicisi var.
+    ///
+    /// null gelirse INSERT <c>kayitgiren</c>'e düşer (eski davranış), UPDATE ise
+    /// Siber'deki değeri korur.
+    /// </summary>
+    public string? SatisTemsilcisiKod { get; init; }
+
     public string? DepartmanId { get; init; }
     public string? YukNoIsTuru { get; init; }
     public decimal? ToplamKap { get; init; }
@@ -214,6 +254,13 @@ public sealed class SiberYuk
     /// (ekleme/dönüşüm sırasında olsold da bunları göndermiyor).
     /// </summary>
     public string? TeslimSekil { get; init; }
+
+    /// <summary>
+    /// YÜKÜN döviz kodu (<c>skn_yuk.dovizkod</c>) — üç harfli KOD (USD/EUR/TL).
+    /// Mali kalem satırlarındaki <c>sfy_modulkalem.dovizkod</c> ile
+    /// KARIŞTIRILMAMALI: bu, yükün kendi para birimi.
+    /// </summary>
+    public string? DovizKod { get; init; }
     public int? OnTasimaTarafimizdanYapilir { get; init; }
     public int? SonTasimaTarafimizdanYapilir { get; init; }
 
@@ -231,6 +278,33 @@ public sealed class SiberYuk
 public sealed class SiberYukKoli
 {
     public string YukKoliId { get; init; } = string.Empty;
+    public string YukId { get; init; } = string.Empty;
+    public int? KapAdet { get; init; }
+    public string? KapId { get; init; }
+    public decimal? En { get; init; }
+    public decimal? Boy { get; init; }
+    public decimal? Yukseklik { get; init; }
+    public decimal? Hacim { get; init; }
+    public decimal? BurutAgirlik { get; init; }
+    public decimal? NetAgirlik { get; init; }
+    public decimal? Lademetre { get; init; }
+    public int? Istiflenemez { get; init; }
+    public string? MalCinsId { get; init; }
+}
+
+/// <summary>
+/// GERÇEK KOLİ (<c>skn_yukkolidepo</c>) — Siber'in yük ekranındaki "Gerçek Koli
+/// Bilgileri" seti. Alanları <see cref="SiberYukKoli"/> ile aynı; tek zorunlu
+/// sütun <c>yukid</c>, yabancı anahtarlar <c>yukid</c> ve <c>kapid</c>.
+///
+/// Tabloda <c>skn_yukkolidepo_kapaniskontrol</c> tetikleyicisi var: kapalı
+/// döneme yazma <c>sbr_kapanistarihkontrol</c> ile reddediliyor. Mesaj
+/// RAISERROR olduğu için kullanıcıya olduğu gibi ulaşıyor (bkz.
+/// ExceptionHandlingMiddleware).
+/// </summary>
+public sealed class SiberYukKoliDepo
+{
+    public string YukKoliDepoId { get; init; } = string.Empty;
     public string YukId { get; init; } = string.Empty;
     public int? KapAdet { get; init; }
     public string? KapId { get; init; }
@@ -470,10 +544,13 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                  firmaid, gondericiid, aliciid, odemesekliid, kamyonda, kuyrukta,
                  cmrduzenlenecek, fcrduzenlenecek, talimatgelissekli, istenenromorkcins,
                  toplamagirlik, toplamhacim, toplamlademetre, ucretagirlik,
-                 musteritemsilcisiad, departmanid, operasyondepartmanid, yuknoisturu,
+                 musteritemsilcisiad, musteritemsilcisi2ad, fiyatlandirankullaniciid,
+                 departmanid, operasyondepartmanid, yuknoisturu,
                  kayitgiristarih, bagliyuknoisturu, toplamkap, kayitgiren, yil,
                  talimatgelistarihi, lademetrecarpan, hacimcarpan, aracyuksekligi,
-                 yukturkod, _yuklemeulke, _bosaltmaulke, _yuklemekita, _bosaltmakita,
+                 yukturkod, teslimsekil, dovizkod,
+                 istenenvaristarihi, hazirolmatarih, musteridenalinistarih,
+                 _yuklemeulke, _bosaltmaulke, _yuklemekita, _bosaltmakita,
                  bildirimyapankullanicikod, satistemsilcisikod, calismasekli,
                  rezervasyonid)
             VALUES
@@ -481,11 +558,28 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                  @FirmaId, @GondericiId, @AliciId, @OdemeSekliId, 0, 0,
                  0, 0, @TalimatGelisSekli, @IstenenRomorkCins,
                  @ToplamAgirlik, @ToplamHacim, @ToplamLademetre, @UcretAgirlik,
-                 @MusteriTemsilcisiAd, @DepartmanId, @DepartmanId, @loadNumberWorkType,
+                 @MusteriTemsilcisiAd, @MusteriTemsilcisi2Ad, @FiyatlandiranKullaniciId,
+                 @DepartmanId, @DepartmanId, @loadNumberWorkType,
                  @KayitGirisTarih, @loadNumberWorkType, @ToplamKap, @KayitGiren, @Yil,
                  @TalimatGelisTarihi, @LademeterMultiplier, @VolumeMultiplier, @CarHeight,
-                 @YukTurKod, @YuklemeUlke, @BosaltmaUlke, @YuklemeKita, @BosaltmaKita,
-                 @KayitGiren, @KayitGiren, @CalismaSekli,
+                 -- TESLİM ŞEKLİ ve DÖVİZ KODU açılışta da yazılır. Eskiden ikisi
+                 -- de yalnızca UPDATE yolunda vardı: form teslim şeklini
+                 -- topluyor, yerel tabloya işliyor ama Siber'e HİÇ göndermiyordu;
+                 -- döviz ise hiç toplanmıyordu. Canlıda skn_yuk'un 8.044
+                 -- satırının 6.116'sında teslimsekil, 6.556'sında dovizkod dolu.
+                 @YukTurKod, @TeslimSekil, @DovizKod,
+                 -- ÜÇ TARİH AÇILIŞTA DA YAZILIR — BULUNAN GERÇEK HATA.
+                 -- İstenen varış / hazır olma / müşteriden alınış tarihleri
+                 -- formda toplanıp yerel tabloya işleniyor ama INSERT'te
+                 -- karşılıkları YOKTU; yalnızca UPDATE yolunda vardılar. Yani
+                 -- yük açılırken girilen tarihler Siber'e hiç gitmiyor, ancak
+                 -- sonradan bir güncelleme yapılırsa ulaşıyordu.
+                 @IstenenVarisTarihi, @HazirOlmaTarih, @MusteridenAlinisTarih,
+                 @YuklemeUlke, @BosaltmaUlke, @YuklemeKita, @BosaltmaKita,
+                 -- bildirimyapankullanicikod hâlâ kaydı girene sabit (ekranda
+                 -- karşılığı yok); satistemsilcisikod artık seçilen kişiden
+                 -- geliyor, gelmezse eski davranışa düşüyor.
+                 @KayitGiren, ISNULL(@SatisTemsilcisiKod, @KayitGiren), @CalismaSekli,
                  @RezervasyonId);
 
             COMMIT TRANSACTION;
@@ -502,12 +596,14 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             yuk.YuklemeTip, yuk.FirmaId, yuk.GondericiId, yuk.AliciId, yuk.OdemeSekliId,
             yuk.TalimatGelisSekli, yuk.IstenenRomorkCins, yuk.ToplamAgirlik,
             yuk.ToplamHacim, yuk.ToplamLademetre, yuk.UcretAgirlik,
-            yuk.MusteriTemsilcisiAd, yuk.DepartmanId,
-            yuk.KayitGirisTarih, yuk.ToplamKap, yuk.KayitGiren,
+            yuk.MusteriTemsilcisiAd, yuk.MusteriTemsilcisi2Ad, yuk.FiyatlandiranKullaniciId,
+            yuk.DepartmanId, yuk.KayitGirisTarih, yuk.ToplamKap, yuk.KayitGiren,
             yuk.TalimatGelisTarihi, LademeterMultiplier, VolumeMultiplier,
-            CarHeight = DefaultCarHeight, yuk.YukTurKod, yuk.YuklemeUlke,
+            CarHeight = DefaultCarHeight, yuk.YukTurKod, yuk.TeslimSekil, yuk.DovizKod,
+            yuk.IstenenVarisTarihi, yuk.HazirOlmaTarih, yuk.MusteridenAlinisTarih,
+            yuk.YuklemeUlke,
             yuk.BosaltmaUlke, yuk.YuklemeKita, yuk.BosaltmaKita,
-            yuk.CalismaSekli, yuk.RezervasyonId,
+            yuk.CalismaSekli, yuk.RezervasyonId, yuk.SatisTemsilcisiKod,
         });
     }
 
@@ -621,7 +717,14 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                 toplamlademetre    = @ToplamLademetre,
                 ucretagirlik       = @UcretAgirlik,
                 toplamkap          = @ToplamKap,
-                musteritemsilcisiad= @MusteriTemsilcisiAd,
+                -- İKİ YETKİLİ, İKİ SÜTUN. ISNULL: yerelde ikinci yetkili boşsa
+                -- (Siber'den senkronlanmış eski yüklerde çoğu zaman öyle)
+                -- Siber'deki dolu değer silinmemeli — ülke sütunlarındaki
+                -- kusurun aynısı.
+                musteritemsilcisiad= ISNULL(@MusteriTemsilcisiAd, musteritemsilcisiad),
+                musteritemsilcisi2ad = ISNULL(@MusteriTemsilcisi2Ad, musteritemsilcisi2ad),
+                fiyatlandirankullaniciid = ISNULL(@FiyatlandiranKullaniciId, fiyatlandirankullaniciid),
+                satistemsilcisikod = ISNULL(@SatisTemsilcisiKod, satistemsilcisikod),
                 departmanid        = @DepartmanId,
                 operasyondepartmanid = @DepartmanId,
                 talimatgelistarihi = @TalimatGelisTarihi,
@@ -645,6 +748,7 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
                 calismasekli       = @CalismaSekli,
                 aracyuksekligi     = @CarHeight,
                 teslimsekil                  = @TeslimSekil,
+                dovizkod                     = ISNULL(@DovizKod, dovizkod),
                 ontasimatarafimizdanyapilir  = @OnTasimaTarafimizdanYapilir,
                 sontasimatarafimizdanyapilir = @SonTasimaTarafimizdanYapilir,
                 istenenvaristarihi           = @IstenenVarisTarihi,
@@ -658,11 +762,13 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             yuk.YukId, yuk.DurumId, yuk.YuklemeTip, yuk.FirmaId, yuk.GondericiId,
             yuk.AliciId, yuk.OdemeSekliId, yuk.TalimatGelisSekli, yuk.IstenenRomorkCins,
             yuk.ToplamAgirlik, yuk.ToplamHacim, yuk.ToplamLademetre, yuk.UcretAgirlik,
-            yuk.ToplamKap, yuk.MusteriTemsilcisiAd, yuk.DepartmanId,
+            yuk.ToplamKap, yuk.MusteriTemsilcisiAd, yuk.MusteriTemsilcisi2Ad,
+            yuk.FiyatlandiranKullaniciId, yuk.SatisTemsilcisiKod, yuk.DepartmanId,
             yuk.TalimatGelisTarihi, yuk.YuklemeUlke, yuk.BosaltmaUlke,
             yuk.YuklemeKita, yuk.BosaltmaKita, yuk.YukTurKod, yuk.CalismaSekli,
             CarHeight = DefaultCarHeight,
-            yuk.TeslimSekil, yuk.OnTasimaTarafimizdanYapilir, yuk.SonTasimaTarafimizdanYapilir,
+            yuk.TeslimSekil, yuk.DovizKod,
+            yuk.OnTasimaTarafimizdanYapilir, yuk.SonTasimaTarafimizdanYapilir,
             yuk.IstenenVarisTarihi, yuk.HazirOlmaTarih, yuk.MusteridenAlinisTarih,
         });
     }
@@ -777,6 +883,61 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
 
         await connection.ExecuteAsync(
             "DELETE FROM skn_yukkoli WHERE yukkoliid = @id", new { id = yukKoliId });
+    }
+
+    public Task<Guid> GenerateYukKoliDepoIdAsync(CancellationToken cancellationToken = default) =>
+        GenerateUniqueAsync("skn_yukkolidepo", "yukkolidepoid", cancellationToken);
+
+    public async Task InsertYukKoliDepoAsync(
+        SiberYukKoliDepo koli, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        // Sütun listesi skn_yukkoli ile birebir aynı tutuldu (tabloların
+        // alanları da aynı); tek fark anahtar adı.
+        const string sql = """
+            INSERT INTO skn_yukkolidepo
+                (yukkolidepoid, yukid, kapadet, kapid, en, boy, yukseklik, hacim,
+                 burutagirlik, netagirlik, lademetre, istiflenemez, malcinsid)
+            VALUES
+                (@YukKoliDepoId, @YukId, @KapAdet, @KapId, @En, @Boy, @Yukseklik, @Hacim,
+                 @BurutAgirlik, @NetAgirlik, @Lademetre, @Istiflenemez, @MalCinsId)
+            """;
+
+        await connection.ExecuteAsync(sql, koli);
+    }
+
+    public async Task UpdateYukKoliDepoAsync(
+        SiberYukKoliDepo koli, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        const string sql = """
+            UPDATE skn_yukkolidepo SET
+                kapadet      = @KapAdet,
+                kapid        = @KapId,
+                en           = @En,
+                boy          = @Boy,
+                yukseklik    = @Yukseklik,
+                hacim        = @Hacim,
+                burutagirlik = @BurutAgirlik,
+                netagirlik   = @NetAgirlik,
+                lademetre    = @Lademetre,
+                istiflenemez = @Istiflenemez,
+                malcinsid    = @MalCinsId
+            WHERE yukkolidepoid = @YukKoliDepoId
+            """;
+
+        await connection.ExecuteAsync(sql, koli);
+    }
+
+    public async Task DeleteYukKoliDepoAsync(
+        string yukKoliDepoId, CancellationToken cancellationToken = default)
+    {
+        using var connection = await _factory.CreateOpenAsync(cancellationToken);
+
+        await connection.ExecuteAsync(
+            "DELETE FROM skn_yukkolidepo WHERE yukkolidepoid = @id", new { id = yukKoliDepoId });
     }
 
     public async Task DeleteModulKalemAsync(

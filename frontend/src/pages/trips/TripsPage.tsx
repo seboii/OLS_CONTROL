@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Truck, Plus, Trash2, Link2, ChevronDown, ChevronUp, Filter, X, CalendarDays, FileText, ExternalLink } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
+import { useRegisterRefresh } from "@/lib/refresh";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { useToast } from "@/components/ui/Toast";
@@ -186,11 +187,21 @@ interface ExpeditionMappingResponse {
   total_expedition_values: MappingTotals;
 }
 
+/** Aracın bağlı olduğu AÇIK sefer — plaka uyarısı için. */
+interface CarUsage {
+  id: number;
+  expedition_number: string | null;
+  status_name: string | null;
+  plate_number: string | null;
+}
+
 interface AvailableLoad {
   id: number;
   load_number_work_type: string | null;
   load_status_id: { id: number; name: string | null } | null;
   customer_id: { id: number; name: string | null } | null;
+  /** Bu yük kaç BAŞKA sefere bağlı — 0'dan büyükse listede uyarı gösterilir. */
+  other_expedition_count: number;
 }
 
 const PER_PAGE = 24;
@@ -247,7 +258,8 @@ function ExpeditionCard({
       </div>
 
       <div className="pt-3 border-t border-gray-100">
-        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Araç</p>
+        {/* Siber'de römork ve çekici AYRI plakalar; hangisi olduğu açıkça yazılıyor. */}
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-0.5">Römork Plaka</p>
         <p className="text-sm font-semibold text-gray-900 truncate">{row.romork_id?.plate_number ?? "—"}</p>
       </div>
 
@@ -348,6 +360,30 @@ export function TripsPage() {
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [form, setForm] = useState<TripForm>({ ...EMPTY_TRIP_FORM });
 
+  /**
+   * SEÇİLEN RÖMORK BAŞKA AÇIK SEFERDE Mİ? Uç yalnızca tamamlanmamış seferleri
+   * döndürüyor (durum numarası 90 = BOŞALTILDI'nın altındakiler); geçmiş
+   * seferler de sayılsaydı uyarı hemen her araçta çıkardı — canlıda 4.436
+   * seferin 3.156'sı zaten tamamlanmış.
+   */
+  const [carUsage, setCarUsage] = useState<CarUsage[]>([]);
+
+  /** Plaka seçilince aracın açık seferlerini sorar. */
+  const checkCarUsage = useCallback(async (carId: number | null, excludeId: number | null) => {
+    if (!carId) { setCarUsage([]); return; }
+
+    try {
+      const res = await api.get<DataMessage<CarUsage[]>>("/api/v1/expedition/car_usage", {
+        car_id: carId,
+        exclude_expedition_id: excludeId ?? undefined,
+      });
+      setCarUsage(res.data ?? []);
+    } catch {
+      // Uyarı bilgilendirme amaçlı; sorgulanamazsa kayıt akışı durmaz.
+      setCarUsage([]);
+    }
+  }, []);
+
   // Kaydedilmemiş "Yeni Sefer" taslağı — bkz. TRIP_DRAFT_KEY açıklaması.
   const [tripDrafts, setTripDrafts] = useState<Draft<TripDraft>[]>(() => listDrafts<TripDraft>(TRIP_DRAFT_KEY));
 
@@ -401,6 +437,9 @@ export function TripsPage() {
       .finally(() => setLoading(false));
   }
 
+  // Üst bardaki Yenile düğmesi bu sayfanın listesini tazeler (bkz. refresh.ts).
+  useRegisterRefresh(load);
+
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -410,6 +449,8 @@ export function TripsPage() {
     // Yeni bir düzenleme oturumu: önceki taslak yerinde kalır.
     activeDraftId.current = newDraftId();
     setForm({ ...EMPTY_TRIP_FORM });
+    // Önceki seçimin uyarısı yeni formda kalmasın.
+    setCarUsage([]);
     setErrors({});
     setDrawerOpen(true);
   }
@@ -642,6 +683,9 @@ export function TripsPage() {
   }
 
   async function openDetail(id: number) {
+    // Uyarı yalnızca kullanıcı plakayı DEĞİŞTİRİNCE hesaplanır; önceki
+    // kaydın uyarısı yeni detayda görünmemeli.
+    setCarUsage([]);
     setDetailId(id);
     setDetailOpen(true);
     setDetailLoading(true);
@@ -740,7 +784,10 @@ export function TripsPage() {
     if (!pickerOpen || !detailId) return;
     setPickerLoading(true);
     api
-      .get<DataMessage<Paginated<AvailableLoad>>>("/api/v1/expedition_load_mapping", { search: debouncedPickerSearch || undefined, per_page: 8, page: 1 })
+      // SEFER KİMLİĞİ ŞART: uç yalnızca BU sefere bağlı yükleri listeden
+      // çıkarıyor. Gönderilmezse hiçbir şey çıkarılmaz ve zaten bağlı yükler
+      // de listelenir.
+      .get<DataMessage<Paginated<AvailableLoad>>>("/api/v1/expedition_load_mapping", { expedition_id: detailId, search: debouncedPickerSearch || undefined, per_page: 8, page: 1 })
       .then((res) => setPickerResults(res.data.data))
       .catch(() => setPickerResults([]))
       .finally(() => setPickerLoading(false));
@@ -1085,16 +1132,40 @@ export function TripsPage() {
             onChange={(v) => setForm((f) => ({ ...f, siber_company_id: v }))}
           />
           <CarPicker
-            label="Araç (Plaka)"
+            label="Römork Plaka"
             required
             error={errors.romork_id?.[0]}
             value={form.romork_id ? { id: Number(form.romork_id), plate_number: form.romork_plate || null } : null}
-            onChange={(v) => setForm((f) => ({
-              ...f,
-              romork_id: v ? String(v.id) : "",
-              romork_plate: v?.plate_number ?? "",
-            }))}
+            onChange={(v) => {
+              setForm((f) => ({
+                ...f,
+                romork_id: v ? String(v.id) : "",
+                romork_plate: v?.plate_number ?? "",
+              }));
+              checkCarUsage(v?.id ?? null, null);
+            }}
           />
+          {/* PLAKA BAŞKA AÇIK SEFERDE Mİ? Tamamlanmış seferler sayılmaz. */}
+          {carUsage.length > 0 && (
+            <div className="col-span-full rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              <p className="font-semibold mb-1">
+                Bu römork {carUsage.length} açık sefere daha bağlı:
+              </p>
+              <ul className="space-y-0.5">
+                {carUsage.map((u) => (
+                  <li key={u.id}>
+                    • <span className="font-medium">{u.expedition_number ?? `#${u.id}`}</span>
+                    {u.status_name ? ` — ${u.status_name}` : ""}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5">
+                Aracı bu sefere bağlamadan önce o seferlerin durumunu netleştirin
+                ya da römorku oradan kaldırın.
+              </p>
+            </div>
+          )}
+
           <FormField label="İş Tipi" required error={errors.work_type?.[0]}>
             <SelectInput value={form.work_type} onChange={(v) => setForm((f) => ({ ...f, work_type: v }))} options={opts(workTypes)} />
           </FormField>
@@ -1164,7 +1235,9 @@ export function TripsPage() {
         open={detailOpen}
         onClose={() => { setDetailOpen(false); clearExpeditionDeepLink(); }}
         title={detail?.expedition_number ?? "Sefer"}
-        subtitle={detail?.romork_id?.plate_number ?? undefined}
+        subtitle={detail?.romork_id?.plate_number
+          ? `Römork: ${detail.romork_id.plate_number}`
+          : undefined}
         width="w-[min(1080px,95vw)]"
         footer={
           canUpdate ? (
@@ -1213,18 +1286,44 @@ export function TripsPage() {
                   </div>
                   <div className="grid grid-cols-3 gap-x-6 gap-y-6">
                   <CarPicker
-                    label="Araç (Plaka)"
+                    label="Römork Plaka"
                     required
                     error={detailErrors.romork_id?.[0]}
                     value={detailForm.romork_id
                       ? { id: Number(detailForm.romork_id), plate_number: detailForm.romork_plate || null }
                       : null}
-                    onChange={(v) => setDetailForm((f) => ({
-                      ...f,
-                      romork_id: v ? String(v.id) : "",
-                      romork_plate: v?.plate_number ?? "",
-                    }))}
+                    onChange={(v) => {
+                      setDetailForm((f) => ({
+                        ...f,
+                        romork_id: v ? String(v.id) : "",
+                        romork_plate: v?.plate_number ?? "",
+                      }));
+                      // Bu seferin kendisi hariç tutulur; aksi hâlde kayıt
+                      // kendi kendini "başka seferde" diye uyarırdı.
+                      checkCarUsage(v?.id ?? null, detailId);
+                    }}
                   />
+
+                  {/* PLAKA BAŞKA AÇIK SEFERDE Mİ? Tamamlanmış seferler sayılmaz. */}
+                  {carUsage.length > 0 && (
+                    <div className="col-span-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                      <p className="font-semibold mb-1">
+                        Bu römork {carUsage.length} açık sefere daha bağlı:
+                      </p>
+                      <ul className="space-y-0.5">
+                        {carUsage.map((u) => (
+                          <li key={u.id}>
+                            • <span className="font-medium">{u.expedition_number ?? `#${u.id}`}</span>
+                            {u.status_name ? ` — ${u.status_name}` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="mt-1.5">
+                        Aracı bu sefere bağlamadan önce o seferlerin durumunu netleştirin
+                        ya da römorku oradan kaldırın.
+                      </p>
+                    </div>
+                  )}
                   <FormField label="Durum" required error={detailErrors.expedition_status_id?.[0]}>
                     <SelectInput value={detailForm.status_id} onChange={(v) => setDetailForm((f) => ({ ...f, status_id: v }))} options={opts(expeditionStatuses)} />
                   </FormField>
@@ -1302,8 +1401,12 @@ export function TripsPage() {
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Bağlı Yükler</p>
                     {canUpdate && (
-                      <button type="button" onClick={() => { setPickerSearch(""); setPickerOpen(true); }} className="text-[11px] text-blue-600 hover:underline flex items-center gap-1">
-                        <Link2 size={12} />Yük Bağla
+                      <button
+                        type="button"
+                        onClick={() => { setPickerSearch(""); setPickerOpen(true); }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors"
+                      >
+                        <Link2 size={14} />Yük Bağla
                       </button>
                     )}
                   </div>
@@ -1643,6 +1746,13 @@ export function TripsPage() {
                   <span>
                     <span className="text-blue-700 font-medium">{r.load_number_work_type ?? `#${r.id}`}</span>
                     <span className="text-gray-500 ml-2">{r.customer_id?.name ?? "—"}</span>
+                    {/* Bir yük birden çok sefere bağlanabiliyor (Siber'de 143
+                        yük öyle) ama bu istisnadır — kullanıcı bilerek seçsin. */}
+                    {r.other_expedition_count > 0 && (
+                      <span className="block text-[10px] text-amber-600 mt-0.5">
+                        {r.other_expedition_count} başka sefere bağlı
+                      </span>
+                    )}
                   </span>
                   {r.load_status_id?.name && <Badge label={r.load_status_id.name} />}
                 </button>

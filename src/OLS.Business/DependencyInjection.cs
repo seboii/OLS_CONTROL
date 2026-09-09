@@ -68,6 +68,8 @@ public static class DependencyInjection
 
         services.AddScoped<ILoadService, LoadService>();
         services.AddScoped<ILoadWriteService, LoadWriteService>();
+        services.AddScoped<IFinancialItemPairService, FinancialItemPairService>();
+        services.AddScoped<IActualPackageService, ActualPackageService>();
         services.AddScoped<ILoadAiImportService, LoadAiImportService>();
         services.AddScoped<ILoadFileService, LoadFileService>();
         services.AddScoped<IOfferEmailService, OfferEmailService>();

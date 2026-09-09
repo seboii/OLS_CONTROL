@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type UIEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { useNavigate } from "react-router-dom";
 import { FileText, Package, Plus, Trash2, Truck, Upload, Download, File as FileIcon, X, Filter, ChevronDown, CalendarDays, User, MoreVertical, Copy } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
+import { useRegisterRefresh } from "@/lib/refresh";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { computeLademeter } from "@/lib/number";
@@ -15,6 +16,9 @@ import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Btn, FormField, SelectInput, Tabs, TextInput, TextareaInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
+import {
+  useFreightPairs, syncFreightSaleRows, type FreightRowAdapter,
+} from "@/lib/freightPairs";
 import { FinancialItemPicker, type FinancialItemOption } from "@/components/shared/FinancialItemPicker";
 import { LookupPicker, type LookupOption } from "@/components/shared/LookupPicker";
 import { listDrafts, saveDraft, removeDraft, newDraftId, formatDraftTime, type Draft } from "@/lib/autodraft";
@@ -111,6 +115,8 @@ interface LoadDetail {
   instruction_id: NamedRef | null;
   romork_type_id: NamedRef | null;
   department_id: NamedRef | null;
+  delivery_method_id: NamedRef | null;
+  currency_id: NamedRef | null;
   customer_id: AccountOption | null;
   sender_id: AccountOption | null;
   receiver_id: AccountOption | null;
@@ -145,11 +151,53 @@ type FinancialItemRow = {
   item: FinancialItemOption | null; transport_type_id: string; account: AccountOption | null;
   description: string; order: string; buysell: string; currency: string;
   net_price: string; total_price: string; quantity: string;
+  /**
+   * Bu satır bir NAVLUN ALIŞINDAN otomatik türetildiyse, türediği alış
+   * kaleminin kimliği. Kullanıcı satırın fiyatına dokunduğu anda null'a
+   * çekilir ve satır bir daha kendiliğinden güncellenmez (bkz. freightPairs).
+   */
+  auto_from_item?: number | null;
 };
 
 const EMPTY_CONTENT_ROW: ContentRow = {
   product_type_id: null, case_type_id: null, quantity: "1", gross_weight: "",
   net_weight: "", volume: "", lademeter: "", width: "", height: "", length: "", stackable: "1",
+};
+
+/**
+ * Teklif formunun satır biçimi için navlun senkron adaptörü.
+ *
+ * Otomatik satırın carisi, para birimi ve taşıma tipi alış satırından
+ * kopyalanır; kalemin kendi varsayılan carisi varsa o öne geçer (kalem
+ * seçicinin elle seçimdeki davranışının aynısı).
+ */
+const FREIGHT_ADAPTER: FreightRowAdapter<FinancialItemRow> = {
+  itemId: (r) => r.item?.id ?? null,
+  buysell: (r) => r.buysell,
+  autoFromItem: (r) => r.auto_from_item ?? null,
+  netPrice: (r) => r.net_price,
+  totalPrice: (r) => r.total_price,
+  createSaleRow: (source, pair, net, total) => ({
+    ...EMPTY_FINANCIAL_ROW,
+    item: {
+      id: pair.sale_item_id,
+      name: pair.sale_item_name,
+      type: pair.sale_item_type ?? 2,
+      default_account_id: pair.sale_default_account_id,
+      default_account_name: pair.sale_default_account_name,
+    },
+    buysell: "2",
+    account: pair.sale_default_account_id
+      ? { id: pair.sale_default_account_id, name: pair.sale_default_account_name }
+      : null,
+    transport_type_id: source.transport_type_id,
+    currency: source.currency,
+    quantity: source.quantity,
+    net_price: net,
+    total_price: total,
+    auto_from_item: pair.purchase_item_id,
+  }),
+  updateSaleRow: (row, net, total) => ({ ...row, net_price: net, total_price: total }),
 };
 
 const EMPTY_FINANCIAL_ROW: FinancialItemRow = {
@@ -178,9 +226,10 @@ type LocalDraft = {
   agent: AccountOption | null;
   companyPayFreight: AccountOption | null;
   route: { departure_country_id: string; transit_country_id: string; target_country_id: string };
-  operationOfficer: UserOption | null;
-  /** Yetkili müşteriden mi geldi (alan kilitli mi) — taslaktan devam ederken korunur. */
-  officerFromCustomer?: boolean;
+  /** İki operasyon yetkilisi, sırayla; boş kalan alan null. */
+  operationOfficers: (UserOption | null)[];
+  /** Fiyatlandıran — Op. Yetkilisi 1'den dolar, elle değişir. */
+  pricingUser: UserOption | null;
   salesReps: UserOption[];
   content: ContentRow[];
   financialItems: FinancialItemRow[];
@@ -193,7 +242,7 @@ const readLocalDrafts = () => listDrafts<LocalDraft>(LOCAL_DRAFT_KEY);
 /** Kullanıcı gerçekten bir şey doldurdu mu — boş formu taslak diye kaydetmeyelim. */
 function draftHasContent(d: Omit<LocalDraft, "savedAt">): boolean {
   if (d.customer || d.sender || d.receiver || d.agent || d.companyPayFreight) return true;
-  if (d.operationOfficer) return true;
+  if (d.operationOfficers?.some(Boolean) || d.pricingUser) return true;
   if (d.route.departure_country_id || d.route.transit_country_id || d.route.target_country_id) return true;
   if (d.financialItems.length > 0) return true;
   if (d.emailTo.length > 0 || d.emailCc.length > 0) return true;
@@ -746,7 +795,7 @@ export function QuotesPage() {
 
   const [form, setForm] = useState({
     work_type_id: "", loading_type_id: "", payment_type_id: "", status_type_id: "",
-    load_transfer_type_id: "", instruction_id: "", romork_type_id: "", department_id: "",
+    load_transfer_type_id: "", instruction_id: "", romork_type_id: "", department_id: "", delivery_method_id: "", currency_id: "",
     offer_date: new Date().toISOString().slice(0, 10), offer_validity_date: "",
     marketing_notification_date: new Date().toISOString().slice(0, 10),
     payer_company: "", description: "", rejection_reason: "", way_of_working: "0",
@@ -759,20 +808,67 @@ export function QuotesPage() {
   const [companyPayFreight, setCompanyPayFreight] = useState<AccountOption | null>(null);
   const [route, setRoute] = useState({ departure_country_id: "", transit_country_id: "", target_country_id: "" });
   // GÖREVLİLER:
-  //   • Operasyon Yetkilisi = MÜŞTERİYE tanımlı yetkili varsa O (değiştirilemez);
-  //     yoksa kullanıcı elle seçer, boş bırakılırsa sunucu kaydedeni yazar.
-  //   • Satış Temsilcisi   = müşteriye tanımlı satış temsilcileri (salt-okunur).
-  // Aynı kural sunucuda da uygulanıyor (LoadWriteService.WriteChargePersonsAsync)
-  // ve tek doğruluk noktası orası: bu ekran yalnızca ne kaydedileceğini gösterir,
-  // elle seçim de yalnızca müşterinin yetkilisi YOKKEN dikkate alınır.
-  const [operationOfficer, setOperationOfficer] = useState<UserOption | null>(null);
-  // MÜŞTERİYE TANIMLI YETKİLİ Mİ? Tanımlıysa alan salt-okunur kalır
-  // ("varsa değişmesin"); tanımlı değilse kullanıcı elle seçer.
-  const [officerFromCustomer, setOfficerFromCustomer] = useState(false);
+  //   • Operasyon Yetkilisi — İKİ ALAN, ELLE DÜZENLENEBİLİR. Siber'in teklif
+  //     kaydında da iki sütun var (musteritemsilcisi + operasyonyetkilisikod2)
+  //     ve 19.554 rezervasyonun 17.127'sinde ikincisi dolu, 6.627'sinde iki
+  //     alan FARKLI kişi. Müşteri seçilince alanlar cariye tanımlı yetkililerle
+  //     ÖN DOLDURULUR ama kilitlenmez.
+  //   • Satış Temsilcisi — TEK KİŞİ, salt-okunur, müşteriden gelir. Siber'in
+  //     ikinci sütunu (satistemsilcisi2kod) 19.561 teklifin 540'ında dolu
+  //     (%2,8), yani fiilen kullanılmıyor — fazladan kişi göstermek Siber'e
+  //     hiç ulaşmayan bir isim göstermek olurdu.
+  //   • Fiyatlandıran — Siber'de fiyatlandirankullaniciid; 19.561 teklifin
+  //     7.952'sinde dolu ve dolu olanların 5.798'inde (%73) 1. operasyon
+  //     yetkilisiyle AYNI kişi. Bu yüzden oradan dolar ama düzenlenebilir.
+  //   • "Tedarik eden" Siber'de YOK: teklif/yük tablolarında karşılığı hiç
+  //     bulunmuyor, seferdeki aractedarikedenpersonelid ise 4.409 kayıttan
+  //     6'sında dolu — alan bilinçli olarak EKLENMEDİ.
+  // Kural sunucuda da uygulanıyor (LoadWriteService.WriteChargePersonsAsync);
+  // tek doğruluk noktası orası, bu ekran yalnızca ne kaydedileceğini gösterir.
+  const [operationOfficers, setOperationOfficers] = useState<(UserOption | null)[]>([null, null]);
+  const [pricingUser, setPricingUser] = useState<UserOption | null>(null);
+  /** Fiyatlandıran elle değiştirildi mi — değiştirildiyse yetkiliyi izlemeyi bırakır. */
+  const pricingUserTouched = useRef(false);
   const [salesReps, setSalesReps] = useState<UserOption[]>([]);
 
+  /**
+   * Tek bir yetkili alanını günceller, diğerine dokunmaz. 1. yetkili
+   * değiştiğinde Fiyatlandıran da onu İZLER — ta ki kullanıcı Fiyatlandıran'ı
+   * elle değiştirene kadar (o an izleme biter, seçim korunur).
+   */
+  function setOperationOfficerAt(index: number, value: UserOption | null) {
+    setOperationOfficers((prev) => prev.map((p, i) => (i === index ? value : p)));
+    if (index === 0 && !pricingUserTouched.current) setPricingUser(value);
+  }
+
+  function changePricingUser(value: UserOption | null) {
+    pricingUserTouched.current = true;
+    setPricingUser(value);
+  }
+
   const [content, setContent] = useState<ContentRow[]>([{ ...EMPTY_CONTENT_ROW }]);
-  const [financialItems, setFinancialItems] = useState<FinancialItemRow[]>([]);
+  const [financialItems, setFinancialItemsRaw] = useState<FinancialItemRow[]>([]);
+  const freightPairs = useFreightPairs();
+
+  // Eşleşmeler forma göre GEÇ gelir (ayrı istek). Sarmalayıcının kimliği sabit
+  // kalsın diye ref üzerinden okunuyor; aksi hâlde liste yüklenince tüm satır
+  // düzenleyicileri yeniden kurulurdu.
+  const freightPairsRef = useRef(freightPairs);
+  freightPairsRef.current = freightPairs;
+
+  /**
+   * NAVLUN OTOMATİĞİ TEK KAPIDAN GEÇER. Kalem satırlarını değiştiren her yer
+   * bu sarmalayıcıyı çağırıyor; alış satırı eklendiğinde/fiyatı değiştiğinde
+   * eşleşen satış satırı burada açılıp güncelleniyor. Senkron idempotent
+   * olduğu için her çağrıda güvenle çalıştırılabiliyor.
+   */
+  const setFinancialItems = useCallback(
+    (update: FinancialItemRow[] | ((prev: FinancialItemRow[]) => FinancialItemRow[])) =>
+      setFinancialItemsRaw((prev) => {
+        const next = typeof update === "function" ? update(prev) : update;
+        return syncFreightSaleRows(next, freightPairsRef.current, FREIGHT_ADAPTER);
+      }),
+    []);
   const [existingFiles, setExistingFiles] = useState<LoadFileDetail[]>([]);
   // Siber arşivi teklifin kendi kaydına bağlı (rezervasyonid); yerel yüklenen
   // dosyalardan ayrı tutulur — sahibi Siber, buradan silinemez.
@@ -802,6 +898,21 @@ export function QuotesPage() {
   const { options: loadTransferTypes } = useLookupOptions("/api/v1/load_transfer_type");
   const { options: transportTypes } = useLookupOptions("/api/v1/transport_type");
   const { options: currencies } = useLookupOptions("/api/v1/currency");
+  const { options: deliveryMethods } = useLookupOptions("/api/v1/load_transfer_deliver_method");
+
+  /**
+   * Teslim şekli Siber'de Incoterm KODUYLA tutuluyor (skn_yuk.teslimsekil =
+   * EXW/FOB/CIF…) ve kullanıcı işini bu kodlarla konuşuyor; liste "EXW — Fabrika
+   * çıkışında teslim" biçiminde gösteriliyor (yük ekranındaki codeOpts ile aynı).
+   */
+  const deliveryMethodOpts = [
+    { value: "", label: "Seçiniz" },
+    ...deliveryMethods.map((t) => {
+      const code = ((t as { edikod?: string | null; code?: string | null }).edikod
+        ?? (t as { code?: string | null }).code ?? "").trim();
+      return { value: String(t.id), label: code ? `${code} — ${t.name}` : t.name };
+    }),
+  ];
   const { options: countries } = useLookupOptions("/api/v1/country");
 
   function opts(list: { id: string | number; name: string }[]) {
@@ -813,6 +924,23 @@ export function QuotesPage() {
     ? statusTypes.find((s) => s.name === activeStatusTab.statusName)?.id
     : undefined;
   const isTimeoutTab = activeStatusTab.statusName === null;
+
+  /**
+   * Kaydedilen teklifi listede GÖRÜNÜR kılar: durumuna karşılık gelen sekmeye
+   * ve 1. sayfaya geçer. Sekme/sayfa zaten doğruysa listeyi elle tazeler
+   * (state değişmediği için efekt tetiklenmezdi).
+   */
+  function showSavedRecord(statusTypeId: string) {
+    const statusName = statusTypes.find((s) => String(s.id) === statusTypeId)?.name;
+    const tab = STATUS_TABS.find((t) => t.statusName === statusName)?.label;
+
+    const tabChanged = tab !== undefined && tab !== listTab;
+    const pageChanged = page !== 1;
+
+    if (tabChanged) setListTab(tab);
+    if (pageChanged) setPage(1);
+    if (!tabChanged && !pageChanged) load();
+  }
 
   function load() {
     setLoading(true);
@@ -840,6 +968,9 @@ export function QuotesPage() {
       .catch(() => addToast("Teklif listesi yüklenemedi", "error"))
       .finally(() => setLoading(false));
   }
+
+  // Üst bardaki Yenile düğmesi bu sayfanın listesini tazeler (bkz. refresh.ts).
+  useRegisterRefresh(load);
 
   useEffect(() => {
     // Zaman Aşımı dışındaki sekmeler ilgili status_type kaydı yüklenene kadar
@@ -925,6 +1056,7 @@ export function QuotesPage() {
       status_type_id: String(statusTypes.find((t) => t.name === "Teklif")?.id ?? ""),
       load_transfer_type_id: "", instruction_id: "", romork_type_id: "",
       department_id: String(departments.find((t) => t.name === "Satış & Pazarlama")?.id ?? ""),
+      delivery_method_id: "", currency_id: "",
       offer_date: new Date().toISOString().slice(0, 10),
       offer_validity_date: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
       marketing_notification_date: new Date().toISOString().slice(0, 10),
@@ -938,11 +1070,13 @@ export function QuotesPage() {
     setCompanyPayFreight(null);
     setRoute({ departure_country_id: "", transit_country_id: "", target_country_id: "" });
     setContent([{ ...EMPTY_CONTENT_ROW }]);
-    setFinancialItems([]);
+    setFinancialItemsRaw([]);
     setExistingFiles([]);
     setRemovedFileIds([]);
     setNewFiles([]);
-    setOperationOfficer(null);
+    setOperationOfficers([null, null]);
+    setPricingUser(null);
+    pricingUserTouched.current = false;
     // Operasyon Yetkilisi gibi hemen seçilebilir olsun diye en az bir boş satır
     // baştan hazır — bkz. content'in EMPTY_CONTENT_ROW ile aynı deseni.
     setSalesReps([{ id: 0, name: null, surname: null }]);
@@ -993,32 +1127,34 @@ export function QuotesPage() {
   }
 
   async function applyCustomerRepresentatives(account: AccountOption | null) {
-    // Müşteri seçilmeden yetkili bilinemez; alan elle seçime açık kalır.
+    // Müşteri seçilmeden yetkili bilinemez; alanlar boşalır ama seçime açık kalır.
     if (!account) {
-      setOperationOfficer(null);
-      setOfficerFromCustomer(false);
+      setOperationOfficers([null, null]);
+      if (!pricingUserTouched.current) setPricingUser(null);
       setSalesReps([]);
       return;
     }
 
     try {
       const res = await api.get<DataMessage<{
-        operation_officer: UserOption | null;
+        operation_officers: UserOption[];
         sales_reps: UserOption[];
       }>>(`/api/v1/account/${account.id}/representatives`);
 
-      const { operation_officer: officer, sales_reps: reps } = res.data;
+      const { operation_officers: officers, sales_reps: reps } = res.data;
 
-      // MÜŞTERİNİNKİ VARSA DEĞİŞMEZ; yoksa alan elle seçime açılır. Uç yalnızca
-      // AKTİF kullanıcıyı döndürüyor — ayrılmış personel "tanımlı" sayılmaz.
-      setOperationOfficer(officer ?? null);
-      setOfficerFromCustomer(officer != null);
-      setSalesReps(reps ?? []);
+      // ÖN DOLDURUR, KİLİTLEMEZ: cariye tanımlı yetkili yalnızca başlangıç
+      // değeridir, kullanıcı iki alanı da değiştirebilir. Uç yalnızca AKTİF
+      // kullanıcıyı döndürüyor — ayrılmış personel "tanımlı" sayılmaz.
+      setOperationOfficers([officers?.[0] ?? null, officers?.[1] ?? null]);
+      if (!pricingUserTouched.current) setPricingUser(officers?.[0] ?? null);
+      // TEK SATIŞ TEMSİLCİSİ — Siber ikinciyi fiilen kullanmıyor (%2,8).
+      setSalesReps(reps?.slice(0, 1) ?? []);
     } catch {
-      // Bağ okunamazsa alanı kilitlemeyiz: kullanıcı elle seçebilsin, sunucu
-      // kaydederken kuralı yine kendisi uygular.
-      setOperationOfficer(null);
-      setOfficerFromCustomer(false);
+      // Bağ okunamazsa alanlar elle seçime açık boş kalır; sunucu kaydederken
+      // kuralı yine kendisi uygular.
+      setOperationOfficers([null, null]);
+      if (!pricingUserTouched.current) setPricingUser(null);
       setSalesReps([]);
     }
   }
@@ -1042,7 +1178,7 @@ export function QuotesPage() {
 
     const snapshot = {
       form, customer, sender, receiver, agent, companyPayFreight, route,
-      operationOfficer, officerFromCustomer, salesReps, content, financialItems,
+      operationOfficers, pricingUser, salesReps, content, financialItems,
       emailTo, emailCc,
     };
     if (!draftHasContent(snapshot)) return;
@@ -1055,7 +1191,7 @@ export function QuotesPage() {
     return () => clearTimeout(timer);
   }, [
     drawerOpen, editingId, form, customer, sender, receiver, agent, companyPayFreight,
-    route, operationOfficer, officerFromCustomer, salesReps, content, financialItems,
+    route, operationOfficers, pricingUser, salesReps, content, financialItems,
     emailTo, emailCc,
   ]);
 
@@ -1076,11 +1212,16 @@ export function QuotesPage() {
     setAgent(d.agent);
     setCompanyPayFreight(d.companyPayFreight);
     setRoute(d.route);
-    setOperationOfficer(d.operationOfficer);
-    setOfficerFromCustomer(d.officerFromCustomer ?? false);
+    setOperationOfficers([d.operationOfficers?.[0] ?? null, d.operationOfficers?.[1] ?? null]);
+    setPricingUser(d.pricingUser ?? null);
+    // Taslaktaki değer neyse o korunur; yetkiliyi yeniden izlemeye başlamaz.
+    pricingUserTouched.current = true;
     setSalesReps(d.salesReps?.length ? d.salesReps : [{ id: 0, name: null, surname: null }]);
     setContent(d.content?.length ? d.content : [{ ...EMPTY_CONTENT_ROW }]);
-    setFinancialItems(d.financialItems ?? []);
+    // Taslaktan/kayittan yukleme senkron TETIKLEMEZ: mevcut bir teklifi acmak
+    // sessizce yeni satir eklememeli. Otomatik satir yalnizca kullanici alis
+    // girdiginde acilir.
+    setFinancialItemsRaw(d.financialItems ?? []);
     setEmailTo(d.emailTo ?? []);
     setEmailCc(d.emailCc ?? []);
     setExistingFiles([]);
@@ -1116,6 +1257,8 @@ export function QuotesPage() {
         instruction_id: d.instruction_id ? String(d.instruction_id.id) : "",
         romork_type_id: d.romork_type_id ? String(d.romork_type_id.id) : "",
         department_id: d.department_id ? String(d.department_id.id) : "",
+        delivery_method_id: d.delivery_method_id ? String(d.delivery_method_id.id) : "",
+        currency_id: d.currency_id ? String(d.currency_id.id) : "",
         offer_date: d.offer_date ?? "",
         offer_validity_date: d.offer_validity_date ?? "",
         marketing_notification_date: d.marketing_notification_date ?? "",
@@ -1126,10 +1269,23 @@ export function QuotesPage() {
         front_transportation_by_us: d.front_transportation_by_us != null ? String(d.front_transportation_by_us) : "0",
         final_transportation_by_us: d.final_transportation_by_us != null ? String(d.final_transportation_by_us) : "0",
       });
-      setOperationOfficer(d.load_charge_person.find((p) => p.user_type === 1)?.user_id ?? null);
+      // SIRA ANLAMLI: uç görevlileri ekleme sırasına göre döndürüyor, 1.
+      // yetkili Siber'de musteritemsilcisi, 2.'si operasyonyetkilisikod2.
+      const existingOfficers = d.load_charge_person.filter((p) => p.user_type === 1);
+      setOperationOfficers([
+        existingOfficers[0]?.user_id ?? null,
+        existingOfficers[1]?.user_id ?? null,
+      ]);
+      // user_type 3 = Fiyatlandıran. Kayıtta yoksa (senkronla gelmiş eski
+      // teklif) 1. yetkili gösterilir — kaydedilecek değerin aynısı.
+      setPricingUser(
+        d.load_charge_person.find((p) => p.user_type === 3)?.user_id
+          ?? existingOfficers[0]?.user_id ?? null);
+      pricingUserTouched.current = true;
       const existingSalesReps = d.load_charge_person
         .filter((p) => p.user_type === 2 && p.user_id)
-        .map((p) => p.user_id!);
+        .map((p) => p.user_id!)
+        .slice(0, 1);
       setSalesReps(existingSalesReps.length > 0 ? existingSalesReps : [{ id: 0, name: null, surname: null }]);
       setCustomer(d.customer_id);
       setSender(d.sender_id);
@@ -1158,7 +1314,7 @@ export function QuotesPage() {
             }))
           : [{ ...EMPTY_CONTENT_ROW }],
       );
-      setFinancialItems(
+      setFinancialItemsRaw(
         d.load_financial_item.map((f) => ({
           item: f.item,
           transport_type_id: f.transport_type_id ? String(f.transport_type_id.id) : "",
@@ -1240,6 +1396,8 @@ export function QuotesPage() {
     fd.append("instruction_id", form.instruction_id);
     fd.append("romork_type_id", form.romork_type_id);
     fd.append("department_id", form.department_id);
+    fd.append("delivery_method_id", form.delivery_method_id);
+    fd.append("currency_id", form.currency_id);
     fd.append("offer_date", form.offer_date);
     fd.append("offer_validity_date", form.offer_validity_date);
     fd.append("marketing_notification_date", form.marketing_notification_date);
@@ -1287,14 +1445,22 @@ export function QuotesPage() {
       fd.append(`load_financial_item[${i}][quantity]`, item.quantity);
     });
 
-    // OPERASYON YETKİLİSİ yalnızca MÜŞTERİYE TANIMLI DEĞİLKEN gönderilir.
-    // Tanımlıysa sunucu istekten geleni zaten yok sayıyor ("varsa değişmesin");
-    // göndermemek isteği de gereksiz yere şişirmez. Satış Temsilcisi hiçbir
-    // durumda gönderilmez, müşteriden türetiliyor.
-    if (!officerFromCustomer && operationOfficer?.id) {
-      fd.append("load_charge_person[0][user_id]", String(operationOfficer.id));
-      fd.append("load_charge_person[0][user_type]", "1");
-    }
+    // OPERASYON YETKİLİLERİ SIRAYLA gönderilir; boş alan atlanır ama SIRA
+    // KORUNUR (1. alan boş, 2. dolu ise dolu olan 1. yetkili olarak gider —
+    // Siber'de tek dolu sütun da ilkidir). Satış Temsilcisi hiçbir durumda
+    // gönderilmez, sunucu müşteriden türetiyor.
+    const sentChargePeople = operationOfficers
+      .filter((officer): officer is UserOption => Boolean(officer?.id))
+      .map((officer) => ({ id: officer.id, type: 1 }));
+
+    // FİYATLANDIRAN (user_type 3). Boşsa gönderilmez; sunucu 1. operasyon
+    // yetkilisine düşer — Siber'de ikisi zaten kayıtların %73'ünde aynı kişi.
+    if (pricingUser?.id) sentChargePeople.push({ id: pricingUser.id, type: 3 });
+
+    sentChargePeople.forEach((person, i) => {
+      fd.append(`load_charge_person[${i}][user_id]`, String(person.id));
+      fd.append(`load_charge_person[${i}][user_type]`, String(person.type));
+    });
 
     emailTo.forEach((email) => fd.append("email_to[]", email));
     emailCc.forEach((email) => fd.append("email_cc[]", email));
@@ -1318,7 +1484,12 @@ export function QuotesPage() {
         activeDraftId.current = newDraftId();
       }
       setDrawerOpen(false);
-      load();
+      // KAYIT GÖRÜNÜR OLDUĞU YERE GİT. Liste oluşturma tarihine göre azalan
+      // sıralı, yani yeni kayıt 1. SAYFANIN başında; ama kullanıcı 2. sayfada
+      // ya da kaydın durumuyla eşleşmeyen bir sekmedeyse listeyi tazelemek
+      // yetmiyordu — kayıt "kaydedildi" diyor, ekranda görünmüyordu ve ancak
+      // F5'ten sonra (sekme/sayfa varsayılana döndüğü için) çıkıyordu.
+      showSavedRecord(form.status_type_id);
     } catch (err) {
       if (err instanceof ApiError && err.errors) {
         setErrors(err.errors);
@@ -1727,6 +1898,15 @@ export function QuotesPage() {
                 <FormField label="Departman" required error={errors.department_id?.[0]}>
                   <SelectInput value={form.department_id} onChange={(v) => setForm((f) => ({ ...f, department_id: v }))} options={opts(departments)} />
                 </FormField>
+
+                <FormField label="Teslim Şekli">
+                  {/* Teklifte toplanıp yüke TAŞINIYOR: yük açıldıktan sonra
+                      tekrar girilmesi gerekmesin diye (bkz. Load.DeliveryMethodId). */}
+                  <SelectInput value={form.delivery_method_id} onChange={(v) => setForm((f) => ({ ...f, delivery_method_id: v }))} options={deliveryMethodOpts} />
+                </FormField>
+                <FormField label="Döviz Türü">
+                  <SelectInput value={form.currency_id} onChange={(v) => setForm((f) => ({ ...f, currency_id: v }))} options={opts(currencies)} />
+                </FormField>
                 <FormField label="Yük Türü" required={isPositiveStatus} error={errors.load_transfer_type_id?.[0]}>
                   <SelectInput value={form.load_transfer_type_id} onChange={(v) => setForm((f) => ({ ...f, load_transfer_type_id: v }))} options={opts(loadTransferTypes)} />
                 </FormField>
@@ -1998,10 +2178,10 @@ export function QuotesPage() {
                                   <TextInput value={item.quantity} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, quantity: v } : x)))} type="number" error={!!errors[`load_financial_item.${i}.quantity`]} />
                                 </FormField>
                                 <FormField label="Birim Fiyat" required error={errors[`load_financial_item.${i}.net_price`]?.[0]}>
-                                  <TextInput value={item.net_price} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, net_price: v } : x)))} error={!!errors[`load_financial_item.${i}.net_price`]} />
+                                  <TextInput value={item.net_price} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, net_price: v, auto_from_item: null } : x)))} error={!!errors[`load_financial_item.${i}.net_price`]} />
                                 </FormField>
                                 <FormField label="Toplam Fiyat" required error={errors[`load_financial_item.${i}.total_price`]?.[0]}>
-                                  <TextInput value={item.total_price} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, total_price: v } : x)))} error={!!errors[`load_financial_item.${i}.total_price`]} />
+                                  <TextInput value={item.total_price} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, total_price: v, auto_from_item: null } : x)))} error={!!errors[`load_financial_item.${i}.total_price`]} />
                                 </FormField>
                                 <FormField label="Para Birimi" required error={errors[`load_financial_item.${i}.currency`]?.[0]}>
                                   <SelectInput value={item.currency} onChange={(v) => setFinancialItems((list) => list.map((x, xi) => (xi === i ? { ...x, currency: v } : x)))} options={opts(currencies)} />
@@ -2026,30 +2206,41 @@ export function QuotesPage() {
               <SectionTitle>Görevliler</SectionTitle>
               <div className="space-y-5 max-w-xl">
                 <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-900">
-                  <b>Operasyon Yetkilisi</b> müşteriye tanımlıysa değiştirilemez;
-                  tanımlı değilse elle seçebilirsiniz, boş bırakırsanız kaydı açan
-                  kullanıcı yazılır. <b>Satış Temsilcisi</b> müşteriye tanımlı
-                  temsilcidir.
+                  <b>Operasyon Yetkilisi</b> iki kişidir ve elle değiştirilebilir;
+                  müşteri seçilince cariye tanımlı yetkililerle dolar. İkisi de boş
+                  bırakılırsa kaydı açan kullanıcı yazılır. <b>Fiyatlandıran</b>
+                  1. yetkiliden dolar, gerekirse değiştirebilirsiniz.
+                  <b> Satış Temsilcisi</b> müşteriye tanımlı temsilcidir ve
+                  değiştirilemez.
                 </div>
 
-                {officerFromCustomer ? (
-                  <ReadOnlyPerson
-                    label="Operasyon Yetkilisi"
-                    person={operationOfficer}
-                    hint="Müşteriye tanımlı"
-                  />
-                ) : (
-                  <UserPicker
-                    label="Operasyon Yetkilisi"
-                    value={operationOfficer}
-                    onChange={setOperationOfficer}
-                  />
-                )}
+                <UserPicker
+                  label="Operasyon Yetkilisi 1"
+                  value={operationOfficers[0]}
+                  onChange={(v) => setOperationOfficerAt(0, v)}
+                />
+
+                <UserPicker
+                  label="Operasyon Yetkilisi 2"
+                  value={operationOfficers[1]}
+                  onChange={(v) => setOperationOfficerAt(1, v)}
+                />
+
+                {/* Siber: skn_rezervasyon.fiyatlandirankullaniciid — 19.561
+                    teklifin 7.952'sinde dolu, son 12 ayın %64'ünde. */}
+                <UserPicker
+                  label="Fiyatlandıran"
+                  value={pricingUser}
+                  onChange={changePricingUser}
+                />
 
                 <div>
                   <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
                     Satış Temsilcisi
                   </p>
+                  {/* TEK KİŞİ: Siber'in ikinci satış temsilcisi sütunu
+                      (satistemsilcisi2kod) 19.561 teklifin 540'ında dolu
+                      (%2,8) — fiilen kullanılmıyor, yazılmıyor da. */}
                   {salesReps.length === 0 ? (
                     <p className="text-xs text-gray-400 py-3">
                       {customer
@@ -2058,10 +2249,10 @@ export function QuotesPage() {
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {salesReps.map((rep, i) => (
+                      {salesReps.slice(0, 1).map((rep, i) => (
                         <ReadOnlyPerson
                           key={rep.id || i}
-                          label={`Satış Temsilcisi ${i + 1}`}
+                          label="Satış Temsilcisi"
                           person={rep}
                           hint="Müşteriye tanımlı"
                         />

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Services.Accounts;
 using OLS.Business.Services.Loads;
+using OLS.DataAccess.Common;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 
@@ -76,8 +77,8 @@ public sealed class InvoiceService : IInvoiceService
             // Türkçe noktasız I/ı normalizasyonu için bkz. QueryableExtensions.NormalizeTurkish.
             var pattern = $"%{QueryableExtensions.NormalizeTurkish(query.Search)}%";
             invoices = invoices.Where(i =>
-                (i.InvoiceId != null && EF.Functions.Like(i.InvoiceId.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern)) ||
-                EF.Functions.Like(i.TargetTitle.Replace("İ", "i").Replace("I", "i").Replace("ı", "i").ToLower(), pattern));
+                (i.InvoiceId != null && EF.Functions.Like(TurkishFold.Fold(i.InvoiceId), pattern)) ||
+                EF.Functions.Like(TurkishFold.Fold(i.TargetTitle), pattern));
         }
 
         if (query.BoxType is { } boxType)
