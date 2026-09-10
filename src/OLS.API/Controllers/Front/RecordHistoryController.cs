@@ -117,26 +117,24 @@ public sealed class RecordHistoryController : ApiControllerBase
     }
 
     /// <summary>
-    /// Cari geçmişi. Cari kayıtlarında şirket alanı yok; erişim, cari
-    /// listesindeki NESNE SEVİYESİ kuralla sınırlanır (süper admin tümünü,
-    /// diğerleri yalnızca kendisine atanmış carileri görür).
+    /// Cari geçmişi. Cari kayıtlarında şirket alanı yok; erişim
+    /// <c>account_management</c> okuma yetkisiyle sınırlanır.
+    ///
+    /// Eskiden burada da nesne seviyesi "yalnızca sana atanmış cariler" kuralı
+    /// vardı ve o kural canlıda TEK satırlık bir eşleme tablosuna dayandığı
+    /// için 48 kullanıcının 46'sında geçmiş sekmesi hep boş dönüyordu
+    /// (bkz. AccountController.Single).
     /// </summary>
     [HttpGet("account/{id:long}/history")]
     [RequiresPermission(PermissionAction.Read, "account_management")]
     public async Task<IActionResult> Account(long id, CancellationToken cancellationToken)
     {
-        if (_currentUser.Id is not { } userId)
-            return NotFoundError();
-
         var siberId = await _db.Accounts.AsNoTracking()
             .Where(a => a.Id == id)
             .Select(a => a.SiberId)
             .FirstOrDefaultAsync(cancellationToken);
 
         if (siberId is null)
-            return NotFoundError();
-
-        if (!await _accounts.IsVisibleToUserAsync(userId, id, cancellationToken))
             return NotFoundError();
 
         return Ok(await _history.GetAsync(AccountTable, siberId, cancellationToken),

@@ -23,6 +23,12 @@ public partial class Account
 
     public Guid? DistrictId { get; set; }
 
+    /// <summary>
+    /// FİRMA DURUMU — Siber'de <c>sbr_firma.firmadurumid</c>: CARİ FİRMALAR ya
+    /// da DİĞER FİRMALAR. Bkz. <see cref="AccountStatus"/>.
+    /// </summary>
+    public Guid? AccountStatusId { get; set; }
+
     public string? Address { get; set; }
 
     public string? Phone { get; set; }

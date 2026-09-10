@@ -389,16 +389,53 @@ public sealed class SiberExpeditionRepository : ISiberExpeditionRepository
             new { id = pozisyonId });
     }
 
+    /// <summary>
+    /// Sefer silme adımları. Sabit olarak dışarıda: sıra ve kapsam bir hataya
+    /// mal oldu (bkz. aşağıdaki not), regresyon testi metnin kendisini sınıyor.
+    /// </summary>
+    public const string DeletePozisyonSql = """
+        UPDATE skn_yuk
+           SET pozisyonid = NULL, pozisyonidstr = NULL, seferno = NULL
+         WHERE pozisyonid = @id;
+
+        DELETE FROM skn_yukaktarma      WHERE pozisyonid = @id;
+        DELETE FROM skn_pozisyonbilgi   WHERE pozisyonid = @id;
+        DELETE FROM skn_pozisyonkmbilgi WHERE pozisyonid = @id;
+        DELETE FROM skn_pozisyon        WHERE pozisyonid = @id;
+        """;
+
     public async Task DeletePozisyonAsync(
         string pozisyonId, CancellationToken cancellationToken = default)
     {
         using var connection = await _factory.CreateOpenAsync(cancellationToken);
 
-        // Önce sefere bağlı yük eşlemeleri, sonra pozisyonun kendisi.
-        await connection.ExecuteAsync("""
-            DELETE FROM skn_yukaktarma WHERE pozisyonid = @id;
-            DELETE FROM skn_pozisyon   WHERE pozisyonid = @id;
-            """, new { id = pozisyonId });
+        // SEFER SİLİNEMİYORDU — BULUNAN GERÇEK HATA.
+        //
+        // Yalnızca yük EŞLEMESİ (skn_yukaktarma) siliniyordu, oysa yükün
+        // KENDİSİ de sefere doğrudan bağlı: skn_yuk.pozisyonid yabancı
+        // anahtarlı (FK_skn_yuk_skn_pozisyon). Silme bu yüzden
+        // "The DELETE statement conflicted with the REFERENCE constraint"
+        // (SQL hata 547) ile düşüyor, kullanıcı da genel hata mesajı
+        // görüyordu.
+        //
+        // Canlıda pozisyona işaret eden satırı OLAN dört tablo var:
+        // skn_yukaktarma (10.571), skn_yuk (7.779), skn_pozisyonbilgi (4.435)
+        // ve skn_pozisyonkmbilgi (1.826). Diğer 42 yabancı anahtarın tamamı
+        // boş — o modüller kullanılmıyor.
+        //
+        // YÜK SİLİNMEZ, SEFERDEN KOPARILIR. Sefer silinince yükün de gitmesi
+        // veri kaybı olurdu; Siber'in kendi ekranı da yükü serbest bırakıyor.
+        // pozisyonidstr ve seferno, pozisyonid'nin metin kopyaları — biri
+        // kalırsa yük ekranda olmayan bir sefer numarasını göstermeye devam
+        // eder.
+        //
+        // skn_pozisyonbilgi ve skn_pozisyonkmbilgi seferin KENDİ alt kayıtları
+        // (bilgi kaydı pozisyon başına birebir), onlar seferle birlikte gider.
+        //
+        // SIRA ÖNEMLİ: yük koparma en başta olmalı — skn_yuk_seferbagla
+        // tetikleyicisi pozisyonid değişince seferin navlun özetini yeniden
+        // hesaplıyor ve bunu pozisyon hâlâ dururken yapması gerekiyor.
+        await connection.ExecuteAsync(DeletePozisyonSql, new { id = pozisyonId });
     }
 
     /// <summary>

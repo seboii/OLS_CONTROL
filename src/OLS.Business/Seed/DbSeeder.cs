@@ -335,6 +335,8 @@ public static class DbSeeder
             (StatusTypeCodes.Correction, "Düzeltme Talebi", "FCF55F7C-876A-482B-B4A7-BADCA250BB91"),
             (StatusTypeCodes.Offer, "Teklif", "EC922C9E-C2CF-4716-A198-F716FDA50358"),
             (StatusTypeCodes.Approved, "Olumlu", "F377242D-0121-4090-BDD2-FF420F21235A"),
+            // Siber'in altıncı durumu; tohumda eksikti (bkz. StatusTypeCodes.FreightGiven).
+            (StatusTypeCodes.FreightGiven, "Navlun Verildi", "81769577-E278-4016-B923-2C876D446833"),
         ];
 
         var existingCodes = await db.StatusTypes
@@ -718,4 +720,13 @@ public static class StatusTypeCodes
     public const string Correction = "CORRECTION";
     public const string Offer = "OFFER";
     public const string Approved = "APPROVED";
+
+    /// <summary>
+    /// NAVLUN VERİLDİ — Siber'in ALTINCI teklif durumu.
+    ///
+    /// Tohumda yoktu ve canlıda 19.686 teklifin <b>5.370'i</b> bu durumda:
+    /// senkron durumu yerelde çözemiyor, teklif ekranda DURUMSUZ görünüyordu
+    /// (5.210 kayıt boş, 160 kayıt eski durumuyla donmuş).
+    /// </summary>
+    public const string FreightGiven = "FREIGHT_GIVEN";
 }

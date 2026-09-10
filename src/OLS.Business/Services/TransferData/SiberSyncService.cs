@@ -347,6 +347,64 @@ public sealed class SiberSyncService : ISiberSyncService
 
 
     /// <summary>
+    /// SİBER'DEN SİLİNMİŞ ALT SATIRLARI KALDIRIR (koli, mali kalem, teklif içeriği).
+    ///
+    /// Üst kayıtlarda (yük/teklif/sefer/cari) kural "sil değil, işaretle"dir:
+    /// bağlı finans kaydı, evrak arşivi ve denetim izi korunmalı. ALT satırda
+    /// böyle bir bağ yok ve tersi doğru: Siber'de artık olmayan bir koli ya da
+    /// mali kalem ekranda durmaya devam ederse hem satır listesi hem TOPLAMLAR
+    /// yanlış çıkıyor. Ölçüm (2026-09-09): 121 yük mali kalemi, 23 yük kolisi,
+    /// 3 teklif içeriği ve 5 teklif mali kalemi bu durumdaydı; yalnızca mali
+    /// kalemlerdeki fark 744.862 TL idi.
+    ///
+    /// SİBER KİMLİĞİ OLMAYAN SATIRA DOKUNULMAZ: uygulamadan yeni açılmış ama
+    /// henüz Siber'e aktarılmamış satır "silinmiş" sayılamaz.
+    ///
+    /// GÜVENLİK EŞİĞİ üst kayıtlardakiyle aynı: Siber'den gelen küme yereldekinin
+    /// yarısından azsa hiçbir şey silinmez. Yarım dönen tek bir çekim, aksi hâlde
+    /// tüm alt tabloyu boşaltırdı.
+    /// </summary>
+    private async Task<string?> RemoveMissingChildRowsAsync<TEntity>(
+        string label,
+        IQueryable<TEntity> localRows,
+        Func<TEntity, string?> keySelector,
+        IReadOnlyCollection<string> siberKeys,
+        CancellationToken cancellationToken)
+        where TEntity : class
+    {
+        var local = await localRows.ToListAsync(cancellationToken);
+
+        if (local.Count == 0)
+            return null;
+
+        if (ShouldSkipDeletionCheck(siberKeys.Count, local.Count))
+        {
+            _logger.LogWarning(
+                "{Label}: Siber'den {Fetched} satır geldi ama yerelde {Local} var — " +
+                "silme kontrolü GÜVENLİK EŞİĞİ nedeniyle atlandı.",
+                label, siberKeys.Count, local.Count);
+
+            return $"{label}: silme kontrolü atlandı (Siber'den beklenenden az satır geldi).";
+        }
+
+        var known = new HashSet<string>(siberKeys, StringComparer.OrdinalIgnoreCase);
+
+        var stale = local
+            .Where(row => keySelector(row) is { } key
+                          && !string.IsNullOrWhiteSpace(key)
+                          && !known.Contains(key))
+            .ToList();
+
+        if (stale.Count == 0)
+            return null;
+
+        _db.Set<TEntity>().RemoveRange(stale);
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return $"{stale.Count} satır Siber'de bulunamadığı için kaldırıldı.";
+    }
+
+    /// <summary>
     /// Siber'den SİLİNMİŞ kayıtları işaretler.
     ///
     /// Uygulama dışında (doğrudan Siber ekranından) silinen bir yük/teklif/sefer,
@@ -934,9 +992,20 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // SİBER'DE SİLİNEN SATIR YERELDE DE KALKAR — aksi hâlde ekranda
+        // olmayan bir satır ve yanlış toplam görünüyordu.
+        var deletionNote = await RemoveMissingChildRowsAsync(
+            "Teklif içeriği",
+            _db.LoadContents.Where(c => c.SiberId != null),
+            c => c.SiberId,
+            rows.Select(r => r.Rezyukkoliid).Where(id => id is not null).Select(id => id!).ToList(),
+            cancellationToken);
+
         return new SiberImportSummary(created, updated, errors) with
         {
             Errors = skipped > 0 ? [.. errors, $"{skipped} satır atlandı (yerel teklif bulunamadı)."] : errors,
+            Notes = deletionNote is null ? [] : [deletionNote],
         };
     }
 
@@ -1044,9 +1113,20 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // SİBER'DE SİLİNEN SATIR YERELDE DE KALKAR — aksi hâlde ekranda
+        // olmayan bir satır ve yanlış toplam görünüyordu.
+        var deletionNote = await RemoveMissingChildRowsAsync(
+            "Teklif mali kalemi",
+            _db.LoadFinancialItems.Where(f => f.SiberId != null),
+            f => f.SiberId,
+            rows.Select(r => r.Rezervasyontarifeid).Where(id => id is not null).Select(id => id!).ToList(),
+            cancellationToken);
+
         return new SiberImportSummary(created, updated, errors) with
         {
             Errors = skipped > 0 ? [.. errors, $"{skipped} satır atlandı (yerel teklif bulunamadı)."] : errors,
+            Notes = deletionNote is null ? [] : [deletionNote],
         };
     }
 
@@ -1293,8 +1373,24 @@ public sealed class SiberSyncService : ISiberSyncService
                     ? (int)fkId : transfer.PricingUserId;
                 transfer.UsercodeWithNotification = row.Bildirimyapankullanicikod is { } bk && userBySiberCode.TryGetValue(bk, out var bkId)
                     ? (int)bkId : transfer.UsercodeWithNotification;
-                transfer.SalesRepCode = row.Satistemsilcisikod is { } sk && userBySiberCode.TryGetValue(sk, out var skId)
-                    ? (int)skId : transfer.SalesRepCode;
+                // SATIŞ TEMSİLCİSİ SİBER'İ BİREBİR YANSITIR.
+                //
+                // Siber'de alan BOŞSA yerel değer de temizlenir. Diğer alanlarda
+                // "boş gelirse mevcut değeri koru" kuralı var ama burada tersi
+                // doğru: uygulama satış temsilcisini Siber'e ISNULL ile yazıyor,
+                // yani gerçekten seçilmiş bir temsilci Siber'de MUTLAKA bulunur.
+                // Siber'de boş olması, o değerin yerelde uydurulduğu anlamına
+                // geliyor — eski kod satış temsilcisi bilinmiyorsa kaydeden
+                // kullanıcıyı yazıyordu ve 396 yükte ekran, Siber'de olmayan bir
+                // kişiyi gösteriyordu.
+                //
+                // Kod dolu ama yerelde o kullanıcı yoksa mevcut değere DOKUNULMAZ:
+                // orada daha iyisini yapamayız.
+                transfer.SalesRepCode = string.IsNullOrWhiteSpace(row.Satistemsilcisikod)
+                    ? null
+                    : userBySiberCode.TryGetValue(row.Satistemsilcisikod, out var skId)
+                        ? (int)skId
+                        : transfer.SalesRepCode;
                 transfer.DeliveryMethodId = row.Teslimsekil is { } ts && deliveryMethodByEdikod.TryGetValue(ts, out var tsId)
                     ? (int)tsId : transfer.DeliveryMethodId;
                 transfer.CurrencyId = row.Dovizkod is { } dk && currencyByCode.TryGetValue(dk, out var dkId)
@@ -1461,9 +1557,20 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // SİBER'DE SİLİNEN SATIR YERELDE DE KALKAR — aksi hâlde ekranda
+        // olmayan bir satır ve yanlış toplam görünüyordu.
+        var deletionNote = await RemoveMissingChildRowsAsync(
+            "Yük koli",
+            _db.LoadTransferPackages.Where(p => p.Yukkoliid != null),
+            p => p.Yukkoliid,
+            rows.Select(r => r.Yukkoliid).Where(id => id is not null).Select(id => id!).ToList(),
+            cancellationToken);
+
         return new SiberImportSummary(created, updated, errors) with
         {
             Errors = skipped > 0 ? [.. errors, $"{skipped} satır atlandı (yerel yük bulunamadı)."] : errors,
+            Notes = deletionNote is null ? [] : [deletionNote],
         };
     }
 
@@ -1569,9 +1676,20 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // SİBER'DE SİLİNEN SATIR YERELDE DE KALKAR — aksi hâlde ekranda
+        // olmayan bir satır ve yanlış toplam görünüyordu.
+        var deletionNote = await RemoveMissingChildRowsAsync(
+            "Gerçek koli",
+            _db.LoadTransferActualPackages.Where(a => a.Yukkolidepoid != null),
+            a => a.Yukkolidepoid,
+            rows.Select(r => r.Yukkolidepoid).Where(id => id is not null).ToList(),
+            cancellationToken);
+
         return new SiberImportSummary(created, updated, errors) with
         {
             Errors = skipped > 0 ? [.. errors, $"{skipped} satır atlandı (yerel yük bulunamadı)."] : errors,
+            Notes = deletionNote is null ? [] : [deletionNote],
         };
     }
 
@@ -1878,9 +1996,20 @@ public sealed class SiberSyncService : ISiberSyncService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+
+        // SİBER'DE SİLİNEN KALEM YERELDE DE KALKAR. Ölçüm (2026-09-09): 121
+        // satır Siber'de yoktu ve yükün finans toplamını 744.862 TL şişiriyordu.
+        var deletionNote = await RemoveMissingChildRowsAsync(
+            "Yük mali kalemi",
+            _db.LoadTransferInvoiceItems.Where(i => i.Modulkalemid != null),
+            i => i.Modulkalemid,
+            rows.Select(r => r.Modulkalemid).Where(id => id is not null).ToList(),
+            cancellationToken);
+
         return new SiberImportSummary(created, updated, errors) with
         {
             Errors = skipped > 0 ? [.. errors, $"{skipped} satır atlandı (yerel yük bulunamadı)."] : errors,
+            Notes = deletionNote is null ? [] : [deletionNote],
         };
     }
 
@@ -1948,7 +2077,22 @@ public sealed class SiberSyncService : ISiberSyncService
                        TRY_CAST(p.durumid AS INT) AS Durumid, LTRIM(RTRIM(ISNULL(p.hafta,''))) AS Hafta,
                        CAST(p.departmanid AS VARCHAR(64)) AS Departmanid, p.kayitgiristarih AS Kayitgiristarih,
                        CAST(p.seferturid AS VARCHAR(64)) AS Seferturid, p.araccikistarih AS Araccikistarih,
-                       s.cikistarih AS Cikistarih, s.donustarih AS Donustarih,
+                       -- ÇIKIŞ/DÖNÜŞ TARİHİ ÖNCE POZİSYONDAN.
+                       --
+                       -- BULUNAN GERÇEK HATA: bu iki tarih yalnızca ÜST SEFERDEN
+                       -- (skn_sefer) okunuyordu. Oysa uygulama sefer GÜNCELLEMESİNDE
+                       -- yalnızca skn_pozisyon'a yazıyor; üst sefer eski değeriyle
+                       -- kalıyor ve bir sonraki senkron kullanıcının girdiği tarihi
+                       -- ekrandan siliyordu. Üstelik bir sefere birden çok pozisyon
+                       -- bağlanabiliyor (canlıda 932 seferde 2, 222'sinde 3, 7'sinde 4)
+                       -- ve o durumda üst seferin tek tarihi hepsine yayılıyordu.
+                       --
+                       -- Ölçüm (2026-09-09): ikisi de dolu olan 3.233 pozisyonun
+                       -- 848'inde tarihler FARKLI. Pozisyonun kendi değeri boşsa
+                       -- üst sefer yedek olarak kullanılır (367 kayıtta yalnızca
+                       -- orada dolu).
+                       ISNULL(p.cikistarih, s.cikistarih) AS Cikistarih,
+                       ISNULL(p.donustarih, s.donustarih) AS Donustarih,
                        CAST(p.cekiciid AS VARCHAR(64)) AS Cekiciid,
                        CAST(p.surucuid AS VARCHAR(64)) AS Surucuid,
                        CAST(p.kiralananfirmaid AS VARCHAR(64)) AS Kiralananfirmaid,
@@ -2244,6 +2388,22 @@ public sealed class SiberSyncService : ISiberSyncService
         public string? Vergino { get; set; }
         public bool? Aktif { get; set; }
         public string? Muhasebekod { get; set; }
+
+        /// <summary>
+        /// ÜLKE ve ŞEHİR — Siber'in kimlikleri (<c>sbr_ulke.ulkeid</c> /
+        /// <c>sbr_sehir.sehirid</c>). Yerel kimlikle AYNI DEĞİL, çözüm
+        /// <c>siber_id</c> üzerinden yapılır (ada göre eşleştirmek aynı adı
+        /// taşıyan farklı ülke/şehirleri birbirine karıştırırdı).
+        /// </summary>
+        public string? Ulkeid { get; set; }
+        public string? Sehirid { get; set; }
+        public string? Ilceid { get; set; }
+
+        /// <summary>
+        /// FİRMA DURUMU — <c>sbr_firmadurum.firmadurumid</c>: CARİ FİRMALAR ya
+        /// da DİĞER FİRMALAR.
+        /// </summary>
+        public string? Firmadurumid { get; set; }
     }
 
     /// <summary>
@@ -2263,7 +2423,10 @@ public sealed class SiberSyncService : ISiberSyncService
                 """
                 SELECT CAST(f.firmaid AS VARCHAR(64)) AS Firmaid, f.ad AS Ad, f.adres1 AS Adres1,
                        f.telefon1 AS Telefon1, f.email AS Email, f.vergidaire AS Vergidaire,
-                       f.vergino AS Vergino, TRY_CAST(f.aktif AS BIT) AS Aktif, m.muhasebekod AS Muhasebekod
+                       f.vergino AS Vergino, TRY_CAST(f.aktif AS BIT) AS Aktif, m.muhasebekod AS Muhasebekod,
+                       CAST(f.ulkeid AS VARCHAR(64)) AS Ulkeid, CAST(f.sehirid AS VARCHAR(64)) AS Sehirid,
+                       CAST(f.ilceid AS VARCHAR(64)) AS Ilceid,
+                       CAST(f.firmadurumid AS VARCHAR(64)) AS Firmadurumid
                 FROM sbr_firma f
                 LEFT JOIN sfy_muhasebeentegrekodu m ON m.entegread = f.ad
                 """,
@@ -2271,6 +2434,61 @@ public sealed class SiberSyncService : ISiberSyncService
 
         var existing = await ExistingByKeyAsync(
             _db.Accounts.Where(a => a.SiberId != null).OrderBy(a => a.Id), a => a.SiberId, cancellationToken);
+
+        // ÇÖZÜM SİBER KİMLİĞİNE GÖRE. Siber'in ulkeid/sehirid değerleri yerel
+        // countries.id / cities.id ile aynı OLMAK ZORUNDA DEĞİL (ülkelerin
+        // 170'inde tesadüfen aynı, kalanında farklı) — ham yazmak öksüz
+        // referans üretirdi.
+        // Ülke/şehirde bugün mükerrer kimlik YOK ama aynı korumadan geçiyorlar:
+        // ileride bir kopya oluşursa senkronun tamamı düşmesin.
+        var countryBySiberId = await FirstByKeyAsync(
+            _db.Countries.Where(c => c.SiberId != null).OrderBy(c => c.Id),
+            c => c.SiberId!, c => c.Id, cancellationToken);
+
+        var cityBySiberId = await FirstByKeyAsync(
+            _db.Cities.Where(c => c.SiberId != null).OrderBy(c => c.Id),
+            c => c.SiberId!, c => c.Id, cancellationToken);
+
+        // EKSİK ŞEHİRLERİ KENDİ KENDİNE TAMAMLA.
+        //
+        // Yerel şehir listesi bilinçli olarak "gerçekten kullanılan" alt küme
+        // (sbr_sehir 118.393 satırlık bir mikro-yerleşim tablosu, açılır
+        // listeye sığmaz) ve sürekli senkron turunun DIŞINDA. Ama carilerin
+        // şehri o alt kümenin dışında kalıyordu: 6.100 carinin şehri 1.030
+        // farklı şehre işaret ediyor, yerelde bunların yalnızca 239'u vardı.
+        // Sonuç, müşteri ekranında boş Şehir alanıydı.
+        //
+        // Tam listeyi almak yerine YALNIZCA carilerin kullandığı, yerelde
+        // olmayan şehirler çekiliyor. İlk turdan sonra bu küme boşalıyor,
+        // yani ek sorgu maliyeti bir defalık.
+        var missingCityIds = rows
+            .Select(r => r.Sehirid)
+            .Where(id => !string.IsNullOrWhiteSpace(id) && !cityBySiberId.ContainsKey(id!))
+            .Select(id => id!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var addedCities = 0;
+
+        if (missingCityIds.Count > 0)
+            addedCities = await AddMissingCitiesAsync(
+                connection, missingCityIds, cityBySiberId, cancellationToken);
+
+        // İLÇE — Siber'de 1.052 caride dolu, yerelde 1 tanesinde. Yerel ilçe
+        // tablosu 1.058 satırla ZATEN TAM (carilerin kullandığı 147 ilçenin
+        // 143'ü var), yani burada eksik olan tek şey okumaktı.
+        // MÜKERRER SİBER KİMLİĞİ VAR: yerel ilçe tablosunda aynı siber_id'yi
+        // taşıyan 26 grup bulunuyor (canlı ölçüm). Doğrudan ToDictionary
+        // kurmak "same key has already been added" ile senkronu düşürüyor —
+        // mali kalemlerde yaşanan tuzağın aynısı. İlk satır alınır.
+        var districtBySiberId = await FirstByKeyAsync(
+            _db.Districts.Where(d => d.SiberId != null).OrderBy(d => d.Id),
+            d => d.SiberId!, d => d.Id, cancellationToken);
+
+        // FİRMA DURUMU (CARİ / DİĞER FİRMALAR) — seçenekler Siber'den aynalanır.
+        var statusBySiberId = await SyncAccountStatusesAsync(connection, cancellationToken);
+
+        var unresolvedCities = 0;
 
         var created = 0;
         var updated = 0;
@@ -2315,6 +2533,36 @@ public sealed class SiberSyncService : ISiberSyncService
                 account.Email = row.Email ?? account.Email;
                 account.TaxOffice = row.Vergidaire ?? account.TaxOffice;
                 account.TaxNumber = row.Vergino ?? account.TaxNumber;
+
+                // ÜLKE ve ŞEHİR — BULUNAN GERÇEK BOŞLUK: senkron bu iki alanı
+                // HİÇ okumuyordu. Müşteri ekranındaki Ülke/Şehir alanları bu
+                // yüzden ilk aktarımda ne kaldıysa onu gösteriyor, Siber'de
+                // dolu olan değer hiçbir turda gelmiyordu. Canlı ölçüm
+                // (2026-09-09): Siber'de 7.462 ülke / 6.100 şehir dolu,
+                // yerelde 7.250 / 2.221.
+                //
+                // BOŞ GELEN DEĞER MEVCUDU SİLMEZ: Siber'de alan boşsa yerelde
+                // elle girilmiş değer korunur (yükteki ISNULL kuralının aynısı).
+                if (row.Ulkeid is { } ulkeId && countryBySiberId.TryGetValue(ulkeId, out var countryId))
+                    account.CountryId = countryId;
+
+                if (row.Ilceid is { } ilceId && districtBySiberId.TryGetValue(ilceId, out var districtId))
+                    account.DistrictId = districtId;
+
+                if (row.Firmadurumid is { } durumId && statusBySiberId.TryGetValue(durumId, out var statusId))
+                    account.AccountStatusId = statusId;
+
+                if (row.Sehirid is { } sehirId)
+                {
+                    if (cityBySiberId.TryGetValue(sehirId, out var cityId))
+                        account.CityId = cityId;
+                    else
+                        // Şehir listesi "gerçekten kullanılan" alt kümedir; bu
+                        // şehir henüz alınmamışsa sayılır ve özete yazılır —
+                        // sessizce kaybolmasın.
+                        unresolvedCities++;
+                }
+
                 if (row.Muhasebekod is not null) account.AccountingCode = row.Muhasebekod;
                 account.IsActive = row.Aktif ?? true;
                 account.UpdatedAt = DateTime.Now;
@@ -2348,6 +2596,10 @@ public sealed class SiberSyncService : ISiberSyncService
 
         await _db.SaveChangesAsync(cancellationToken);
 
+        // TEKLİF/YÜK'ÜN İŞARET ETTİĞİ SİLİNMİŞ FİRMALARI GERİ GETİR — böylece
+        // o kayıtların gönderici/alıcı alanı ekranda boş kalmaz.
+        var restoredAccounts = await RestoreDeletedReferencedAccountsAsync(connection, cancellationToken);
+
         // CARİLERDE DE SİLME TESPİTİ. Yük/teklif/seferde vardı, caride yoktu:
         // Siber ekranından silinen firma yerelde canlı görünmeye devam ediyor ve
         // teklifsiz yük açarken FK hatası veriyordu (canlıda üç firma).
@@ -2374,9 +2626,287 @@ public sealed class SiberSyncService : ISiberSyncService
                 .. unclassified > 0
                     ? new[] { $"{unclassified} satırın muhasebe kodundan cari tipi çıkarılamadı (alanlar güncellendi, tip eşlemesine dokunulmadı)." }
                     : [],
+                .. addedCities > 0
+                    ? new[] { $"{addedCities} şehir carilerden türetilerek listeye eklendi." }
+                    : [],
+                .. restoredAccounts > 0
+                    ? new[] { $"{restoredAccounts} silinmiş firma, teklif/yük kayıtlarında adıyla görünsün diye geri getirildi." }
+                    : [],
+                .. unresolvedCities > 0
+                    ? new[] { $"{unresolvedCities} carinin şehri çözülemedi (Siber'de şehrin ülkesi yerel listede yok)." }
+                    : [],
                 .. deletionNote is null ? Array.Empty<string>() : [deletionNote],
             ],
         };
+    }
+
+    /// <summary>
+    /// Carilerin işaret ettiği ama yerel listede olmayan şehirleri
+    /// <c>sbr_sehir</c>'den alıp ekler ve sözlüğü günceller.
+    ///
+    /// ADA GÖRE DEĞİL, SİBER KİMLİĞİNE GÖRE eklenir: aynı ad birden çok ülkede
+    /// geçiyor (iki MINSK, iki TRABZON, iki BAKÜ) ve ada göre eşleştiren bir
+    /// deneme daha önce 12 gerçek şehri listeden düşürmüştü.
+    ///
+    /// Ülkesi yerel listede olmayan şehir EKLENMEZ: <c>cities.country_id</c>
+    /// NOT NULL ve karşılıksız bir ülke referansı öksüz satır üretirdi.
+    /// </summary>
+    private async Task<int> AddMissingCitiesAsync(
+        IDbConnection connection,
+        IReadOnlyList<string> siberIds,
+        Dictionary<string, Guid> cityBySiberId,
+        CancellationToken cancellationToken)
+    {
+        var countryBySiberId = await FirstByKeyAsync(
+            _db.Countries.Where(c => c.SiberId != null).OrderBy(c => c.Id),
+            c => c.SiberId!, c => c.Id, cancellationToken);
+
+        // PARÇALI SORGU: Dapper `IN @ids`'i parametre parametre açıyor ve SQL
+        // Server'ın istek başına 2.100 parametre sınırı var. Bugün küme 791
+        // ama cari sayısı arttıkça sınıra dayanabilir.
+        const int chunkSize = 500;
+        var fetched = new List<SehirRow>();
+
+        for (var offset = 0; offset < siberIds.Count; offset += chunkSize)
+        {
+            var chunk = siberIds.Skip(offset).Take(chunkSize).ToList();
+
+            fetched.AddRange(await connection.QueryAsync<SehirRow>(
+                new CommandDefinition(
+                    @"SELECT CAST(s.sehirid AS VARCHAR(64)) AS Sehirid, s.ad AS Ad,
+                             CAST(s.ulkeid AS VARCHAR(64)) AS Ulkeid
+                      FROM sbr_sehir s
+                      WHERE s.sehirid IN @ids",
+                    new { ids = chunk },
+                    cancellationToken: cancellationToken)));
+        }
+
+        var added = 0;
+
+        foreach (var row in fetched)
+        {
+            if (string.IsNullOrWhiteSpace(row.Ad) || row.Ulkeid is null
+                || !countryBySiberId.TryGetValue(row.Ulkeid, out var countryId)
+                || cityBySiberId.ContainsKey(row.Sehirid))
+                continue;
+
+            var city = new City
+            {
+                Id = Guid.NewGuid(),
+                Name = row.Ad,
+                CountryId = countryId.ToString(),
+                SiberId = row.Sehirid,
+                CreatedAt = DateTime.Now,
+                UpdatedAt = DateTime.Now,
+            };
+
+            _db.Cities.Add(city);
+            cityBySiberId[row.Sehirid] = city.Id;
+            added++;
+        }
+
+        if (added > 0)
+            await _db.SaveChangesAsync(cancellationToken);
+
+        return added;
+    }
+
+    /// <summary>
+    /// Siber kimliğine göre sözlük kurar; aynı kimlikten birden çok yerel
+    /// satır varsa İLKİNİ alır.
+    ///
+    /// Doğrudan <c>ToDictionaryAsync</c> kullanmak bu projede tekrar eden bir
+    /// tuzak: yerel tanım tablolarında mükerrer <c>siber_id</c> grupları var
+    /// (ilçelerde 26, mali kalemlerde 12) ve tek bir kopya senkron adımının
+    /// TAMAMINI düşürüyor.
+    /// </summary>
+    private static async Task<Dictionary<string, TValue>> FirstByKeyAsync<TEntity, TValue>(
+        IQueryable<TEntity> query,
+        Func<TEntity, string> key,
+        Func<TEntity, TValue> value,
+        CancellationToken cancellationToken)
+        where TEntity : class
+    {
+        var rows = await query.AsNoTracking().ToListAsync(cancellationToken);
+        var map = new Dictionary<string, TValue>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var row in rows)
+            map.TryAdd(key(row), value(row));
+
+        return map;
+    }
+
+    /// <summary>
+    /// TEKLİF/YÜK'ÜN İŞARET ETTİĞİ AMA SİBER'DE ARTIK OLMAYAN FİRMALARI GERİ GETİRİR.
+    ///
+    /// <c>skn_rezervasyon</c> ve <c>skn_yuk</c>, <c>sbr_firma</c>'dan SİLİNMİŞ
+    /// firmalara işaret etmeye devam ediyor (Siber'in kendi verisinde yabancı
+    /// anahtar yok). Ölçüm (2026-09-09): 107 böyle firma var ve 389 teklifin
+    /// gönderici/alıcı alanı bu yüzden ekranda BOŞ görünüyordu — kullanıcı
+    /// kaydın kime ait olduğunu göremiyordu.
+    ///
+    /// Firmanın adı değişiklik günlüğünden kurtarılıyor (<c>sbr_log</c>,
+    /// 106/107 kayıtta bulunuyor) ve cari SİLİNMİŞ DAMGASIYLA açılıyor:
+    /// listede görünmez, seçicilerde çıkmaz, ama teklif/yük detayında adıyla
+    /// görünür. Silen kullanıcı ve silme anı da günlükten alınıyor.
+    ///
+    /// Bu tarihsel bir onarımdır: bundan sonra Siber'de silinen bir firma
+    /// zaten yerelde mevcut olur ve <c>MarkMissingAsDeletedAsync</c> damgalar.
+    /// Adım yine de her turda çalışıyor — ilk turdan sonra hiçbir şey bulmuyor
+    /// ve tek bir sorgu maliyeti kalıyor.
+    /// </summary>
+    private async Task<int> RestoreDeletedReferencedAccountsAsync(
+        IDbConnection connection, CancellationToken cancellationToken)
+    {
+        var rows = (await connection.QueryAsync<SilinenFirmaRow>(
+            new CommandDefinition(
+                @"WITH ref AS (
+                      SELECT DISTINCT gondericiid AS fid FROM skn_rezervasyon WHERE gondericiid IS NOT NULL
+                      UNION SELECT DISTINCT aliciid FROM skn_rezervasyon WHERE aliciid IS NOT NULL
+                      UNION SELECT DISTINCT musteriid FROM skn_rezervasyon WHERE musteriid IS NOT NULL
+                      UNION SELECT DISTINCT navlunfirmaid FROM skn_rezervasyon WHERE navlunfirmaid IS NOT NULL
+                      UNION SELECT DISTINCT firmaid FROM skn_yuk WHERE firmaid IS NOT NULL
+                      UNION SELECT DISTINCT gondericiid FROM skn_yuk WHERE gondericiid IS NOT NULL
+                      UNION SELECT DISTINCT aliciid FROM skn_yuk WHERE aliciid IS NOT NULL
+                  )
+                  SELECT CAST(r.fid AS VARCHAR(64)) AS Firmaid,
+                         (SELECT TOP 1 LTRIM(RTRIM(l.findfieldvalue)) FROM sbr_log l
+                          WHERE l.tablename = 'sbr_firma' AND l.tablerecordid = r.fid
+                            AND LTRIM(RTRIM(ISNULL(l.findfieldvalue, ''))) <> ''
+                          ORDER BY l.tarih DESC) AS Ad,
+                         (SELECT TOP 1 LTRIM(RTRIM(l.kullanici)) FROM sbr_log l
+                          WHERE l.tablename = 'sbr_firma' AND l.tablerecordid = r.fid AND l.yapilanislem = 3
+                          ORDER BY l.tarih DESC) AS Silen,
+                         (SELECT TOP 1 l.tarih FROM sbr_log l
+                          WHERE l.tablename = 'sbr_firma' AND l.tablerecordid = r.fid AND l.yapilanislem = 3
+                          ORDER BY l.tarih DESC) AS SilmeTarihi
+                  FROM ref r
+                  WHERE NOT EXISTS (SELECT 1 FROM sbr_firma f WHERE f.firmaid = r.fid)",
+                cancellationToken: cancellationToken))).ToList();
+
+        if (rows.Count == 0)
+            return 0;
+
+        var known = await _db.Accounts.AsNoTracking()
+            .Where(a => a.SiberId != null)
+            .Select(a => a.SiberId!)
+            .ToListAsync(cancellationToken);
+
+        var knownSet = new HashSet<string>(known, StringComparer.OrdinalIgnoreCase);
+        var userCodes = await SiberUserCodeMapAsync(cancellationToken);
+        var now = DateTime.Now;
+        var restored = 0;
+
+        foreach (var row in rows)
+        {
+            // ADI BİLİNMEYEN FİRMA AÇILMAZ: adsız bir cari ekranda boş
+            // görünmeye devam eder, üstelik listeye çöp satır katardı.
+            if (string.IsNullOrWhiteSpace(row.Ad) || knownSet.Contains(row.Firmaid))
+                continue;
+
+            var account = new Account
+            {
+                Name = row.Ad,
+                SiberId = row.Firmaid,
+                Discount = 0,
+                IsActive = false,
+                // SİLİNMİŞ DAMGASI: listede ve seçicilerde görünmez, yalnızca
+                // ona işaret eden teklif/yük detayında adıyla çıkar.
+                SiberDeletedAt = now,
+                SiberDeletedBy = row.Silen,
+                SiberDeletedByUserId = row.Silen is { } code && userCodes.TryGetValue(code, out var uid)
+                    ? (int)uid
+                    : null,
+                SiberDeletedOn = row.SilmeTarihi,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+
+            _db.Accounts.Add(account);
+            knownSet.Add(row.Firmaid);
+            restored++;
+        }
+
+        if (restored > 0)
+            await _db.SaveChangesAsync(cancellationToken);
+
+        return restored;
+    }
+
+    private sealed class SilinenFirmaRow
+    {
+        public string Firmaid { get; set; } = string.Empty;
+        public string? Ad { get; set; }
+        public string? Silen { get; set; }
+        public DateTime? SilmeTarihi { get; set; }
+    }
+
+    /// <summary>
+    /// FİRMA DURUMU LİSTESİNİ SİBER'DEN AYNALAR (<c>sbr_firmadurum</c>).
+    ///
+    /// Canlıda tam olarak İKİ satır var — CARİ FİRMALAR ve DİĞER FİRMALAR — ve
+    /// ayrım fiilen kullanılıyor: 7.462 firmanın 4.250'si cari, 3.212'si diğer.
+    /// Seçenekler yerelde tohumlanmıyor, Siber'den geliyor: karşılığı olmayan
+    /// bir seçenek kaydetme anında sessizce çöp veri üretirdi.
+    /// </summary>
+    private async Task<Dictionary<string, Guid>> SyncAccountStatusesAsync(
+        IDbConnection connection, CancellationToken cancellationToken)
+    {
+        var rows = (await connection.QueryAsync<FirmaDurumRow>(
+            new CommandDefinition(
+                @"SELECT CAST(firmadurumid AS VARCHAR(64)) AS Firmadurumid, ad AS Ad
+                  FROM sbr_firmadurum",
+                cancellationToken: cancellationToken))).ToList();
+
+        var existing = await _db.AccountStatuses.ToListAsync(cancellationToken);
+        var bySiberId = new Dictionary<string, AccountStatus>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var status in existing.Where(s => s.SiberId is not null))
+            bySiberId.TryAdd(status.SiberId!, status);
+
+        var now = DateTime.Now;
+
+        foreach (var row in rows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Ad))
+                continue;
+
+            if (bySiberId.TryGetValue(row.Firmadurumid, out var status))
+            {
+                status.Name = row.Ad;
+                status.UpdatedAt = now;
+                continue;
+            }
+
+            var fresh = new AccountStatus
+            {
+                Id = Guid.NewGuid(),
+                Name = row.Ad,
+                SiberId = row.Firmadurumid,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+
+            _db.AccountStatuses.Add(fresh);
+            bySiberId[row.Firmadurumid] = fresh;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+
+        return bySiberId.ToDictionary(p => p.Key, p => p.Value.Id, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private sealed class FirmaDurumRow
+    {
+        public string Firmadurumid { get; set; } = string.Empty;
+        public string? Ad { get; set; }
+    }
+
+    private sealed class SehirRow
+    {
+        public string Sehirid { get; set; } = string.Empty;
+        public string? Ad { get; set; }
+        public string? Ulkeid { get; set; }
     }
 
     private sealed class AracRow

@@ -366,8 +366,14 @@ internal sealed class RecordingSiberLoadRepository : ISiberLoadRepository
         throw new NotSupportedException();
     public Task<Guid> GenerateModulKalemIdAsync(CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
+    /// <summary>
+    /// Siber'de modül kaydı YOK. Gerçek bir durum: kalem satırı ancak modül
+    /// kaydı varsa Siber'e açılabiliyor, yoksa satır yerelde kalıyor. Bu
+    /// yüzden fırlatmak yerine null dönüyor — testlerin konusu kalem yazımı
+    /// değil, yükün kendi alanları.
+    /// </summary>
     public Task<SiberModulKayit?> FindModulKayitAsync(string loadNumberWorkType, CancellationToken cancellationToken = default) =>
-        throw new NotSupportedException();
+        Task.FromResult<SiberModulKayit?>(null);
     public Task<SiberYukNumberResult> InsertYukWithLockedNumberAsync(SiberYuk yuk, string year, string additionalCode, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
     public Task LinkRezervasyonToYukAsync(string rezervasyonId, string yukId, CancellationToken cancellationToken = default) =>

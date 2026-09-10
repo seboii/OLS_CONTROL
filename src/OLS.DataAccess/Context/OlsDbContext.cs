@@ -31,6 +31,8 @@ public partial class OlsDbContext : DbContext
 
     public virtual DbSet<AccountingPlan> AccountingPlans { get; set; }
 
+    public virtual DbSet<AccountStatus> AccountStatuses { get; set; }
+
     public virtual DbSet<AccountType> AccountTypes { get; set; }
 
     public virtual DbSet<AccountTypeMapping> AccountTypeMappings { get; set; }
@@ -195,7 +197,16 @@ public partial class OlsDbContext : DbContext
                     new SqlFunctionExpression(
                         "translate",
                         [
-                            args[0],
+                            // btrim: .NET tarafı da kırpıyor (bkz. TurkishFold.Normalize).
+                            // İki taraf aynı kuralı uygulamazsa sonda boşluğu olan
+                            // sütun değerleri hiçbir zaman eşleşmez.
+                            new SqlFunctionExpression(
+                                "btrim",
+                                [args[0]],
+                                nullable: true,
+                                argumentsPropagateNullability: [true],
+                                typeof(string),
+                                args[0].TypeMapping),
                             new SqlConstantExpression(Common.TurkishFold.From, args[0].TypeMapping),
                             new SqlConstantExpression(Common.TurkishFold.To, args[0].TypeMapping),
                         ],
@@ -255,6 +266,7 @@ public partial class OlsDbContext : DbContext
                 .HasDefaultValue(0)
                 .HasColumnName("discount");
             entity.Property(e => e.DistrictId).HasColumnName("district_id");
+            entity.Property(e => e.AccountStatusId).HasColumnName("account_status_id");
             entity.Property(e => e.Email)
                 .HasMaxLength(191)
                 .HasColumnName("email");
@@ -300,6 +312,28 @@ public partial class OlsDbContext : DbContext
             entity.Property(e => e.Name)
                 .HasMaxLength(191)
                 .HasColumnName("name");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("updated_at");
+        });
+
+        // FİRMA DURUMU (CARİ / DİĞER FİRMALAR) — Siber'in sbr_firmadurum aynası.
+        modelBuilder.Entity<AccountStatus>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("account_statuses_pkey");
+
+            entity.ToTable("account_statuses");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp(0) without time zone")
+                .HasColumnName("created_at");
+            entity.Property(e => e.Name)
+                .HasMaxLength(191)
+                .HasColumnName("name");
+            entity.Property(e => e.SiberId)
+                .HasMaxLength(191)
+                .HasColumnName("siber_id");
             entity.Property(e => e.UpdatedAt)
                 .HasColumnType("timestamp(0) without time zone")
                 .HasColumnName("updated_at");

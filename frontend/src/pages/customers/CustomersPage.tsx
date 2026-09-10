@@ -62,6 +62,8 @@ interface AccountDetail extends AccountListItem {
   discount: number;
   city_id: NamedRef | null;
   district_id: NamedRef | null;
+  /** Siber'de sbr_firmadurum: CARİ FİRMALAR / DİĞER FİRMALAR. */
+  account_status: NamedRef | null;
   contact_language: NamedRef | null;
   account_contact_person: { id: number; name: string | null; email: string | null }[];
   user_account_mapping: { id: number; user_id: UserOption | null }[];
@@ -211,6 +213,7 @@ export function CustomersPage() {
     country_id: "",
     city_id: "",
     district_id: "",
+    account_status_id: "",
     address: "",
     phone: "",
     phone_country_id: "",
@@ -227,6 +230,9 @@ export function CustomersPage() {
   const [removeAvatar, setRemoveAvatar] = useState(false);
 
   const { options: accountTypes } = useLookupOptions("/api/v1/account_type");
+  // FİRMA DURUMU — seçenekler Siber'den geliyor (sbr_firmadurum), yerelde
+  // sabit yazılmıyor: karşılığı olmayan bir seçenek kaydetmede çöp veri olurdu.
+  const { options: accountStatuses } = useLookupOptions("/api/v1/account/statuses");
   const { options: countries } = useLookupOptions("/api/v1/country");
   const { options: taxOffices } = useLookupOptions("/api/v1/tax_office");
   const cityQuery = useMemo(() => (form.country_id ? { country_id: form.country_id } : undefined), [form.country_id]);
@@ -283,6 +289,7 @@ export function CustomersPage() {
       country_id: "",
       city_id: "",
       district_id: "",
+      account_status_id: "",
       address: "",
       phone: "",
       phone_country_id: "",
@@ -324,6 +331,7 @@ export function CustomersPage() {
         country_id: d.country_id?.id ?? "",
         city_id: d.city_id?.id ?? "",
         district_id: d.district_id?.id ?? "",
+        account_status_id: d.account_status?.id ?? "",
         address: d.address ?? "",
         phone: d.phone ?? "",
         phone_country_id: d.phone_country_id?.id ?? "",
@@ -403,6 +411,9 @@ export function CustomersPage() {
       if (form.country_id) fd.append("country_id", form.country_id);
       if (form.city_id) fd.append("city_id", form.city_id);
       if (form.district_id) fd.append("district_id", form.district_id);
+      // FİRMA DURUMU: boş gönderilirse sunucu mevcut değeri korur, yeni
+      // kayıtta CARİ FİRMALAR yazar (eski davranış).
+      if (form.account_status_id) fd.append("account_status_id", form.account_status_id);
       fd.append("address", form.address);
       fd.append("phone", form.phone);
       if (form.phone_country_id) fd.append("phone_country_id", form.phone_country_id);
@@ -653,6 +664,20 @@ export function CustomersPage() {
                     </div>
                     {errors.account_type_mapping?.[0] && <p className="mt-1 text-xs text-red-500">{errors.account_type_mapping[0]}</p>}
                   </div>
+                  {/* FİRMA DURUMU — Siber'in CARİ FİRMALAR / DİĞER FİRMALAR
+                      ayrımı. Program bu alanı hiç sormuyor, her firmayı CARİ
+                      olarak açıyordu; Siber'in kendi verisinde ayrım 4.250 /
+                      3.212 ile fiilen kullanılıyor. */}
+                  <FormField label="Firma Durumu">
+                    <SelectInput
+                      value={form.account_status_id}
+                      onChange={(v) => setForm((f) => ({ ...f, account_status_id: v }))}
+                      options={[
+                        { value: "", label: "Cari Firmalar (varsayılan)" },
+                        ...accountStatuses.map((s) => ({ value: String(s.id), label: s.name })),
+                      ]}
+                    />
+                  </FormField>
                   <FormField label="Ülke" required error={errors.country_id?.[0]}>
                     <SelectInput
                       value={form.country_id}

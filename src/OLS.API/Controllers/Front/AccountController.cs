@@ -48,6 +48,18 @@ public sealed class AccountController : ApiControllerBase
         return Ok(result, "Kayıtlar");
     }
 
+    /// <summary>
+    /// <c>GET /api/v1/account/statuses</c> — firma durumu seçenekleri
+    /// (Siber <c>sbr_firmadurum</c>: CARİ FİRMALAR / DİĞER FİRMALAR).
+    ///
+    /// Rota <c>{id:long}</c> kalıbından ÖNCE tanımlı olmalı; "statuses" bir
+    /// sayı olmadığı için zaten çakışmıyor ama sıra bilinçli.
+    /// </summary>
+    [HttpGet("statuses")]
+    [RequiresPermission(PermissionAction.Read, "account_management")]
+    public async Task<IActionResult> Statuses(CancellationToken cancellationToken) =>
+        Ok(await _accounts.StatusesAsync(cancellationToken), "Kayıtlar");
+
     [HttpGet]
     [RequiresPermission(PermissionAction.Read, "account_management")]
     public async Task<IActionResult> All(
@@ -85,12 +97,22 @@ public sealed class AccountController : ApiControllerBase
         if (_currentUser.Id is not { } userId)
             return Unauthorized(ApiResponse.Error(Translator.Get("Yetkisiz Erişim")));
 
-        // olsold: süper admin her cariyi görür; değilse yalnızca kendisine
-        // atanmış cariler, aksi halde 403.
+        // BULUNAN GERÇEK HATA — cariye tıklayınca hiçbir bilgi açılmıyordu.
+        //
+        // Burada olsold'dan devralınan NESNE SEVİYESİ kural duruyordu: süper
+        // admin değilsen yalnızca "sana atanmış" cariyi görebilirsin. Atama
+        // user_account_mappings tablosunda tutuluyor ve canlıda o tablonun
+        // 7.462 cariye karşılık TEK satırı var — yani 48 aktif kullanıcının
+        // 46'sı için bu uç HER cariden 403 dönüyordu. Liste açılıyor, arama
+        // çalışıyor, satıra tıklandığında çekmece "Müşteri bilgileri
+        // yüklenemedi" deyip kapanıyordu.
+        //
+        // Aynı kural cari LİSTESİNDEN daha önce bu gerekçeyle kaldırılmıştı;
+        // detay ucu atlanmış. Görünürlük artık tek yerden geliyor:
+        // account_management okuma yetkisi (yukarıdaki RequiresPermission).
+        // user_account_mappings bir YETKİ tablosu değil, cariye bağlı görevli
+        // ataması — müşteri formundan doldurulur ve erişimi belirlemez.
         var isSuperAdmin = await _accounts.IsSuperAdminAsync(userId, cancellationToken);
-        if (!isSuperAdmin && !await _accounts.IsVisibleToUserAsync(userId, id, cancellationToken))
-            return StatusCode(StatusCodes.Status403Forbidden,
-                ApiResponse.Message(Translator.Get("Yetkisiz Erişim")));
 
         // olsold: 'Invoice' ilişkisi single()'da yalnızca süper admin dalında yükleniyordu.
         var account = await _accounts.SingleAsync(id, isSuperAdmin, cancellationToken);

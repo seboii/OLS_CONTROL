@@ -26,6 +26,14 @@ public interface IAccountService
     /// </summary>
     Task<AccountRepresentativesDto> RepresentativesAsync(
         long accountId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FİRMA DURUMU SEÇENEKLERİ — Siber'in <c>sbr_firmadurum</c> aynası
+    /// (CARİ FİRMALAR / DİĞER FİRMALAR). Siber karşılığı olmayan satır
+    /// LİSTELENMEZ: seçilemeyen bir seçenek kaydetme anında çöp veri üretirdi.
+    /// </summary>
+    Task<IReadOnlyList<AccountStatusDto>> StatusesAsync(
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>Cariye bağlı varsayılan görevliler.</summary>
@@ -76,6 +84,12 @@ public sealed class AccountWriteModel
     public Guid? CountryId { get; init; }
     public Guid? CityId { get; init; }
     public Guid? DistrictId { get; init; }
+
+    /// <summary>
+    /// FİRMA DURUMU (<c>account_statuses.id</c>). Boş gelirse mevcut değer
+    /// korunur; hiç yoksa Siber'in çoğunluk seçimi olan CARİ FİRMALAR yazılır.
+    /// </summary>
+    public Guid? AccountStatusId { get; init; }
     public string? Address { get; init; }
     public string? Phone { get; init; }
     public Guid? PhoneCountryId { get; init; }
@@ -275,6 +289,14 @@ public sealed class AccountService : IAccountService
             .AnyAsync(m => m.UserId == userId && m.AccountId == (int)accountId, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<AccountStatusDto>> StatusesAsync(
+        CancellationToken cancellationToken = default) =>
+        await _db.AccountStatuses.AsNoTracking()
+            .Where(s => s.SiberId != null)
+            .OrderBy(s => s.Name)
+            .Select(s => new AccountStatusDto { Id = s.Id, Name = s.Name, SiberId = s.SiberId })
+            .ToListAsync(cancellationToken);
+
     public async Task<AccountDetailDto?> SingleAsync(long id, bool includeInvoices, CancellationToken cancellationToken = default)
     {
         var account = await _db.Accounts.AsNoTracking()
@@ -314,6 +336,7 @@ public sealed class AccountService : IAccountService
             CountryId = model.CountryId,
             CityId = model.CityId,
             DistrictId = model.DistrictId,
+            AccountStatusId = model.AccountStatusId,
             Address = model.Address,
             Avatar = model.AvatarFileName,
             Phone = model.Phone,
@@ -378,6 +401,9 @@ public sealed class AccountService : IAccountService
         account.CountryId = model.CountryId;
         account.CityId = model.CityId;
         account.DistrictId = model.DistrictId;
+        // Boş gelirse mevcut durum korunur — form bu alanı göndermezse
+        // firmanın Siber'deki durumu sessizce CARİ'ye dönmemeli.
+        account.AccountStatusId = model.AccountStatusId ?? account.AccountStatusId;
         account.Address = model.Address;
         account.Phone = model.Phone;
         account.PhoneCountryId = model.PhoneCountryId;
@@ -582,6 +608,34 @@ public sealed class AccountService : IAccountService
                 .Select(t => new { t.Name, t.SiberId })
                 .FirstOrDefaultAsync(cancellationToken);
 
+        // YEREL KİMLİK SİBER'E YAZILAMAZ — ülke/şehir/ilçe Siber kimliğine
+        // çevrilir. Yerel countries.id / cities.id / districts.id, Siber'in
+        // ulkeid/sehirid/ilceid'siyle AYNI OLMAK ZORUNDA DEĞİL: ülkelerin
+        // 195'inin 170'inde tesadüfen aynı, şehirlerin 1.142'sinin çoğunda
+        // FARKLI. Ham yazmak Siber'de karşılıksız referans bırakırdı — yükte
+        // aynı tuzağa düşülmüştü (bkz. SiberCountryResolver).
+        var ulkeSiberId = await _db.Countries.AsNoTracking()
+            .Where(c => c.Id == account.CountryId).Select(c => c.SiberId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var sehirSiberId = await _db.Cities.AsNoTracking()
+            .Where(c => c.Id == account.CityId).Select(c => c.SiberId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var ilceSiberId = await _db.Districts.AsNoTracking()
+            .Where(d => d.Id == account.DistrictId).Select(d => d.SiberId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // FİRMA DURUMU ARTIK SABİT DEĞİL.
+        //
+        // Siber firmayı CARİ FİRMALAR / DİĞER FİRMALAR diye ikiye ayırıyor ve
+        // ayrım gerçekten kullanılıyor (4.250 / 3.212). Uygulama bu alanı hiç
+        // sormuyor, her firmayı CARİ olarak açıyordu. Seçim yapılmamışsa eski
+        // davranış korunuyor: Siber'in çoğunluk seçimi olan CARİ FİRMALAR.
+        var durumSiberId = await _db.AccountStatuses.AsNoTracking()
+            .Where(s => s.Id == account.AccountStatusId).Select(s => s.SiberId)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var firma = new SiberFirma
         {
             FirmaId = account.SiberId,
@@ -595,10 +649,10 @@ public sealed class AccountService : IAccountService
             VergiDaireId = taxOffice?.SiberId,
             VergiNo = account.TaxNumber,
             MuhasebeKod = account.AccountingCode,
-            UlkeId = account.CountryId?.ToString(),
-            SehirId = account.CityId?.ToString(),
-            IlceId = account.DistrictId?.ToString(),
-            FirmaDurumId = SiberAccountRepository.FirmaDurumId,
+            UlkeId = ulkeSiberId,
+            SehirId = sehirSiberId,
+            IlceId = ilceSiberId,
+            FirmaDurumId = durumSiberId ?? SiberAccountRepository.FirmaDurumId,
             Alici = alici,
             Satici = satici,
             SahisTuzel = account.IndividualPersonal,
@@ -677,6 +731,11 @@ public sealed class AccountService : IAccountService
         var district = await _db.Districts.AsNoTracking()
             .Where(d => d.Id == account.DistrictId)
             .Select(d => new DistrictDto { Id = d.Id, Name = d.Name, CityId = d.CityId })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var status = await _db.AccountStatuses.AsNoTracking()
+            .Where(s => s.Id == account.AccountStatusId)
+            .Select(s => new AccountStatusDto { Id = s.Id, Name = s.Name, SiberId = s.SiberId })
             .FirstOrDefaultAsync(cancellationToken);
 
         var taxOffice = await _db.TaxOffices.AsNoTracking()
@@ -768,6 +827,7 @@ public sealed class AccountService : IAccountService
             CountryId = country,
             CityId = city,
             DistrictId = district,
+            AccountStatus = status,
             PhoneCountryId = phoneCountry,
             ContactLanguage = contactLanguage,
             TaxOffice = taxOffice,

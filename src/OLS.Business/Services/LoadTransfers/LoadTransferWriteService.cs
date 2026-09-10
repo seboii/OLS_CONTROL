@@ -365,8 +365,24 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
     }
 
     /// <summary>
-    /// Her finansal kalem için İKİ satır üretilir: alış (buysell=1, Siber GC='C')
-    /// ve satış (buysell=2). olsold da aynı şekilde çiftliyor.
+    /// Her finansal kalem TEK satır üretir — kendi tarafında.
+    ///
+    /// BULUNAN GERÇEK HATA: eskiden her kalem İKİ kez yazılıyordu (alış
+    /// <c>GC='C'</c> ve satış <c>GC='G'</c>, aynı kalem ve aynı fiyatla).
+    /// olsold da böyle yapıyordu ama Siber'in kendi verisi bunu YALANLIYOR:
+    /// yüke bağlı 38.492 mali kalem satırının 30.298'i C, 8.194'ü G ve aynı
+    /// modülde aynı kalemin hem C hem G olduğu yalnızca 28 satır var (%0,07) —
+    /// o 28'i de bu uygulama üretmiş.
+    ///
+    /// Kullanıcının gördüğü: "KARA NAVLUN GİDERİ" hem Alış hem Satış
+    /// hareketlerinde çıkıyordu. Gider alışta olmalı; satışta ise onun
+    /// eşleşen gelir kalemi ("KARA NAVLUN HİZMET BEDELİ") olmalı — o satırı
+    /// zaten navlun eşleşmesi %15 zamla kendisi açıyor
+    /// (bkz. lib/freightPairs.ts).
+    ///
+    /// Taraf artık teklifin kendi <c>buysell</c> değerinden geliyor (canlıda
+    /// 9.365 teklif kaleminin 2.866'sı alış, 6.499'u satış — alan dolu ve
+    /// anlamlı). Değer yoksa alışa yazılır: Siber'de ezici çoğunluk C.
     /// </summary>
     private async Task WriteInvoiceItemsAsync(
         Load load, string loadNumberWorkType, long currentUserId,
@@ -397,7 +413,9 @@ public sealed class LoadTransferWriteService : ILoadTransferWriteService
 
             var total = (item.NetPrice ?? 0) * (item.Quantity ?? 0);
 
-            foreach (var buysell in new[] { 1, 2 })
+            // TEKLİFTEKİ TARAF KORUNUR. Çözülemezse alış (Siber'de baskın taraf).
+            var buysell = item.Buysell == 2 ? 2 : 1;
+
             {
                 var modulKalemId = (await _siber.GenerateModulKalemIdAsync(cancellationToken)).ToString();
 

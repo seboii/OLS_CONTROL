@@ -269,7 +269,7 @@ public sealed class DirectLoadRequest
             .ToList(),
         FinancialItems = FinancialItems
             .Select(f => new DirectLoadFinancialItem(
-                f.ItemId, f.AccountId, f.CurrencyId, f.NetPrice, f.Quantity, f.Description))
+                f.ItemId, f.AccountId, f.CurrencyId, f.NetPrice, f.Quantity, f.Description, f.Buysell))
             .ToList(),
     };
 }
@@ -282,6 +282,9 @@ public sealed class DirectLoadFinancialItemRequest
     [JsonPropertyName("net_price")] public decimal? NetPrice { get; set; }
     [JsonPropertyName("quantity")] public decimal? Quantity { get; set; }
     [JsonPropertyName("description")] public string? Description { get; set; }
+
+    /// <summary>"1" alış, "2" satış. Boşsa alış — Siber'de baskın taraf.</summary>
+    [JsonPropertyName("buysell")] public string? Buysell { get; set; }
 }
 
 public sealed class DirectLoadPackageRequest

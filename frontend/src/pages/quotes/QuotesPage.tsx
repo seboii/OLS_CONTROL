@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type UIEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { useNavigate } from "react-router-dom";
@@ -6,6 +6,7 @@ import { FileText, Package, Plus, Trash2, Truck, Upload, Download, File as FileI
 import type { LucideIcon } from "lucide-react";
 import { api, ApiError, downloadFile, type DataMessage, type Paginated } from "@/lib/api";
 import { useRegisterRefresh } from "@/lib/refresh";
+import { useDirty } from "@/lib/dirty";
 import { useAuth } from "@/lib/auth";
 import { useDebouncedValue, useLookupOptions } from "@/lib/hooks";
 import { computeLademeter } from "@/lib/number";
@@ -278,6 +279,10 @@ const STATUS_TABS: { label: string; statusName: string | null }[] = [
   { label: "Olumsuz", statusName: "Olumsuz" },
   { label: "Sipariş", statusName: "Sipariş" },
   { label: "Düzeltme Talebi", statusName: "Düzeltme Talebi" },
+  // NAVLUN VERİLDİ — Siber'in altıncı durumu, tohumda eksikti. Canlıda
+  // 19.686 teklifin 5.370'i bu durumda; sekme olmadan hiçbir listede
+  // görünmüyorlardı (durumları yerelde çözülemediği için ekranda da boştular).
+  { label: "Navlun Verildi", statusName: "Navlun Verildi" },
   { label: "Zaman Aşımı", statusName: null },
 ];
 const WAY_OF_WORKING_OPTIONS = [
@@ -1378,6 +1383,37 @@ export function QuotesPage() {
     setFinancialItems((list) => list.filter((_, xi) => xi !== i));
   }
 
+  /**
+   * DEĞİŞİKLİK DENETİMİ — Kaydet düğmesi yalnızca gerçekten bir şey
+   * değiştiyse aktif (YALNIZCA MEVCUT TEKLİFTE; yeni teklifte düğme her zaman
+   * açık, aksi hâlde boş formdan kayıt açılamazdı).
+   *
+   * Görüntü, handleSubmit'in GÖNDERDİĞİ alanları taşır. Dosya seçimleri de
+   * dâhil: dosya eklemek de bir değişikliktir.
+   */
+  const editSnapshot = useMemo(() => ({
+    form, customer, sender, receiver, agent, companyPayFreight, route,
+    operationOfficers: operationOfficers.map((o) => o?.id ?? null),
+    pricingUser: pricingUser?.id ?? null,
+    salesReps: salesReps.map((r) => r?.id ?? null),
+    content, financialItems, emailTo, emailCc,
+    removedFileIds, newFiles: newFiles.map((f) => `${f.name}:${f.size}`),
+  }), [form, customer, sender, receiver, agent, companyPayFreight, route,
+       operationOfficers, pricingUser, salesReps, content, financialItems,
+       emailTo, emailCc, removedFileIds, newFiles]);
+
+  const editDirty = useDirty(editSnapshot);
+
+  // TABAN, TEKLİF FORMA İŞLENDİKTEN SONRA ALINIR — durum güncellemeleri
+  // uygulandıktan sonraki render'da. openEdit içinde çağırmak eski değerleri
+  // tabana yazardı.
+  useEffect(() => {
+    if (drawerOpen && editingId !== null && !detailLoading) editDirty.reset();
+    else if (!drawerOpen || editingId === null) editDirty.clear();
+    // editDirty her render'da yeni kimlik alıyor; bağımlılığa eklenirse döngü olur.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerOpen, editingId, detailLoading]);
+
   async function handleSubmit() {
     // Buton `disabled={saving}` ile korunuyor ama bu, React'ın bir sonraki render'ına
     // kadar DOM'a yansımıyor — bu aralıkta gelen ikinci bir tetikleme (hızlı çift
@@ -1474,6 +1510,8 @@ export function QuotesPage() {
       if (editingId) {
         await api.postForm(`/api/v1/load/${editingId}`, fd);
         addToast("Teklif güncellendi");
+        // Kaydedilen hâl yeni taban.
+        editDirty.reset();
       } else {
         await api.postForm("/api/v1/load", fd);
         addToast("Teklif oluşturuldu");
@@ -1850,7 +1888,12 @@ export function QuotesPage() {
                 )}
               </div>
               <div className="flex gap-2 shrink-0">
-                <Btn onClick={handleSubmit} disabled={saving || detailLoading || busyLabel !== null}>
+                <Btn
+                  onClick={handleSubmit}
+                  disabled={saving || detailLoading || busyLabel !== null
+                            || (editingId !== null && !editDirty.dirty)}
+                  title={editingId !== null && !editDirty.dirty ? "Değişiklik yok" : undefined}
+                >
                   <BusyLabel busy={saving} busyText="Kaydediliyor...">Kaydet</BusyLabel>
                 </Btn>
                 <Btn variant="secondary" onClick={() => setDrawerOpen(false)}>İptal</Btn>

@@ -170,11 +170,20 @@ public sealed class ExpeditionService : IExpeditionService
     /// BOŞALTILDI durumunda ve bir aracın geçmişte onlarca seferi olması
     /// normal. Açık seferle sınırlandırıldığında uyarı yalnızca 10 araçta
     /// çıkıyor — yani gürültü değil, gerçek çakışma.
+    ///
+    /// SİBER'DEN SİLİNMİŞ SEFERLER DE DIŞARIDA — BULUNAN GERÇEK HATA.
+    /// Silinen sefer damgalanıyor ama listeden gizlenmesi dışında hiçbir yerde
+    /// süzülmüyordu; bu kontrol de onu "açık sefer" sayıp plakayı DOLU
+    /// gösteriyordu. Canlı örnek: 26OZ0100EX'e 34 NBV 524 seçilince uyarı
+    /// 26OZ0087EX'i gösteriyordu — o sefer 2026-09-01'de Siber'den silinmişti,
+    /// yani plaka gerçekte boştaydı. Ölçüm: silinmiş olduğu hâlde uyarı
+    /// üretebilecek 5 sefer var.
     /// </summary>
     public async Task<IReadOnlyList<CarExpeditionUsageDto>> CarUsageAsync(
         long carId, long? excludeExpeditionId, CancellationToken cancellationToken = default) =>
         await _db.Expeditions.AsNoTracking()
             .Where(e => e.RomorkId == (int)carId
+                     && e.SiberDeletedAt == null
                      && (excludeExpeditionId == null || e.Id != excludeExpeditionId))
             .Where(e => _db.ExpeditionStatuses
                 .Any(s => s.Id == e.StatusId && (s.OrderNumber == null || s.OrderNumber < 90)))

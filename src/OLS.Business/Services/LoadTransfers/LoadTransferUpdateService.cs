@@ -176,6 +176,24 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         var user = await _db.Users.AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == currentUserId, cancellationToken);
 
+        // SİBER'E DOKUNMADAN ÖNCE DOĞRULA (proje kuralı).
+        //
+        // sfy_modulkalem.kalemid gerçek Siber'de NOT NULL. Kalemi boş —
+        // ya da yerel kalemin Siber karşılığı olmayan — bir finans satırı
+        // UPDATE'i "Cannot insert the value NULL" ile düşürüyordu ve kullanıcı
+        // ekranda yalnızca "Beklenmeyen bir hata oluştu." görüyordu: hangi
+        // satırın sorunlu olduğuna dair hiçbir ipucu yok, üstelik yerel kayıt
+        // o sırada zaten yazılmış oluyordu. Dönüşüm akışının kendi kontrolü
+        // (LoadTransferWriteService.ValidateRequired) bunu zaten yapıyordu,
+        // bu ekran atlıyordu.
+        if (_siber.IsConfigured)
+        {
+            var itemFailure = await ValidateFinancialItemsAsync(request, cancellationToken);
+
+            if (itemFailure is not null)
+                return LoadTransferWriteResult.Fail(itemFailure);
+        }
+
         var now = _clock.Now;
 
         await using var tx = await _db.Database.BeginTransactionAsync(cancellationToken);
@@ -291,9 +309,15 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
         //
         // Kıta artık seçilen ÜLKEDEN türetiliyor (bkz. ApplyContinentsAsync).
         transfer.UsercodeWithNotification = (int)userId;
-        // SATIŞ TEMSİLCİSİ ARTIK SABİT DEĞİL. Gönderilmezse mevcut değer korunur;
-        // hiç yoksa (eski kayıt) kaydeden kullanıcıya düşülür.
-        transfer.SalesRepCode = request.SalesRepUserId ?? transfer.SalesRepCode ?? (int)userId;
+        // SATIŞ TEMSİLCİSİ UYDURULMAZ.
+        //
+        // Gönderilmezse mevcut değer korunur; hiç yoksa BOŞ KALIR. Eski kural
+        // "hiç yoksa kaydeden kullanıcıya düşür" idi ve sonucu ölçüldü: 396
+        // yükte yerelde bir satış temsilcisi görünüyor ama Siber'de o alan
+        // BOŞ — yani ekran, Siber'de olmayan bir kişiyi gösteriyordu. Yükü
+        // kaydeden kişi o yükün satış temsilcisi değildir; bilinmiyorsa
+        // bilinmiyor olarak kalmalı.
+        transfer.SalesRepCode = request.SalesRepUserId ?? transfer.SalesRepCode;
         transfer.UpdatedAt = now;
     }
 
@@ -402,6 +426,44 @@ public sealed class LoadTransferUpdateService : ILoadTransferUpdateService
             item.Status = input.Status ?? "pending";
             item.UpdatedAt = now;
         }
+    }
+
+    /// <summary>
+    /// Finans satırlarının Siber'e yazılabilir olduğunu doğrular.
+    ///
+    /// İki kusuru birden yakalar: Kalem hiç seçilmemiş, ya da seçilmiş ama
+    /// yerel kaydın <c>siber_id</c>'si yok. İkisi de <c>kalemid</c>'yi null
+    /// bırakıyor ve NOT NULL sütun yüzünden yazımı düşürüyor.
+    /// </summary>
+    private async Task<string?> ValidateFinancialItemsAsync(
+        LoadTransferUpdateRequest request, CancellationToken cancellationToken)
+    {
+        if (request.InvoiceItems is not { Count: > 0 } rows)
+            return null;
+
+        if (rows.Any(i => i.ItemId is null or 0))
+            return "Finans satırlarında Kalem boş olamaz.";
+
+        var selected = rows.Select(i => (long)i.ItemId!.Value).Distinct().ToList();
+
+        var resolved = await _db.FinancialItems.AsNoTracking()
+            .Where(f => selected.Contains(f.Id) && f.SiberId != null)
+            .Select(f => f.Id)
+            .ToListAsync(cancellationToken);
+
+        var missing = selected.Except(resolved).ToList();
+
+        if (missing.Count == 0)
+            return null;
+
+        var names = await _db.FinancialItems.AsNoTracking()
+            .Where(f => missing.Contains(f.Id))
+            .Select(f => f.Name)
+            .ToListAsync(cancellationToken);
+
+        return names.Count > 0
+            ? $"Seçilen kalemin Siber karşılığı yok: {string.Join(", ", names)}"
+            : "Seçilen kalemin Siber karşılığı yok.";
     }
 
     /// <summary>Yerel kaydı Siber'e yansıtır (skn_yuk + koli + modül kalemleri).</summary>

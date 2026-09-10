@@ -112,9 +112,17 @@ public sealed class DirectLoadModel
     public long? SalesRepId { get; init; }
 }
 
+/// <summary>
+/// Teklifsiz yükün mali kalemi.
+///
+/// <c>Buysell</c>: "1" alış, "2" satış. Form bu bilgiyi zaten topluyor (Finans
+/// bölümü Alış/Satış diye ikiye ayrılmış) ama sunucuya HİÇ gönderilmiyordu ve
+/// servis eksiği "her kalemi iki tarafa da yaz" diye kapatıyordu — bkz.
+/// <see cref="DirectLoadService"/> içindeki kalem yazımı.
+/// </summary>
 public sealed record DirectLoadFinancialItem(
     long? ItemId, long? AccountId, long? CurrencyId,
-    decimal? NetPrice, decimal? Quantity, string? Description);
+    decimal? NetPrice, decimal? Quantity, string? Description, string? Buysell = null);
 
 public sealed record DirectLoadPackage(
     long? ProductTypeId, long? CaseTypeId, int? Quantity,
@@ -626,7 +634,21 @@ public sealed class DirectLoadService : IDirectLoadService
 
             var total = (item.NetPrice ?? 0) * (item.Quantity ?? 0);
 
-            foreach (var buysell in new[] { 1, 2 })
+            // KALEM TEK TARAFA YAZILIR — BULUNAN GERÇEK HATA.
+            //
+            // Eskiden her kalem İKİ kez yazılıyordu (alış GC='C' ve satış
+            // GC='G', aynı kalem ve aynı fiyatla), çünkü formun topladığı taraf
+            // bilgisi sunucuya hiç ulaşmıyordu. Sonuç ekranda görünüyordu:
+            // "KARA NAVLUN GİDERİ" hem Alış hem Satış hareketlerinde çıkıyordu.
+            //
+            // Siber'in kendi verisi tek taraflı: yüke bağlı 38.492 satırın
+            // 30.298'i C, 8.194'ü G ve aynı modülde aynı kalemin iki tarafta
+            // birden olduğu yalnızca 28 satır — o 28'i de bu uygulama üretti.
+            //
+            // Gider alışta kalır; satış tarafını navlun eşleşmesi %15 zamla
+            // KENDİ kalemiyle açıyor (bkz. lib/freightPairs.ts).
+            var buysell = item.Buysell == "2" ? 2 : 1;
+
             {
                 string? modulKalemId = null;
 

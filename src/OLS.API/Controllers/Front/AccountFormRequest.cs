@@ -22,6 +22,13 @@ public sealed class AccountFormRequest
     [FromForm(Name = "country_id")] public Guid? CountryId { get; set; }
     [FromForm(Name = "city_id")] public Guid? CityId { get; set; }
     [FromForm(Name = "district_id")] public Guid? DistrictId { get; set; }
+
+    /// <summary>
+    /// FİRMA DURUMU (<c>account_statuses.id</c>) — Siber'de CARİ FİRMALAR /
+    /// DİĞER FİRMALAR. Gönderilmezse mevcut değer korunur, yeni kayıtta
+    /// CARİ FİRMALAR yazılır (eski davranış).
+    /// </summary>
+    [FromForm(Name = "account_status_id")] public Guid? AccountStatusId { get; set; }
     [FromForm(Name = "address")] public string? Address { get; set; }
     [FromForm(Name = "phone")] public string? Phone { get; set; }
     [FromForm(Name = "phone_country_id")] public Guid? PhoneCountryId { get; set; }
@@ -56,6 +63,7 @@ public sealed class AccountFormRequest
         CountryId = CountryId,
         CityId = CityId,
         DistrictId = DistrictId,
+        AccountStatusId = AccountStatusId,
         Address = Address,
         Phone = Phone,
         PhoneCountryId = PhoneCountryId,

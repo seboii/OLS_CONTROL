@@ -59,6 +59,13 @@ public sealed class AccountDetailDto
     [JsonPropertyName("country_id")] public CountryDto? CountryId { get; init; }
     [JsonPropertyName("city_id")] public CityDto? CityId { get; init; }
     [JsonPropertyName("district_id")] public DistrictDto? DistrictId { get; init; }
+
+    /// <summary>
+    /// FİRMA DURUMU — Siber'de <c>sbr_firmadurum</c>: CARİ FİRMALAR /
+    /// DİĞER FİRMALAR. Uygulama bunu hiç sormuyor, Siber'e sabit "CARİ"
+    /// yazıyordu.
+    /// </summary>
+    [JsonPropertyName("account_status")] public AccountStatusDto? AccountStatus { get; init; }
     [JsonPropertyName("phone_country_id")] public CountryDto? PhoneCountryId { get; init; }
     [JsonPropertyName("contact_language")] public CountryDto? ContactLanguage { get; init; }
     [JsonPropertyName("tax_office")] public TaxOfficeDto? TaxOffice { get; init; }
@@ -75,6 +82,14 @@ public sealed class AccountDetailDto
     /// <summary>olsold: AccountFormDrawer.vue "Faturalar" sekmesi (yalnızca düzenlemede, salt-okunur).</summary>
     [JsonPropertyName("invoice")]
     public IReadOnlyList<AccountInvoiceDto> Invoice { get; init; } = [];
+}
+
+/// <summary>Firma durumu seçeneği (Siber <c>sbr_firmadurum</c> aynası).</summary>
+public sealed class AccountStatusDto
+{
+    [JsonPropertyName("id")] public Guid Id { get; init; }
+    [JsonPropertyName("name")] public string? Name { get; init; }
+    [JsonPropertyName("siber_id")] public string? SiberId { get; init; }
 }
 
 public sealed class AccountInvoiceDto

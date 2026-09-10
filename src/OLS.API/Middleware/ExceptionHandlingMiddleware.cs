@@ -43,8 +43,25 @@ public sealed class ExceptionHandlingMiddleware
                 throw;
             }
 
-            _logger.LogError(ex, "İşlenmemiş istisna: {Method} {Path}",
-                context.Request.Method, context.Request.Path);
+            // HATA KODU — kullanıcının gördüğü mesajı log satırına BAĞLAR.
+            //
+            // "Beklenmeyen bir hata oluştu." tek başına hiçbir şey söylemiyor:
+            // kullanıcı bildiriyor, log'da o ana ait onlarca satır arasından
+            // hangi istisnanın onun hatası olduğu ayırt edilemiyordu.
+            //
+            // Yeni bir kimlik ÜRETİLMİYOR: istek zaten CorrelationIdMiddleware'in
+            // verdiği kimliği taşıyor ve o kimlik Serilog LogContext'inde de
+            // duruyor. Kullanıcıya ilk 8 karakteri gösteriliyor — mesaja
+            // sığacak kadar kısa, log'da aramaya yetecek kadar ayırt edici.
+            var correlationId = context.Items.TryGetValue(CorrelationIdMiddleware.HeaderName, out var value)
+                && value is string id && !string.IsNullOrWhiteSpace(id)
+                ? id
+                : Guid.NewGuid().ToString("n");
+
+            var reference = correlationId[..Math.Min(8, correlationId.Length)].ToUpperInvariant();
+
+            _logger.LogError(ex, "İşlenmemiş istisna [{Reference}] (correlation {CorrelationId}): {Method} {Path}",
+                reference, correlationId, context.Request.Method, context.Request.Path);
 
             var (status, message) = ex switch
             {
@@ -65,9 +82,20 @@ public sealed class ExceptionHandlingMiddleware
                     => (StatusCodes.Status422UnprocessableEntity, SiberRuleMessage(sql)),
 
                 DbUpdateException => (StatusCodes.Status500InternalServerError,
-                    translator.Get("Form hataydı! Lütfen geliştiricinizle iletişime geçin.")),
+                    WithReference(translator.Get("Form hataydı! Lütfen geliştiricinizle iletişime geçin."), reference)),
+
+                // SİBER'İN TEKNİK SQL HATASI: iş kuralı değil ama sebebi
+                // hâlâ belirli. Hata numarası mesaja katılıyor —
+                // 547 yabancı anahtar, 8114 tip dönüşümü, 2627 yinelenen
+                // kayıt… Numara olmadan aynı genel metin her sebep için
+                // çıkıyor ve teşhis log'a bakmadan imkânsız oluyordu.
+                SqlException sql => (StatusCodes.Status500InternalServerError,
+                    WithReference(
+                        $"{translator.Get("Beklenmeyen bir hata oluştu.")} Siber hata no: {sql.Number}.",
+                        reference)),
+
                 _ => (StatusCodes.Status500InternalServerError,
-                    translator.Get("Beklenmeyen bir hata oluştu.")),
+                    WithReference(translator.Get("Beklenmeyen bir hata oluştu."), reference)),
             };
 
             context.Response.Clear();
@@ -84,6 +112,14 @@ public sealed class ExceptionHandlingMiddleware
 
     /// <summary>SQL Server'da RAISERROR ile üretilen kullanıcı hatalarının numarası.</summary>
     private const int SiberRuleErrorNumber = 50000;
+
+    /// <summary>
+    /// Kullanıcıya gösterilen mesajın sonuna log'daki satırla eşleşen kodu
+    /// ekler. Siber'in KENDİ iş kuralı mesajlarına eklenmez: onlar zaten
+    /// kullanıcının düzeltebileceği açık cümleler, teknik kuyruk gereksiz.
+    /// </summary>
+    private static string WithReference(string message, string reference) =>
+        $"{message} (Hata kodu: {reference})";
 
     /// <summary>
     /// Siber mesajlarının sonunda tetikleyicinin adı bir işaretle duruyor

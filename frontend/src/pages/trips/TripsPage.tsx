@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDirty } from "@/lib/dirty";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -745,6 +746,23 @@ export function TripsPage() {
       .catch(() => { setMovements([]); setDeletedMovements([]); });
   }
 
+  /**
+   * DEĞİŞİKLİK DENETİMİ — Kaydet düğmesi yalnızca gerçekten bir şey
+   * değiştiyse aktif. Sefer güncellemesi yalnızca detailForm'u gönderiyor,
+   * görüntü de onunla birebir.
+   */
+  const detailDirty = useDirty(detailForm);
+
+  // TABAN, SEFER FORMA İŞLENDİKTEN SONRA ALINIR — durum güncellemeleri
+  // uygulandıktan sonraki render'da. Kayıttan sonra openDetail yeniden
+  // yüklüyor, yani taban orada kendiliğinden tazeleniyor.
+  useEffect(() => {
+    if (detailOpen && !detailLoading) detailDirty.reset();
+    else if (!detailOpen) detailDirty.clear();
+    // detailDirty her render'da yeni kimlik alıyor; bağımlılığa eklenirse döngü olur.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailOpen, detailLoading, detailId]);
+
   async function handleDetailSave() {
     if (!detailId) return;
     setDetailSaving(true);
@@ -820,6 +838,23 @@ export function TripsPage() {
   }
 
   /** Arşiv listesi — hem seferin kendi evrakları hem bağlı yüklerinki için. */
+  /**
+   * Bağlı yüklerin arşiv evrakları, yük numarasına göre gruplu.
+   *
+   * Evrağı olmayan yük listeye HİÇ girmiyor: seferde onlarca yük olabiliyor ve
+   * "evrak yok" satırlarıyla dolu bir liste asıl dosyaları gizlerdi.
+   */
+  const loadArchives = useMemo(
+    () =>
+      mappings
+        .map((m) => ({
+          key: String(m.id),
+          loadNumber: m.load_transfer_id?.load_number_work_type ?? "—",
+          files: m.load_transfer_id?.siber_archive ?? [],
+        }))
+        .filter((g) => g.files.length > 0),
+    [mappings]);
+
   function ArchiveList({ files, empty }: { files: SiberArchiveFile[]; empty: string }) {
     if (files.length === 0)
       return <p className="text-[11px] text-gray-400 py-2">{empty}</p>;
@@ -1242,7 +1277,11 @@ export function TripsPage() {
         footer={
           canUpdate ? (
             <div className="flex gap-2">
-              <Btn onClick={handleDetailSave} disabled={detailSaving || detailLoading}>
+              <Btn
+                onClick={handleDetailSave}
+                disabled={detailSaving || detailLoading || !detailDirty.dirty}
+                title={detailDirty.dirty ? undefined : "Değişiklik yok"}
+              >
                 <BusyLabel busy={detailSaving} busyText="Kaydediliyor...">Kaydet</BusyLabel>
               </Btn>
               <Btn variant="secondary" onClick={() => { setDetailOpen(false); clearExpeditionDeepLink(); }}>İptal</Btn>
@@ -1619,6 +1658,31 @@ export function TripsPage() {
                     empty="Bu sefer için Siber arşivinde evrak yok."
                   />
                 </div>
+
+                {/* BAĞLI YÜKLERİN EVRAKLARI.
+                    Siber'de sefer evrakı pozisyonid'ye, yük evrakı yukid'ye
+                    bağlanıyor — yani iki ayrı kayıt. Ama kullanıcı için ikisi
+                    de "bu seferin evrakı": yükün evrakını görmek için Bağlı
+                    Yükler bölümünde satırı tek tek açmak gerekiyordu. Dosyalar
+                    burada da, hangi yüke ait olduğu belirtilerek listeleniyor.
+                    Veri zaten yükleniyor (mappings), ek istek yok. */}
+                {loadArchives.length > 0 && (
+                  <div className="mb-5 rounded-lg border border-gray-200 bg-gray-50/70 p-3">
+                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                      Bağlı Yüklerin Evrakları ({loadArchives.reduce((n, g) => n + g.files.length, 0)})
+                    </p>
+                    <div className="space-y-3">
+                      {loadArchives.map((group) => (
+                        <div key={group.key}>
+                          <p className="mb-1 text-[11px] font-medium text-gray-600">
+                            {group.loadNumber}
+                          </p>
+                          <ArchiveList files={group.files} empty="" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {canUpdate && (
                   <div

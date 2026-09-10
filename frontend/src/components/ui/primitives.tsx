@@ -77,6 +77,7 @@ export function Btn({
   className,
   disabled,
   type = "button",
+  title,
 }: {
   variant?: "primary" | "secondary" | "ghost" | "danger";
   size?: "sm" | "md";
@@ -85,6 +86,12 @@ export function Btn({
   className?: string;
   disabled?: boolean;
   type?: "button" | "submit";
+  /**
+   * Araç ipucu. Devre dışı bir düğmede NEDEN kapalı olduğunu söylemek için
+   * gerekiyor ("Değişiklik yok"); kapalı düğme başka türlü sessizce
+   * "bozuk" görünüyor.
+   */
+  title?: string;
 }) {
   const base =
     "inline-flex items-center gap-1.5 font-medium rounded transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed select-none";
@@ -100,6 +107,7 @@ export function Btn({
       type={type}
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={clsx(base, sizes[size], variants[variant], className)}
     >
       {children}

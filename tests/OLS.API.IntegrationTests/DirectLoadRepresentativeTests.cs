@@ -90,7 +90,7 @@ public sealed class DirectLoadRepresentativeTests
         var satisci = await AddSiberUserAsync(db, "UMUT AKBAS", $"UMUT{Random.Shared.Next(1000, 9999)}");
 
         var siber = new RecordingDirectLoadRepository();
-        var model = await BuildModelAsync(db, officers: [birinci.Id, ikinci.Id], salesRepId: satisci.Id);
+        var model = await DirectLoadModelHelper.BuildAsync(db, officers: [birinci.Id, ikinci.Id], salesRepId: satisci.Id);
 
         var result = await CreateService(scope, db, siber)
             .CreateAsync(model, currentUserId: 1);
@@ -127,7 +127,7 @@ public sealed class DirectLoadRepresentativeTests
         var birinci = await AddSiberUserAsync(db, "ORCUN OZDEMIR", $"ORCU{Random.Shared.Next(1000, 9999)}");
 
         var siber = new RecordingDirectLoadRepository();
-        var model = await BuildModelAsync(db, officers: [birinci.Id], salesRepId: null);
+        var model = await DirectLoadModelHelper.BuildAsync(db, officers: [birinci.Id], salesRepId: null);
 
         var result = await CreateService(scope, db, siber)
             .CreateAsync(model, currentUserId: 1);
@@ -162,7 +162,7 @@ public sealed class DirectLoadRepresentativeTests
         }
 
         var siber = new RecordingDirectLoadRepository();
-        var model = await BuildModelAsync(db, officers: [], salesRepId: null, currencyId: currency.Id);
+        var model = await DirectLoadModelHelper.BuildAsync(db, officers: [], salesRepId: null, currencyId: currency.Id);
 
         var result = await CreateService(scope, db, siber)
             .CreateAsync(model, currentUserId: 1);
@@ -180,117 +180,8 @@ public sealed class DirectLoadRepresentativeTests
             new PassThroughReferenceValidator(),
             new FakeSiberCountryResolver(db));
 
-    /// <summary>
-    /// Formun zorunlu kıldığı en küçük geçerli yük. Tanım satırları test
-    /// veritabanında tohumlu olanlardan seçilir — konu görevliler ve döviz.
-    /// </summary>
-    private static async Task<DirectLoadModel> BuildModelAsync(
-        OlsDbContext db, IReadOnlyList<long> officers, long? salesRepId, long? currencyId = null)
-    {
-        var account = new Account
-        {
-            Name = $"TEKLIFSIZ {Guid.NewGuid():N}"[..24],
-            SiberId = Guid.NewGuid().ToString(),
-            CreatedAt = DateTime.Now,
-            UpdatedAt = DateTime.Now,
-        };
-        db.Accounts.Add(account);
-        await db.SaveChangesAsync();
-
-        // ENTEGRASYON TESTLERİ VERİTABANINI PAYLAŞIYOR: tanım tablolarında
-        // "Siber kimlikli en az bir satır" garanti değil. Eksik olan burada
-        // açılır; var olan kullanılır, böylece tur sırası testi etkilemez.
-        var country = await db.Countries.AsNoTracking()
-            .Where(c => c.SiberId != null).OrderBy(c => c.Id).Select(c => c.Id)
-            .FirstOrDefaultAsync();
-
-        if (country == Guid.Empty)
-        {
-            var row = new Country
-            {
-                Id = Guid.NewGuid(),
-                Name = $"TEST ÜLKE {Guid.NewGuid():N}"[..24],
-                SiberId = Guid.NewGuid().ToString(),
-                CreatedAt = DateTime.Now,
-                UpdatedAt = DateTime.Now,
-            };
-            db.Countries.Add(row);
-            await db.SaveChangesAsync();
-            country = row.Id;
-        }
-
-        return new DirectLoadModel
-        {
-            WorkTypeId = await EnsureAsync(db, db.WorkTypes, () => new WorkType
-            {
-                Name = "TEST İŞ TÜRÜ", Code = "0", GroupCode = "ISTURU", AdditionalCode = "EX",
-                SiberId = Guid.NewGuid().ToString(),
-            }),
-            LoadingTypeId = await EnsureAsync(db, db.LoadingTypes, () => new LoadingType
-            {
-                Name = "TEST YÜKLEME TİPİ", Code = "1", GroupCode = "YUKLEMETIP",
-                SiberId = Guid.NewGuid().ToString(),
-            }),
-            LoadTransferTypeId = await EnsureAsync(db, db.LoadTransferTypes, () => new LoadTransferType
-            {
-                Name = "TEST YÜK TÜRÜ", Code = "1", GroupCode = "YUKTUR",
-                SiberId = Guid.NewGuid().ToString(),
-            }),
-            InstructionId = await EnsureAsync(db, db.Instructions, () => new Instruction
-            {
-                Name = "TEST TALİMAT", Code = "1", GroupCode = "TALIMATGELISSEKLI",
-                SiberId = Guid.NewGuid().ToString(),
-            }),
-            RomorkTypeId = await EnsureAsync(db, db.RomorkTypes, () => new RomorkType
-            {
-                Name = "TEST RÖMORK", Code = "1", GroupCode = "ROMORKCINS",
-                SiberId = Guid.NewGuid().ToString(),
-            }),
-            PaymentTypeId = await EnsureAsync(db, db.PaymentTypes, () => new PaymentType
-            {
-                Name = "TEST ÖDEME", Code = "1", SiberId = Guid.NewGuid().ToString(),
-            }),
-            DepartmentId = await EnsureAsync(db, db.Departments, () => new Department
-            {
-                Name = "TEST DEPARTMAN", SiberId = Guid.NewGuid().ToString(),
-            }),
-            CustomerId = account.Id,
-            SenderId = account.Id,
-            ReceiverId = account.Id,
-            DepartureCountryId = country,
-            TargetCountryId = country,
-            CurrencyId = currencyId,
-            OperationOfficerIds = officers,
-            SalesRepId = salesRepId,
-            InstructionArrivalDate = DateOnly.FromDateTime(DateTime.Today),
-            Packages = [new DirectLoadPackage(null, null, 1, 100, 90, 2, 1, null, null, null, 1)],
-        };
-    }
-
-    /// <summary>
-    /// Siber kimliği olan ilk satırın kimliğini verir; yoksa <paramref name="create"/>
-    /// ile bir satır açar. Tanım tabloları paylaşımlı test veritabanında dolu
-    /// gelebilir de gelmeyebilir de.
-    /// </summary>
-    private static async Task<long> EnsureAsync<T>(
-        OlsDbContext db, DbSet<T> set, Func<T> create) where T : class
-    {
-        var id = await set.AsNoTracking()
-            .Where(e => EF.Property<string?>(e, "SiberId") != null)
-            .Select(e => EF.Property<long>(e, "Id")).OrderBy(i => i).FirstOrDefaultAsync();
-
-        if (id > 0)
-            return id;
-
-        var row = create();
-        db.Entry(row).Property("CreatedAt").CurrentValue = DateTime.Now;
-        db.Entry(row).Property("UpdatedAt").CurrentValue = DateTime.Now;
-        set.Add(row);
-        await db.SaveChangesAsync();
-
-        return (long)db.Entry(row).Property("Id").CurrentValue!;
-    }
 }
+
 
 /// <summary>
 /// Teklifsiz yükün Siber'e yazdığı kaydı yakalar; hiçbir G/Ç yapmaz.
@@ -299,6 +190,9 @@ public sealed class DirectLoadRepresentativeTests
 internal sealed class RecordingDirectLoadRepository : ISiberLoadRepository
 {
     public SiberYuk? Written { get; private set; }
+
+    /// <summary>Siber'e giden mali kalemler — hangi tarafa (GC) yazıldığı sınanıyor.</summary>
+    public List<SiberModulKalem> Kalemler { get; } = [];
 
     public bool IsConfigured => true;
 
@@ -321,14 +215,25 @@ internal sealed class RecordingDirectLoadRepository : ISiberLoadRepository
         Task.FromResult(Guid.NewGuid());
     public Task InsertYukKoliAsync(SiberYukKoli koli, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
-    public Task InsertModulKalemAsync(SiberModulKalem kalem, CancellationToken cancellationToken = default) =>
-        Task.CompletedTask;
+    public Task InsertModulKalemAsync(SiberModulKalem kalem, CancellationToken cancellationToken = default)
+    {
+        Kalemler.Add(kalem);
+        return Task.CompletedTask;
+    }
     public Task<IReadOnlyList<string>> FindMissingKalemIdsAsync(
         IReadOnlyCollection<string> kalemIds, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<string>>([]);
+    /// <summary>
+    /// Modül kaydı VAR sayılır: yoksa kalem satırı Siber'e hiç yazılmıyor ve
+    /// taraf (GC) sınanamazdı.
+    /// </summary>
     public Task<SiberModulKayit?> FindModulKayitAsync(
         string loadNumberWorkType, CancellationToken cancellationToken = default) =>
-        Task.FromResult<SiberModulKayit?>(null);
+        Task.FromResult<SiberModulKayit?>(new SiberModulKayit
+        {
+            ModulId = Guid.NewGuid().ToString(),
+            ModulKod = "0401",
+        });
 
     public Task<SiberRezervasyon?> FindRezervasyonAsync(string rezervasyonId, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();

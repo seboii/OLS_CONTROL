@@ -98,4 +98,76 @@ public sealed class AccountVisibilityTests
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
+
+    /// <summary>
+    /// BULUNAN GERÇEK HATA — CARİYE TIKLAYINCA HİÇBİR BİLGİ AÇILMIYORDU.
+    ///
+    /// Liste kuralı daha önce kaldırılmıştı ama DETAY ucu
+    /// (<c>GET /api/v1/account/{id}</c>) olsold'dan devralınan nesne seviyesi
+    /// kuralı hâlâ uyguluyordu: süper admin değilsen yalnızca
+    /// <c>user_account_mappings</c> ile sana atanmış cariyi görebilirsin.
+    ///
+    /// O tablo canlıda 7.462 cariye karşılık TEK satır taşıyor; yani 48 aktif
+    /// kullanıcının 46'sı için uç HER cariden 403 dönüyordu. Kullanıcının
+    /// gördüğü: liste ve arama çalışıyor, satıra tıklayınca çekmece
+    /// "Müşteri bilgileri yüklenemedi" deyip kapanıyor.
+    /// </summary>
+    [Fact]
+    public async Task RegularUser_WithReadPermission_OpensAccountDetailWithoutMapping()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountName = $"Detay Musteri {Guid.NewGuid():N}"[..30];
+        using var form = await TestAccountHelper.MinimalAccountFormAsync(admin, accountName);
+        var created = await admin.PostAsync("/api/v1/account", form);
+        created.EnsureSuccessStatusCode();
+        var accountId = (await created.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        var email = $"account-detail-{Guid.NewGuid():N}@example.test";
+        var userId = await admin.CreateUserAsync(email);
+        await admin.GrantPermissionAsync(userId, "account_management", "read");
+        // Bilinçli olarak user_account_mappings satırı EKLENMİYOR.
+
+        var token = await _factory.LoginAsync(email, "Test!2026Pw");
+        using var client = _factory.CreateAuthorizedClient(token);
+
+        var response = await client.GetAsync($"/api/v1/account/{accountId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "okuma yetkisi olan kullanıcı cari detayını açabilmeli");
+
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("data").GetProperty("name").GetString().Should().Be(accountName);
+    }
+
+    /// <summary>
+    /// Aynı kural cari GEÇMİŞİ ucunda da vardı: geçmiş sekmesi 46 kullanıcıda
+    /// hep boş dönüyordu. Yetkisi olan kullanıcı için uç artık 404 DEĞİL.
+    /// </summary>
+    [Fact]
+    public async Task RegularUser_WithReadPermission_ReadsAccountHistoryWithoutMapping()
+    {
+        using var admin = await _factory.CreateAdminClientAsync();
+
+        var accountName = $"Gecmis Musteri {Guid.NewGuid():N}"[..30];
+        using var form = await TestAccountHelper.MinimalAccountFormAsync(admin, accountName);
+        var created = await admin.PostAsync("/api/v1/account", form);
+        created.EnsureSuccessStatusCode();
+        var accountId = (await created.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("data").GetProperty("id").GetInt64();
+
+        var email = $"account-history-{Guid.NewGuid():N}@example.test";
+        var userId = await admin.CreateUserAsync(email);
+        await admin.GrantPermissionAsync(userId, "account_management", "read");
+
+        var token = await _factory.LoginAsync(email, "Test!2026Pw");
+        using var client = _factory.CreateAuthorizedClient(token);
+
+        var response = await client.GetAsync($"/api/v1/record_history/account/{accountId}/history");
+
+        // Yeni açılan carinin Siber kimliği yoksa uç 404 döner — o ayrı bir
+        // durum. Burada aranan, YETKİ yüzünden reddedilmemesi.
+        response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+    }
 }

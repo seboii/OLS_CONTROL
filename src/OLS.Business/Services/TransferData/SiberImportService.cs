@@ -792,7 +792,15 @@ public sealed class SiberImportService : ISiberImportService
     ///
     /// Bu yüzden ölçüt "gerçekten kullanılan": Türkiye'nin tüm şehirleri +
     /// pozisyonların başlangıç/yükleme/bitiş/giriş-çıkış kapısı olarak
-    /// geçirdiği her şehir. Bugün 351 satır ediyor ve her turda güncel kalıyor.
+    /// geçirdiği her şehir + CARİLERİN ŞEHRİ. Her turda güncel kalıyor.
+    ///
+    /// Cari şehirleri sonradan eklendi: müşteri ekranındaki Şehir alanı
+    /// carilerin çoğunda boş görünüyordu. Ölçüm (2026-09-09) sebebi net
+    /// gösterdi — 7.462 carinin 6.100'ünde Siber'de şehir dolu ve bunlar
+    /// 1.030 FARKLI şehre işaret ediyor, ama yerel listede o şehirlerin
+    /// yalnızca 239'u vardı. Kalan 791'i listede olmadığı için cari senkronu
+    /// şehri çözemiyordu. Liste 351'den ~1.140 satıra çıkıyor; hâlâ tek
+    /// seferde yüklenebilecek boyutta (ham tablo 118.393 satır).
     ///
     /// EŞLEŞME ADA GÖRE DEĞİL, SİBER KİMLİĞİNE GÖRE: liste artık çok ülkeli ve
     /// aynı ad birden çok ülkede geçiyor ("İSKENDERUN", "Bursa"...). Ada göre
@@ -811,7 +819,8 @@ public sealed class SiberImportService : ISiberImportService
                         SELECT baslangicsehirid FROM skn_pozisyon WHERE baslangicsehirid IS NOT NULL
                         UNION SELECT yuklemesehirid FROM skn_pozisyon WHERE yuklemesehirid IS NOT NULL
                         UNION SELECT bitissehirid FROM skn_pozisyon WHERE bitissehirid IS NOT NULL
-                        UNION SELECT giriscikiskapiid FROM skn_pozisyon WHERE giriscikiskapiid IS NOT NULL)
+                        UNION SELECT giriscikiskapiid FROM skn_pozisyon WHERE giriscikiskapiid IS NOT NULL
+                        UNION SELECT sehirid FROM sbr_firma WHERE sehirid IS NOT NULL)
                 """,
                 cancellationToken: cancellationToken));
 

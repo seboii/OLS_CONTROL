@@ -34,6 +34,13 @@ public sealed class TurkishFoldTests
     [InlineData("GUL TUREDİ", "gul turedi")]
     [InlineData("BURAK KOCASAHİNOĞLU", "burak kocasahinoglu")]
     [InlineData("Öz Mal", "oz mal")]
+    // BAŞTAKİ/SONDAKİ BOŞLUK ATILIR. Yerel users.siber_name değerlerinin
+    // 130'unun 14'ünde sonda boşluk var ("HASAN ÇALIŞKAN "); Siber tarafı
+    // sorguda zaten kırpılıyordu ve kırpılmayan anahtar yüzünden 76 yükün
+    // operasyon yetkilisi, kişi yerelde kayıtlı olduğu hâlde çözülemiyordu.
+    [InlineData("HASAN ÇALIŞKAN ", "hasan caliskan")]
+    [InlineData(" MUHAMMED ORUNBAİEV ", "muhammed orunbaiev")]
+    [InlineData("   ", "")]
     public void Normalize_KatlarVeKucultur(string girdi, string beklenen) =>
         TurkishFold.Normalize(girdi).Should().Be(beklenen);
 

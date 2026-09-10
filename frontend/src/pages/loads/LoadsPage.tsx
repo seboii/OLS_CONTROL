@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import { clsx } from "clsx";
@@ -15,6 +15,7 @@ import { Drawer, Modal } from "@/components/ui/Overlay";
 import { Btn, FormField, SelectInput, Tabs, TextareaInput, TextInput } from "@/components/ui/primitives";
 import { AccountPicker, type AccountOption } from "@/components/shared/AccountPicker";
 import { UserPicker, type UserOption } from "@/components/shared/UserPicker";
+import { useDirty } from "@/lib/dirty";
 import { FinancialItemManagerModal } from "@/components/shared/FinancialItemManagerModal";
 import { FinancialItemPicker, type FinancialItemOption } from "@/components/shared/FinancialItemPicker";
 import {
@@ -748,6 +749,10 @@ export function LoadsPage() {
               net_price: num(f.net_price),
               quantity: num(f.quantity),
               description: f.description || null,
+              // TARAF GÖNDERİLİR. Gönderilmediği için sunucu her kalemi hem
+              // alışa hem satışa yazıyordu: "KARA NAVLUN GİDERİ" iki bölümde
+              // birden görünüyordu.
+              buysell: f.buysell,
             })),
         });
 
@@ -1370,6 +1375,43 @@ export function LoadsPage() {
   const num = parseDecimalInput;
   const int = parseIntegerInput;
 
+  /**
+   * DEĞİŞİKLİK DENETİMİ — Kaydet düğmesi yalnızca gerçekten bir şey
+   * değiştiyse aktif.
+   *
+   * Görüntü, handleSave'in GÖNDERDİĞİ alanların aynısını taşır: gönderilmeyen
+   * bir alan değiştiğinde düğme boşuna açılmamalı, gönderilen bir alan
+   * değiştiğinde de kapalı kalmamalı.
+   */
+  const detailSnapshot = useMemo(() => ({
+    form,
+    customer: customer?.id ?? null,
+    sender: sender?.id ?? null,
+    receiver: receiver?.id ?? null,
+    customerRep: customerRep?.id ?? null,
+    secondCustomerRep: secondCustomerRep?.id ?? null,
+    pricingUser: pricingUser?.id ?? null,
+    salesRep: salesRep?.id ?? null,
+    departureCountry, transitCountry, targetCountry, loadCompany,
+    packages, invoiceItems, removedPackageIds,
+  }), [form, customer, sender, receiver, customerRep, secondCustomerRep,
+       pricingUser, salesRep, departureCountry, transitCountry, targetCountry,
+       loadCompany, packages, invoiceItems, removedPackageIds]);
+
+  const detailDirty = useDirty(detailSnapshot);
+
+  // TABAN, KAYIT FORMA İŞLENDİKTEN SONRA ALINIR. Etki, durum güncellemeleri
+  // uygulandıktan sonraki render'da çalışıyor; openDetail'in içinde çağırmak
+  // henüz eski değerleri tabana yazardı ve düğme açılışta yanlışlıkla aktif
+  // olurdu. Çekmece kapanınca taban bırakılır, sonraki açılış temiz başlar.
+  useEffect(() => {
+    if (drawerOpen && !detailLoading) detailDirty.reset();
+    else if (!drawerOpen) detailDirty.clear();
+    // detailDirty her render'da yeni kimlik alıyor; bağımlılığa eklenirse
+    // sonsuz döngü olur.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawerOpen, detailLoading, editingId]);
+
   async function handleSave() {
     if (!editingId || saving) return;
     setSaving(true);
@@ -1436,6 +1478,8 @@ export function LoadsPage() {
         })),
       });
       addToast("Yük güncellendi");
+      // Kaydedilen hâl yeni taban: çekmece tekrar açılırsa düğme kapalı başlar.
+      detailDirty.reset();
       setDrawerOpen(false);
       load();
     } catch (err) {
@@ -1993,7 +2037,11 @@ export function LoadsPage() {
               <div className="flex gap-2">
                 {canUpdate && (
                   <>
-                    <Btn onClick={handleSave} disabled={saving || detailLoading || deleting}>
+                    <Btn
+                      onClick={handleSave}
+                      disabled={saving || detailLoading || deleting || !detailDirty.dirty}
+                      title={detailDirty.dirty ? undefined : "Değişiklik yok"}
+                    >
                       <BusyLabel busy={saving} busyText="Kaydediliyor...">Kaydet</BusyLabel>
                     </Btn>
                     <Btn variant="secondary" onClick={() => setDrawerOpen(false)}>İptal</Btn>

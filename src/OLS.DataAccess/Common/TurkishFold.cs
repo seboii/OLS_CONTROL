@@ -50,15 +50,26 @@ public static class TurkishFold
     /// <summary>PostgreSQL <c>translate()</c>'in "hedef" argümanı; konum konum eşleşir.</summary>
     public static readonly string To = new([.. Pairs.Select(p => p.To)]);
 
-    /// <summary>.NET tarafı: deseni katlar.</summary>
+    /// <summary>
+    /// .NET tarafı: deseni katlar.
+    ///
+    /// BAŞTAKİ/SONDAKİ BOŞLUK ATILIR. Kullanıcı adları eşleştirilirken bunun
+    /// bedeli somut: yerel <c>users.siber_name</c> değerlerinin 130'unun
+    /// 14'ünde sonda boşluk var ("HASAN ÇALIŞKAN "), Siber tarafı ise sorguda
+    /// zaten <c>LTRIM(RTRIM(...))</c> ile geliyordu. Kırpılmayan anahtar
+    /// yüzünden 76 yükün operasyon yetkilisi çözülemiyordu — kişi yerelde
+    /// KAYITLI olduğu hâlde.
+    /// </summary>
     public static string Normalize(string input)
     {
-        Span<char> buffer = input.Length <= 256 ? stackalloc char[input.Length] : new char[input.Length];
+        var trimmed = input.AsSpan().Trim();
 
-        for (var i = 0; i < input.Length; i++)
+        Span<char> buffer = trimmed.Length <= 256 ? stackalloc char[trimmed.Length] : new char[trimmed.Length];
+
+        for (var i = 0; i < trimmed.Length; i++)
         {
-            var index = From.IndexOf(input[i]);
-            buffer[i] = index >= 0 ? To[index] : input[i];
+            var index = From.IndexOf(trimmed[i]);
+            buffer[i] = index >= 0 ? To[index] : trimmed[i];
         }
 
         return new string(buffer).ToLowerInvariant();
