@@ -341,6 +341,16 @@ export function TripsPage() {
 
   const [fExpeditionType, setFExpeditionType] = useState("");
   const [fStatus, setFStatus] = useState("");
+
+  /**
+   * YOLDAKİ SEFERLER SÜZGECİ — panelin "Yoldaki Seferler" kartından geliniyor
+   * (/seferler?durum=yolda).
+   *
+   * Tek bir durum kimliği yetmiyor: "yolda" birden çok duruma karşılık geliyor
+   * (çıkış yaptı / yükleme için yolda / yurt içi–dışı yolda / boşaltmada).
+   * Bu yüzden süzgeç sunucuda, durum SIRA numarasına göre uygulanıyor.
+   */
+  const onRoadOnly = searchParams.get("durum") === "yolda";
   const [fDepartment, setFDepartment] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const hasActiveAdvancedFilters = !!(dateFrom || dateTo || fExpeditionType || fStatus || fDepartment);
@@ -427,6 +437,7 @@ export function TripsPage() {
         status_id: fStatus || undefined,
         department_id: fDepartment || undefined,
         only_deleted: onlyDeleted || undefined,
+        on_road: onRoadOnly || undefined,
         per_page: PER_PAGE,
         page,
       })
@@ -444,7 +455,7 @@ export function TripsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedSearch, workTypeTab, workTypes.length, dateFrom, dateTo, page, fExpeditionType, fStatus, fDepartment, onlyDeleted]);
+  }, [debouncedSearch, workTypeTab, workTypes.length, dateFrom, dateTo, page, fExpeditionType, fStatus, fDepartment, onlyDeleted, onRoadOnly]);
 
   function openNew() {
     // Yeni bir düzenleme oturumu: önceki taslak yerinde kalır.
@@ -1069,6 +1080,20 @@ export function TripsPage() {
               {hasActiveAdvancedFilters && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
               <ChevronDown size={13} className={clsx("transition-transform", showAdvanced && "rotate-180")} />
             </button>
+            {/* PANELDEN GELEN SÜZGEÇ GÖRÜNÜR OLMALI. Kullanıcı "Yoldaki
+                Seferler" kartına basıp buraya düşüyor; liste neden kısa,
+                yazmazsak anlaşılmıyor ve kaldırmanın yolu da yok. */}
+            {onRoadOnly && (
+              <button
+                type="button"
+                onClick={() => { searchParams.delete("durum"); setSearchParams(searchParams, { replace: true }); }}
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 shrink-0"
+                title="Süzgeci kaldır"
+              >
+                Yalnızca yoldakiler
+                <X size={12} />
+              </button>
+            )}
             {hasActiveFilters && (
               <button type="button" onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-600 flex items-center gap-1 shrink-0">
                 <X size={12} />
@@ -1276,15 +1301,29 @@ export function TripsPage() {
         width="w-[min(1080px,95vw)]"
         footer={
           canUpdate ? (
-            <div className="flex gap-2">
-              <Btn
-                onClick={handleDetailSave}
-                disabled={detailSaving || detailLoading || !detailDirty.dirty}
-                title={detailDirty.dirty ? undefined : "Değişiklik yok"}
-              >
-                <BusyLabel busy={detailSaving} busyText="Kaydediliyor...">Kaydet</BusyLabel>
-              </Btn>
-              <Btn variant="secondary" onClick={() => { setDetailOpen(false); clearExpeditionDeepLink(); }}>İptal</Btn>
+            <div className="flex items-center gap-3">
+              <div className="flex gap-2">
+                <Btn
+                  onClick={handleDetailSave}
+                  disabled={detailSaving || detailLoading || !detailDirty.dirty}
+                  title={detailDirty.dirty ? undefined : "Sefer bilgilerinde değişiklik yok"}
+                >
+                  <BusyLabel busy={detailSaving} busyText="Kaydediliyor...">Kaydet</BusyLabel>
+                </Btn>
+                <Btn variant="secondary" onClick={() => { setDetailOpen(false); clearExpeditionDeepLink(); }}>İptal</Btn>
+              </div>
+
+              {/* KAPALI DÜĞMENİN SEBEBİ GÖRÜNÜR OLMALI.
+                  Bu ekranda Kaydet YALNIZCA üstteki sefer alanlarını yazıyor;
+                  yük bağlama, hareket ve evrak kendi düğmeleriyle ANINDA
+                  kaydediliyor. Kullanıcı yük bağladıktan sonra Kaydet'i pasif
+                  görüp "kaydedilmedi" sanıyordu — araç ipucu yetmiyor. */}
+              {!detailSaving && !detailLoading && !detailDirty.dirty && (
+                <p className="text-[11px] leading-tight text-gray-500">
+                  Sefer bilgilerinde değişiklik yok.<br />
+                  Bağlanan yük, hareket ve evraklar zaten kaydedildi.
+                </p>
+              )}
             </div>
           ) : undefined
         }

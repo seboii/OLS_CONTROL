@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using OLS.Business.Common;
 using OLS.Business.Seed;
 using OLS.Business.Services.Authorization;
+using OLS.Business.Services.Expeditions;
 using OLS.DataAccess.Context;
 using OLS.DataAccess.Entities;
 
@@ -26,6 +27,20 @@ public sealed record DashboardMetricsDto
 {
     public required int ActiveExpeditions { get; init; }
     public required int ActiveExpeditionsDelta { get; init; }
+
+    /// <summary>
+    /// YOLDAKİ SEFERLER — çıkış yapmış, henüz boşaltılmamış.
+    ///
+    /// "Aktif sefer" ölçütü (boşaltılmamış) operasyoncu için yanıltıcı: canlıda
+    /// 1.271 aktif seferin 1.255'i "10 - HAZIR" durumunda, yani açılmış ama hiç
+    /// hareket etmemiş eski kayıtlar. Gerçekten yolda olan 16 sefer var ve
+    /// operasyoncunun sabah baktığı sayı bu.
+    ///
+    /// Ölçüt SIRA NUMARASI: 15 (ÇIKIŞ YAPTI) ile 90 (BOŞALTILDI) arası. Kimlik
+    /// yerine numara, çünkü durum satırlarının yerel kimlikleri ortamdan ortama
+    /// değişebiliyor.
+    /// </summary>
+    public required int OnRoadExpeditions { get; init; }
     public required int LoadTransfersThisMonth { get; init; }
     public required double LoadTransfersThisMonthChangePercent { get; init; }
     public required decimal RevenueThisMonth { get; init; }
@@ -45,6 +60,23 @@ public sealed record DashboardMetricsDto
     /// </summary>
     public required double CompletionRatePercent { get; init; }
     public required double CompletionRateDeltaPoints { get; init; }
+
+    /// <summary>
+    /// Bu hafta çıkan sefer sayısı ve geçen haftaya oranı (kullanıcı isteği:
+    /// "haftalık toplam seferlerin oranını görsün").
+    /// </summary>
+    public required int ExpeditionsThisWeek { get; init; }
+    public required int ExpeditionsLastWeek { get; init; }
+    public required double ExpeditionsWeekChangePercent { get; init; }
+
+    /// <summary>
+    /// Kullanıcı PARA verilerini görebilir mi (<c>finance_management</c> okuma).
+    ///
+    /// Operasyonun para ile işi yok — yalnızca yükün mali kalemini girerken
+    /// finansa dokunuyor (kullanıcı isteği). Karar SUNUCUDA veriliyor: arayüzün
+    /// gizlemesine güvenmek, tutarı yine de göndermek demekti.
+    /// </summary>
+    public required bool CanSeeRevenue { get; init; }
 }
 
 public sealed record MonthlyPointDto(string Month, int ShipmentCount, decimal Revenue);
@@ -55,8 +87,21 @@ public sealed record WeeklyPointDto(string Day, int CompletedCount);
 
 public sealed record ActivityItemDto(string Kind, string Text, string Sub, DateTime At);
 
+/// <summary>
+/// Yaklaşan sefer satırı. Operasyoncunun bakışıyla: hangi sefer, nereden
+/// nereye, hangi araç, KAÇ GÜN KALDI ve şu an hangi durumda.
+///
+/// <c>DaysLeft</c> ve <c>Status</c> sonradan eklendi: eski kart yalnızca
+/// numara/güzergâh/plaka/tarih gösteriyordu ve "Beklemede" etiketi SABİTTİ —
+/// yani seferin gerçek durumunu değil, sabit bir metni yazıyordu.
+/// </summary>
 public sealed record UpcomingTripDto(
-    long Id, string? ExpeditionNumber, string? Route, string? PlateNumber, DateOnly? Date);
+    long Id, string? ExpeditionNumber, string? Route, string? PlateNumber, DateOnly? Date)
+{
+    public int? DaysLeft { get; init; }
+    public string? Status { get; init; }
+    public string? Driver { get; init; }
+}
 
 public sealed class DashboardService : IDashboardService
 {
@@ -64,14 +109,17 @@ public sealed class DashboardService : IDashboardService
     private readonly IClock _clock;
     private readonly ICompanyScope _companyScope;
     private readonly ICurrentUser _currentUser;
+    private readonly IPermissionService _permissions;
 
     public DashboardService(
-        OlsDbContext db, IClock clock, ICompanyScope companyScope, ICurrentUser currentUser)
+        OlsDbContext db, IClock clock, ICompanyScope companyScope,
+        ICurrentUser currentUser, IPermissionService permissions)
     {
         _db = db;
         _clock = clock;
         _companyScope = companyScope;
         _currentUser = currentUser;
+        _permissions = permissions;
     }
 
     /// <summary>
@@ -109,7 +157,7 @@ public sealed class DashboardService : IDashboardService
         var monthlyShipments = await BuildMonthlyShipmentsAsync(src, monthStart, cancellationToken);
         var workTypeDistribution = await BuildWorkTypeDistributionAsync(src, cancellationToken);
         var weeklyCompleted = await BuildWeeklyCompletedAsync(src, weekStart, cancellationToken);
-        var recentActivity = await BuildRecentActivityAsync(src, cancellationToken);
+        var recentActivity = await BuildRecentActivityAsync(cancellationToken);
         var upcomingTrips = await BuildUpcomingTripsAsync(src, now, cancellationToken);
 
         return new DashboardDto
@@ -127,6 +175,19 @@ public sealed class DashboardService : IDashboardService
     /// bu durumdaki sefer tamamlanmış sayılır (bkz. SiberExpeditionRepository.UnloadedStatusId
     /// - aynı sabit orada aktif-sefer kontrolü için kullanılıyor).</summary>
     private const int UnloadedStatusCode = 14;
+
+    /// <summary>
+    /// Sefer durumlarının SIRA numaraları (Siber'in kendi numaralandırması):
+    /// 10 HAZIR · 15 ÇIKIŞ YAPTI · 20 SEFERE ATANMIŞ · 30 YÜKLEME İÇİN YOLDA ·
+    /// 40 YÜKLENDİ · 50 YÜKLEME GÜMRÜĞÜNDE · 60 YURT İÇİ YOLDA ·
+    /// 70 YURT DIŞI YOLDA · 80 BOŞALTMADA · 90 BOŞALTILDI.
+    /// </summary>
+    private const int OnRoadFromOrder = 15;
+    private const int UnloadedOrder = 90;
+
+    /// <summary>Haftanın başı (Pazartesi) — Pazar günü bir önceki haftaya sayılır.</summary>
+    private static DateTime StartOfWeek(DateTime now) =>
+        now.Date.AddDays(-(int)now.DayOfWeek + (now.DayOfWeek == DayOfWeek.Sunday ? -6 : 1));
 
     private async Task<DashboardMetricsDto> BuildMetricsAsync(
         Sources src, DateTime now, DateTime monthStart, DateTime prevMonthStart, CancellationToken ct)
@@ -185,14 +246,64 @@ public sealed class DashboardService : IDashboardService
             : 100.0 * expeditionsThisMonth.Count(e => unloadedStatusId is { } uid3 ? e.StatusId == uid3 : e.ReturnDate != null)
                 / expeditionsThisMonth.Count;
 
+        // YOLDAKİ SEFER — kural tek yerde (bkz. ExpeditionOnRoad).
+        //
+        // Yalnızca duruma bakmak YETMİYOR: Avrora sefer durumunu hiç
+        // ilerletmiyor ve yolda olup olmadığı tarihlerden okunuyor. Bu yüzden
+        // kart Avrora'da hep 0 gösteriyordu.
+        var onRoadStatusIds = await _db.ExpeditionStatuses
+            .Where(s => s.OrderNumber != null
+                     && s.OrderNumber >= ExpeditionOnRoad.DepartedOrder
+                     && s.OrderNumber < ExpeditionOnRoad.UnloadedOrder)
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+
+        var finishedStatusIds = await _db.ExpeditionStatuses
+            .Where(s => s.OrderNumber != null && s.OrderNumber >= ExpeditionOnRoad.UnloadedOrder)
+            .Select(s => s.Id)
+            .ToListAsync(ct);
+
+        var onRoadExpeditions = await src.Expeditions.CountAsync(
+            ExpeditionOnRoad.Predicate(onRoadStatusIds, finishedStatusIds, DateOnly.FromDateTime(now)), ct);
+
+        // HAFTALIK SEFER ORANI. Ölçüt çıkış tarihi: seferin fiilen o hafta
+        // yola çıkıp çıkmadığını söyleyen tek alan (kayıt tarihi senkron
+        // damgası taşıyabiliyor).
+        var weekStart = StartOfWeek(now);
+        var lastWeekStart = weekStart.AddDays(-7);
+        var thisWeekEnd = weekStart.AddDays(7);
+
+        var expeditionsThisWeek = await src.Expeditions.CountAsync(
+            e => e.ReleaseDate != null
+              && e.ReleaseDate >= DateOnly.FromDateTime(weekStart)
+              && e.ReleaseDate < DateOnly.FromDateTime(thisWeekEnd), ct);
+
+        var expeditionsLastWeek = await src.Expeditions.CountAsync(
+            e => e.ReleaseDate != null
+              && e.ReleaseDate >= DateOnly.FromDateTime(lastWeekStart)
+              && e.ReleaseDate < DateOnly.FromDateTime(weekStart), ct);
+
+        // PARA YETKİSİ. Operasyonun para ile işi yok; tutar, yetkisi olmayana
+        // hiç GÖNDERİLMİYOR (gizlemek yetmez).
+        var canSeeRevenue = _currentUser.Id is { } userId
+            && await _permissions.HasPermissionAsync(
+                userId, "finance_management", PermissionAction.Read, ct);
+
         return new DashboardMetricsDto
         {
             ActiveExpeditions = activeExpeditions,
+            OnRoadExpeditions = onRoadExpeditions,
+            ExpeditionsThisWeek = expeditionsThisWeek,
+            ExpeditionsLastWeek = expeditionsLastWeek,
+            ExpeditionsWeekChangePercent = PercentChange(expeditionsLastWeek, expeditionsThisWeek),
+            CanSeeRevenue = canSeeRevenue,
             ActiveExpeditionsDelta = activeExpeditions - activeExpeditionsLastMonth,
             LoadTransfersThisMonth = loadTransfersThisMonth,
             LoadTransfersThisMonthChangePercent = PercentChange(loadTransfersLastMonth, loadTransfersThisMonth),
-            RevenueThisMonth = revenueThisMonth,
-            RevenueThisMonthChangePercent = PercentChange((double)revenueLastMonth, (double)revenueThisMonth),
+            RevenueThisMonth = canSeeRevenue ? revenueThisMonth : 0m,
+            RevenueThisMonthChangePercent = canSeeRevenue
+                ? PercentChange((double)revenueLastMonth, (double)revenueThisMonth)
+                : 0,
             PendingQuotes = pendingQuotes,
             PendingQuotesDelta = 0,
             ActiveCustomers = activeCustomers,
@@ -272,65 +383,107 @@ public sealed class DashboardService : IDashboardService
         return points;
     }
 
-    private async Task<IReadOnlyList<ActivityItemDto>> BuildRecentActivityAsync(Sources src, CancellationToken ct)
+    /// <summary>
+    /// SON AKTİVİTELER — GERÇEK KULLANICI HAREKETLERİ.
+    ///
+    /// BULUNAN GERÇEK HATA: liste yerel tabloların <c>created_at</c> alanından
+    /// üretiliyordu. O alan, SENKRONLA gelen kayıtlarda kaydın açıldığı anı
+    /// değil, senkron turunun saatini taşıyor — canlıda tek bir turda onlarca
+    /// yük/teklif aynı saniyeye damgalanıyor. Sonuç: "Son Aktiviteler" gerçek
+    /// hareketi değil, senkron gürültüsünü listeliyordu; üstelik kimin ne
+    /// yaptığı hiç yazmıyordu.
+    ///
+    /// Doğru kaynak <c>siber_change_logs</c> (Siber'in kendi değişiklik
+    /// günlüğünün aynası): 256.322 satır, kullanıcı KODU, kayıt etiketi ve
+    /// işlem türüyle birlikte ve canlı ilerliyor.
+    ///
+    /// PARA MODÜLLERİ DIŞARIDA: operasyoncunun panelinde fatura/tahsilat
+    /// hareketi işi değil (kullanıcı isteği). Yalnızca yük, teklif, sefer ve
+    /// cari hareketleri gösteriliyor.
+    /// </summary>
+    private async Task<IReadOnlyList<ActivityItemDto>> BuildRecentActivityAsync(
+        CancellationToken ct)
     {
-        var activities = new List<ActivityItemDto>();
-
-        var recentLoadTransfers = await src.LoadTransfers
-            .Where(l => l.CreatedAt != null)
-            .OrderByDescending(l => l.CreatedAt)
-            .Take(5)
-            .Select(l => new { l.Id, l.LoadNumber, l.CreatedAt })
+        var rows = await _db.SiberChangeLogs.AsNoTracking()
+            .Where(l => l.ChangedAt != null && ActivityTables.Contains(l.TableName))
+            .OrderByDescending(l => l.ChangedAt)
+            .Take(12)
+            .Select(l => new
+            {
+                l.TableName,
+                l.Operation,
+                l.RecordLabel,
+                l.UserCode,
+                l.ChangedAt,
+                UserName = _db.Users.Where(u => u.Id == l.UserId).Select(u => u.Name).FirstOrDefault(),
+            })
             .ToListAsync(ct);
-        activities.AddRange(recentLoadTransfers.Select(l => new ActivityItemDto(
-            "load_transfer", $"{l.LoadNumber ?? $"YUK-{l.Id}"} oluşturuldu", "Yük", l.CreatedAt!.Value)));
 
-        var recentExpeditions = await src.Expeditions
-            .Where(e => e.CreatedAt != null)
-            .OrderByDescending(e => e.CreatedAt)
-            .Take(5)
-            .Select(e => new { e.Id, e.ExpeditionNumber, e.CreatedAt })
-            .ToListAsync(ct);
-        activities.AddRange(recentExpeditions.Select(e => new ActivityItemDto(
-            "expedition", $"{e.ExpeditionNumber ?? $"SEF-{e.Id}"} oluşturuldu", "Sefer", e.CreatedAt!.Value)));
-
-        var recentInvoices = await _db.Invoices
-            .Where(i => i.CreatedAt != null)
-            .OrderByDescending(i => i.CreatedAt)
-            .Take(5)
-            .Select(i => new { i.Id, i.InvoiceId, i.PayableAmount, i.CreatedAt })
-            .ToListAsync(ct);
-        activities.AddRange(recentInvoices.Select(i => new ActivityItemDto(
-            "invoice",
-            $"{i.InvoiceId ?? $"FAT-{i.Id}"} oluşturuldu",
-            i.PayableAmount is { } amt ? $"₺{amt:N0}" : "Fatura",
-            i.CreatedAt!.Value)));
-
-        var recentQuotes = await src.Loads
-            .Where(l => l.CreatedAt != null)
-            .OrderByDescending(l => l.CreatedAt)
-            .Take(5)
-            .Select(l => new { l.Id, l.LoadNumber, l.CreatedAt })
-            .ToListAsync(ct);
-        activities.AddRange(recentQuotes.Select(l => new ActivityItemDto(
-            "quote", $"{l.LoadNumber ?? $"T-{l.Id}"} teklifi oluşturuldu", "Teklif", l.CreatedAt!.Value)));
-
-        return activities
-            .OrderByDescending(a => a.At)
-            .Take(6)
+        return rows
+            .Select(r => new ActivityItemDto(
+                ActivityKind(r.TableName),
+                $"{ActivityLabel(r.TableName)} {r.RecordLabel ?? "—"} {ActivityVerb(r.Operation)}",
+                r.UserName ?? r.UserCode ?? "—",
+                r.ChangedAt!.Value))
             .ToList();
     }
+
+    /// <summary>
+    /// Panelde gösterilen modüller. Fatura (<c>sfy_gelirgider</c>) ve tahsilat
+    /// (<c>sfy_tahsilatodeme</c>) BİLEREK yok: operasyonun para hareketiyle işi
+    /// yok, yalnızca yükün mali kalemini girerken finansa dokunuyor.
+    /// </summary>
+    private static readonly string[] ActivityTables =
+        ["skn_yuk", "skn_rezervasyon", "skn_pozisyon", "sbr_firma"];
+
+    private static string ActivityKind(string table) => table switch
+    {
+        "skn_yuk" => "load_transfer",
+        "skn_rezervasyon" => "offer",
+        "skn_pozisyon" => "expedition",
+        _ => "account",
+    };
+
+    private static string ActivityLabel(string table) => table switch
+    {
+        "skn_yuk" => "Yük",
+        "skn_rezervasyon" => "Teklif",
+        "skn_pozisyon" => "Sefer",
+        _ => "Cari",
+    };
+
+    /// <summary>Siber: 1 ekleme, 2 güncelleme, 3 silme.</summary>
+    private static string ActivityVerb(short? operation) => operation switch
+    {
+        1 => "açıldı",
+        3 => "silindi",
+        _ => "güncellendi",
+    };
 
     private async Task<IReadOnlyList<UpcomingTripDto>> BuildUpcomingTripsAsync(
         Sources src, DateTime now, CancellationToken ct)
     {
         var today = DateOnly.FromDateTime(now);
 
+        // YAKLAŞAN SEFERİN TARİHİ TEK ALANDAN GELMİYOR.
+        //
+        // Eski ölçüt yalnızca araç çıkış tarihiydi (car_exit_date) ve canlıda
+        // bugünden sonrası için 2 kayıt buluyordu — kart neredeyse hep boştu.
+        // Operasyoncunun beklediği tarih hangisi doluysa odur: araç çıkışı,
+        // yoksa sefer çıkışı, yoksa yükleme tarihi (sırasıyla 2 / 4 / 7 kayıt).
         var upcoming = await src.Expeditions
-            .Where(e => e.CarExitDate != null && e.CarExitDate >= today)
-            .OrderBy(e => e.CarExitDate)
-            .Take(5)
-            .Select(e => new { e.Id, e.ExpeditionNumber, e.CarExitDate, e.RomorkId, e.StartCityId, e.EndCityId })
+            .Where(e => (e.CarExitDate ?? e.ReleaseDate ?? e.LoadingDate) != null
+                     && (e.CarExitDate ?? e.ReleaseDate ?? e.LoadingDate) >= today)
+            .OrderBy(e => e.CarExitDate ?? e.ReleaseDate ?? e.LoadingDate)
+            .Take(6)
+            .Select(e => new
+            {
+                e.Id, e.ExpeditionNumber,
+                CarExitDate = e.CarExitDate ?? e.ReleaseDate ?? e.LoadingDate,
+                e.RomorkId, e.StartCityId, e.EndCityId,
+                Status = _db.ExpeditionStatuses.Where(s => s.Id == e.StatusId).Select(s => s.Name).FirstOrDefault(),
+                Driver = _db.Personnel.Where(p => p.Id == e.DriverId).Select(p => p.Name).FirstOrDefault(),
+            })
             .ToListAsync(ct);
 
         var carIds = upcoming.Where(e => e.RomorkId != null).Select(e => (long)e.RomorkId!.Value).ToList();
@@ -355,7 +508,14 @@ public sealed class DashboardService : IDashboardService
             var route = start is not null && end is not null ? $"{start} → {end}" : null;
             var plate = e.RomorkId is { } rid ? plates.GetValueOrDefault(rid) : null;
 
-            return new UpcomingTripDto(e.Id, e.ExpeditionNumber, route, plate, e.CarExitDate);
+            return new UpcomingTripDto(e.Id, e.ExpeditionNumber, route, plate, e.CarExitDate)
+            {
+                // Sabit "Beklemede" etiketi yerine seferin GERÇEK durumu ve
+                // çıkışa kaç gün kaldığı.
+                DaysLeft = e.CarExitDate is { } exit ? exit.DayNumber - today.DayNumber : null,
+                Status = e.Status,
+                Driver = e.Driver,
+            };
         }).ToList();
     }
 

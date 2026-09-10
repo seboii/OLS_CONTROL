@@ -43,7 +43,14 @@ public sealed record ExpeditionListQuery(
     /// "ne silinmiş?" sorusuna tek tıkla cevap verir; include_deleted ise
     /// silinenleri normal listeye katar.
     /// </summary>
-    bool OnlyDeleted = false);
+    bool OnlyDeleted = false,
+    /// <summary>
+    /// true ise YALNIZCA YOLDAKİ seferler listelenir: çıkış yapmış (durum sıra
+    /// numarası ≥ 15) ama boşaltılmamış (< 90). Panelin "Yoldaki Seferler"
+    /// kartı buraya bağlanıyor — sayıya tıklayan kullanıcı tam olarak o
+    /// seferleri görmeli.
+    /// </summary>
+    bool OnRoad = false);
 
 public sealed class ExpeditionListItemDto
 {
@@ -147,15 +154,17 @@ public sealed class ExpeditionService : IExpeditionService
     private readonly ISiberArchiveRepository _archive;
     private readonly ICompanyScope _companyScope;
     private readonly ICurrentUser _currentUser;
+    private readonly IClock _clock;
 
     public ExpeditionService(
         OlsDbContext db, ISiberArchiveRepository archive,
-        ICompanyScope companyScope, ICurrentUser currentUser)
+        ICompanyScope companyScope, ICurrentUser currentUser, IClock clock)
     {
         _db = db;
         _archive = archive;
         _companyScope = companyScope;
         _currentUser = currentUser;
+        _clock = clock;
     }
 
     /// <summary>
@@ -208,6 +217,30 @@ public sealed class ExpeditionService : IExpeditionService
             expeditions = expeditions.Where(e => e.SiberDeletedAt != null);
         else if (!query.IncludeDeleted)
             expeditions = expeditions.Where(e => e.SiberDeletedAt == null);
+
+        // YOLDAKİ SEFERLER — panelin kartından geliniyor.
+        //
+        // Ölçüt durum SIRA numarası: 15 (ÇIKIŞ YAPTI) ile 90 (BOŞALTILDI)
+        // arası. Kimlik yerine numara, çünkü durum satırlarının yerel
+        // kimlikleri ortamdan ortama değişebiliyor; numaralar Siber'in kendi
+        // tanımından geliyor.
+        if (query.OnRoad)
+        {
+            var onRoadIds = await _db.ExpeditionStatuses.AsNoTracking()
+                .Where(s => s.OrderNumber != null
+                         && s.OrderNumber >= ExpeditionOnRoad.DepartedOrder
+                         && s.OrderNumber < ExpeditionOnRoad.UnloadedOrder)
+                .Select(s => s.Id)
+                .ToListAsync(cancellationToken);
+
+            var finishedIds = await _db.ExpeditionStatuses.AsNoTracking()
+                .Where(s => s.OrderNumber != null && s.OrderNumber >= ExpeditionOnRoad.UnloadedOrder)
+                .Select(s => s.Id)
+                .ToListAsync(cancellationToken);
+
+            expeditions = expeditions.Where(ExpeditionOnRoad.Predicate(
+                onRoadIds, finishedIds, DateOnly.FromDateTime(_clock.Now)));
+        }
 
         // ŞİRKET GÖRÜNÜRLÜĞÜ — yüklerdeki ile aynı kural (bkz. CompanyScope).
         var visibility = await _companyScope.ResolveAsync(_currentUser.Id, cancellationToken);

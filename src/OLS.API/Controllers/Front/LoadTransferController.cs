@@ -475,12 +475,14 @@ public sealed class ExpeditionController : ApiControllerBase
         [FromQuery(Name = "include_deleted")] bool includeDeleted = false,
         /// <summary>Yalnizca Siber'den silinmis kayitlari listeler.</summary>
         [FromQuery(Name = "only_deleted")] bool onlyDeleted = false,
+        /// <summary>Yalnizca YOLDAKI seferler — panelin kartindan geliniyor.</summary>
+        [FromQuery(Name = "on_road")] bool onRoad = false,
         CancellationToken cancellationToken = default)
     {
         var result = await _expeditions.ListAsync(
             new ExpeditionListQuery(
                 search, workTypeId, dateFrom, dateTo, perPage, page, CurrentPath,
-                expeditionTypeId, statusId, departmentId, includeDeleted, onlyDeleted),
+                expeditionTypeId, statusId, departmentId, includeDeleted, onlyDeleted, onRoad),
             cancellationToken);
 
         return Ok(result, "Kayıtlar");

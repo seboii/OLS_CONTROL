@@ -881,6 +881,36 @@ export function LoadsPage() {
   // güncellemesiyle yarışıyordu. Önce aç, parametreyi kart kapanınca temizle.
   const handledLoadRef = useRef<string | null>(null);
 
+  /**
+   * "BU AY" SÜZGECİ — panelin "Bu Ay Yükler" kartından geliniyor
+   * (/yukler?donem=bu-ay).
+   *
+   * Kartın saydığı küme ile listenin gösterdiği küme AYNI olmalı: panel bu ay
+   * açılan yükleri sayıyor, o yüzden tarih aralığı ayın 1'inden bugüne
+   * kuruluyor. Süzgeç bir kez uygulanıp URL'den düşürülüyor — kullanıcı tarihi
+   * elle değiştirdiğinde geri gelmesin.
+   */
+  const monthFilterRef = useRef(false);
+
+  useEffect(() => {
+    if (searchParams.get("donem") !== "bu-ay" || monthFilterRef.current) return;
+
+    monthFilterRef.current = true;
+
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    setDateFrom(iso(first));
+    setDateTo(iso(now));
+    setPage(1);
+
+    searchParams.delete("donem");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   useEffect(() => {
     const requested = searchParams.get("yuk");
 
