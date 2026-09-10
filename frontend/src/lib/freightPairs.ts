@@ -101,6 +101,10 @@ export interface FreightRowAdapter<TRow> {
  *
  * Kurallar:
  *   • Eşleşmesi olmayan kalemde hiçbir şey yapılmaz.
+ *   • AYNI SATIŞ KALEMİNE DÜŞEN BİRDEN ÇOK ALIŞ TEK SATIR ÜRETİR ve fiyatı
+ *     İLK GİRİLEN alış satırından gelir (kullanıcı isteği). Navlun alışı
+ *     birden fazla satıra bölünebiliyor — her biri için ayrı satış satırı
+ *     açmak satışı çoğaltırdı.
  *   • Kullanıcı o satış kalemini ELLE eklemişse otomatik satır AÇILMAZ —
  *     "boşsa doldur" kuralı budur.
  *   • Kullanıcı otomatik satırın fiyatına dokunduysa (adaptör autoFromItem'ı
@@ -118,15 +122,26 @@ export function syncFreightSaleRows<TRow>(
     .map((r) => ({ row: r, pair: pairForPurchase(pairs, adapter.itemId(r)) }))
     .filter((x): x is { row: TRow; pair: FreightPair } => x.pair !== undefined);
 
-  const livePurchaseItemIds = new Set(purchases.map((p) => p.pair.purchase_item_id));
+  // SATIŞ KALEMİ BAŞINA İLK ALIŞ. Map ekleme sırasını koruyor ve satırlar
+  // formdaki giriş sırasında geldiği için "ilk giren" tam olarak bu.
+  const firstBySaleItem = new Map<number, { row: TRow; pair: FreightPair }>();
 
-  // Karşılığı kalmayan otomatik satırları düşür.
+  for (const purchase of purchases)
+    if (!firstBySaleItem.has(purchase.pair.sale_item_id))
+      firstBySaleItem.set(purchase.pair.sale_item_id, purchase);
+
+  // Karşılığı kalmayan otomatik satırları düşür. Ölçüt, satırı DOĞURAN alış
+  // kaleminin hâlâ "ilk" olması: ilk satır silinince yerine geçen alış farklı
+  // bir kalem olabilir, o zaman eski otomatik satır kalkar ve yenisi açılır.
+  const liveSourceItemIds = new Set(
+    [...firstBySaleItem.values()].map((p) => p.pair.purchase_item_id));
+
   let result = rows.filter((r) => {
     const from = adapter.autoFromItem(r);
-    return from === null || livePurchaseItemIds.has(from);
+    return from === null || liveSourceItemIds.has(from);
   });
 
-  for (const { row: purchase, pair } of purchases) {
+  for (const { row: purchase, pair } of firstBySaleItem.values()) {
     const net = markedUpPrice(adapter.netPrice(purchase), pair.markup_percent);
     const total = markedUpPrice(adapter.totalPrice(purchase), pair.markup_percent);
 

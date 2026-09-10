@@ -151,6 +151,47 @@ describe("syncFreightSaleRows", () => {
     expect(sync(bir)).toEqual(bir);
   });
 
+  // ÇOKLU NAVLUN ALIŞI — kullanıcı isteği: "alış navlunu birden fazla ise
+  // satış navlunu çoğalmasın, ilk girilen navlun fiyatına uysun".
+  it("aynı navlun alışı birden çok satırdaysa TEK satış satırı açılır", () => {
+    const rows = sync([alis(31772, "5000"), alis(31772, "3000")]);
+
+    expect(rows.filter((r) => r.buysell === "2")).toHaveLength(1);
+  });
+
+  it("çoklu alışta satış fiyatı İLK girilen satırdan gelir", () => {
+    const rows = sync([alis(31772, "5000"), alis(31772, "3000")]);
+    const satis = rows.find((r) => r.buysell === "2");
+
+    // 5000 × 1,15 — ikinci satır (3000) fiyatı belirlemez.
+    expect(satis?.net).toBe("5750.00");
+  });
+
+  it("ilk alış silinince satış fiyatı sıradakine uyar", () => {
+    const ilkTur = sync([alis(31772, "5000"), alis(31772, "3000")]);
+    const ilkSilinmis = ilkTur.filter((r) => !(r.buysell === "1" && r.net === "5000"));
+
+    const satis = sync(ilkSilinmis).find((r) => r.buysell === "2");
+
+    expect(satis?.net).toBe("3450.00");
+  });
+
+  /**
+   * Farklı navlun türleri AYRI satış kalemine düştüğü için ayrı ayrı kalır —
+   * çoğalma kuralı yalnızca aynı satış kalemine düşenler için.
+   */
+  it("farklı navlun türleri ayrı satış satırı üretmeye devam eder", () => {
+    const rows = sync([alis(31772, "100"), alis(30573, "200")]);
+
+    expect(rows.filter((r) => r.buysell === "2").map((r) => r.itemId)).toEqual([31773, 30572]);
+  });
+
+  it("çoklu alışta da iki kez çalıştırmak aynı sonucu verir", () => {
+    const bir = sync([alis(31772, "5000"), alis(31772, "3000")]);
+
+    expect(sync(bir)).toEqual(bir);
+  });
+
   it("eşleşme listesi boşsa hiçbir şey yapmaz", () => {
     const rows = [alis(31772, "100")];
 
