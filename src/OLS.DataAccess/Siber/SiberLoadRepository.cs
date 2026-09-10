@@ -1,4 +1,5 @@
-﻿using Dapper;
+﻿using System.Data;
+using Dapper;
 
 namespace OLS.DataAccess.Siber;
 
@@ -587,7 +588,7 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             SELECT @nextNo AS YukNo, @loadNumberWorkType AS LoadNumberWorkType;
             """;
 
-        return await connection.QuerySingleAsync<SiberYukNumberResult>(sql, new
+        var inserted = await connection.QuerySingleAsync<SiberYukNumberResult>(sql, new
         {
             yuk.YukId, SirketId = yuk.SirketId ?? DefaultSirketId,
             SubeId = SubeIdFor(yuk.SirketId),
@@ -604,6 +605,67 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             yuk.YuklemeUlke,
             yuk.BosaltmaUlke, yuk.YuklemeKita, yuk.BosaltmaKita,
             yuk.CalismaSekli, yuk.RezervasyonId, yuk.SatisTemsilcisiKod,
+        });
+
+        // INSERT de gondericiid/aliciid yazdığı için tetikleyici orada da
+        // çalışıyor; seçilen ülke hemen ardından geri yazılıyor.
+        await RestoreCountriesAsync(connection, yuk.YukId, yuk);
+
+        return inserted;
+    }
+
+    /// <summary>
+    /// ÜLKE/KITA SÜTUNLARINI TETİKLEYİCİDEN SONRA GERİ YAZAR.
+    ///
+    /// BULUNAN GERÇEK HATA: Siber'de <c>skn_yuk_yuklemebosaltma_update</c>
+    /// tetikleyicisi var ve <c>gondericiid</c> ya da <c>aliciid</c> SET
+    /// listesinde geçtiği anda <c>_yuklemeulke</c>, <c>_bosaltmaulke</c> ve
+    /// kıta sütunlarını <c>skn_yuk_bilgi_yukbosulke_V2</c> ile YENİDEN
+    /// hesaplıyor — kaynağı gönderici/alıcı FİRMANIN adresi. Uygulamanın
+    /// yazdığı ülke aynı işlemde eziliyordu.
+    ///
+    /// Canlı örnek: teklif TÜRKİYE → ÇEK CUMHURİYETİ seçilmiş, gönderici ve
+    /// alıcı aynı Danimarka firması, yük DANİMARKA → DANİMARKA açılmış.
+    /// Ölçüm: teklifden gelen 3.782 yükün 3.113'ünde (%82) yükün ülkesi
+    /// gönderici firmanın ülkesi; teklifte seçilenle aynı olan yalnızca 1.806.
+    ///
+    /// ÇÖZÜM ÜRETİMDE DENENDİ (geri alınan işlemle): yalnızca ülke/kıta
+    /// sütunlarına dokunan bir UPDATE tetikleyiciyi UYANDIRMIYOR ve değer
+    /// kalıcı oluyor; aynı UPDATE gondericiid'yi de listelerse eziliyor.
+    /// Bu yüzden ülke, ana yazımdan SONRA ayrı bir ifadeyle geri yazılıyor.
+    ///
+    /// ISNULL: elimizde değer yoksa Siber'in türettiği değer korunur — yükün
+    /// gönderici/alıcısı yoksa tetikleyici zaten çalışmıyor ve tek kaynak
+    /// bizim yazdığımız oluyor.
+    /// </summary>
+    public const string RestoreCountrySql = """
+        UPDATE skn_yuk SET
+            _yuklemeulke  = ISNULL(@YuklemeUlke,  _yuklemeulke),
+            _bosaltmaulke = ISNULL(@BosaltmaUlke, _bosaltmaulke),
+            _yuklemekita  = ISNULL(@YuklemeKita,  _yuklemekita),
+            _bosaltmakita = ISNULL(@BosaltmaKita, _bosaltmakita)
+        WHERE yukid = @YukId
+        """;
+
+    /// <summary>
+    /// Yazacak bir ülke değeri varsa <see cref="RestoreCountrySql"/>'i çalıştırır.
+    /// Dördü de boşsa hiç dokunulmaz: gereksiz UPDATE, Siber'in kendi
+    /// hesapladığı değeri de boşuna yeniden yazardı.
+    /// </summary>
+    private static async Task RestoreCountriesAsync(
+        IDbConnection connection, string yukId, SiberYuk yuk)
+    {
+        if (yuk.YuklemeUlke is null && yuk.BosaltmaUlke is null
+            && yuk.YuklemeKita is null && yuk.BosaltmaKita is null)
+            return;
+
+        await connection.ExecuteAsync(RestoreCountrySql, new
+        {
+            YukId = yukId,
+            yuk.YuklemeUlke,
+            yuk.BosaltmaUlke,
+            yuk.YuklemeKita,
+            yuk.BosaltmaKita,
         });
     }
 
@@ -771,6 +833,10 @@ public sealed class SiberLoadRepository : ISiberLoadRepository
             yuk.OnTasimaTarafimizdanYapilir, yuk.SonTasimaTarafimizdanYapilir,
             yuk.IstenenVarisTarihi, yuk.HazirOlmaTarih, yuk.MusteridenAlinisTarih,
         });
+
+        // Yukarıdaki UPDATE gondericiid/aliciid'yi de yazdığı için tetikleyici
+        // ülkeyi firmadan yeniden türetiyor; seçilen değer geri yazılıyor.
+        await RestoreCountriesAsync(connection, yuk.YukId, yuk);
     }
 
     public async Task UpdateYukKoliAsync(
